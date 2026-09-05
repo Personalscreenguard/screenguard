@@ -1,0 +1,13 @@
+# Rust / Tauri
+src-tauri/target/
+src-tauri/.cargo/
+.cargo/
+
+# Node
+node_modules/
+
+# macOS
+.DS_Store
+
+# 临时
+*.log

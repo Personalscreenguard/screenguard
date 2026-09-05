@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>屏幕守护</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" width="28" height="28">
+        <rect x="2" y="4" width="16" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        <rect x="6" y="9" width="9" height="3" rx="1" fill="currentColor" opacity="0.9"/>
+        <line x1="10" y1="15" x2="10" y2="19" stroke="currentColor" stroke-width="1.6"/>
+        <line x1="6" y1="19" x2="14" y2="19" stroke="currentColor" stroke-width="1.6"/>
+      </svg>
+      <div>
+        <h1>屏幕守护</h1>
+        <p class="subtitle">跨平台 · 显示器控制助力</p>
+      </div>
+    </div>
+    <div class="platform-badge" id="platform-badge">检测中…</div>
+  </header>
+
+  <main class="content">
+
+    <!-- ===== 显示器 ===== -->
+    <section class="card">
+      <div class="card-head">
+        <h2>🖥️ 显示器控制</h2>
+        <button class="ghost" id="refresh-btn" title="刷新显示器列表">⟳ 刷新</button>
+      </div>
+      <div class="displays" id="displays">
+        <div class="empty">正在读取显示器…</div>
+      </div>
+    </section>
+
+    <!-- ===== 色彩 & 校准 ===== -->
+    <section class="card">
+      <div class="card-head">
+        <h2>🎨 色彩同步</h2>
+        <span class="hint">让多块屏幕色彩一致 / 对齐标准</span>
+      </div>
+      <div class="color-row">
+        <label>目标色彩空间</label>
+        <select id="color-space">
+          <option value="sRGB">sRGB（网络/通用）</option>
+          <option value="p3">Display P3（苹果）</option>
+          <option value="adobeRGB">Adobe RGB（印刷/摄影）</option>
+        </select>
+      </div>
+      <div class="btn-row">
+        <button class="primary" id="apply-color">应用到所有屏幕</button>
+        <button class="ghost" id="match-mac">对齐 Mac 内建屏</button>
+      </div>
+      <div class="calib-note">深度校准需硬件校色仪（DisplayCAL）｜软件可统一色彩空间 + 白点</div>
+    </section>
+
+    <!-- ===== 窗口 ===== -->
+    <section class="card">
+      <div class="card-head">
+        <h2>🪟 窗口 / 多屏布局</h2>
+      </div>
+      <div class="btn-row">
+        <button class="primary" id="match-ppi">窗口拖到另一屏不变小</button>
+        <button class="ghost" id="rotate-secondary">副屏横竖屏切换</button>
+        <button class="ghost" id="restore-secondary">恢复副屏竖屏</button>
+      </div>
+      <div class="hint">匹配各屏幕取显示密度，让窗口跨屏保持物理大小</div>
+    </section>
+
+    <!-- ===== 视频跨屏 ===== -->
+    <section class="card">
+      <div class="card-head">
+        <h2>🎬 双屏铺满</h2>
+        <span class="hint">看电影横跨两块屏</span>
+      </div>
+      <div class="btn-row">
+        <button class="primary" id="span-video">用 VLC 双屏铺满</button>
+        <button class="ghost" id="restore-video">恢复</button>
+      </div>
+      <div class="hint">macOS 不原生支持合并屏，此功能用无边框窗口跨双屏实现（需 VLC）</div>
+    </section>
+
+  </main>
+
+  <footer class="statusbar">
+    <span id="status">就绪</span>
+  </footer>
+</div>
+
+<script src="main.js"></script>
+</body>
+</html>
