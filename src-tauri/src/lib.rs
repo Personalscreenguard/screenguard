@@ -161,6 +161,15 @@ pub fn run() {
                 .build(app)?;
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // 主窗口点 X = 隐藏到托盘（程序常驻，托盘左键呼出面板）
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_platform,
             get_version,
