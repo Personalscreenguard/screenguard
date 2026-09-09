@@ -84,6 +84,10 @@ public struct SGDISPLAY_DEVICE {
   public int cb;
   [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
   [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+  // 关键：实测本机(2026, Win11 24H2+) EnumDisplayDevicesW 实际布局在 DeviceString
+  // 后多 4 字节(疑似新 SDK 隐藏字段)，缺此 pad 会导致 DeviceID/DeviceKey 整体
+  // 错位 4 字节，读到 \u0003 之类垃圾 → uid 全坏、按屏操作无法定位。勿删！
+  public int _pad;
   [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
   [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
   public int StateFlags;
@@ -349,13 +353,18 @@ fn resolve_dev(uid: &str) -> Result<String, String> {
 // ---------- 显示器列表 ----------
 pub fn get_displays() -> Vec<DisplayInfo> {
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays();\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ $_ -ne 0 }} | ForEach-Object {{ [char]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($nm) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ Write-Output ('P|' + $dev + '|' + [SGCore]::DDCProbe($dev)) }}",
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays();\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ Write-Output ('P|' + $dev + '|' + [SGCore]::DDCProbe($dev)) }}",
         cs = CORE_CS
     );
     let raw = ps(&script).unwrap_or_default();
     let mut rows: Vec<(String, String, u32, u32, u32, bool, u32)> = Vec::new(); // dev,uid,w,h,hz,main,ori
     let mut names: HashMap<String, String> = HashMap::new();
     let mut ddc: HashMap<String, bool> = HashMap::new();
+    // uid 是 "MONITOR\XMI27B3\{GUID}\0007" 而 WMI InstanceName 是
+    // "DISPLAY\XMI27B3\5&...&UID4352"，两者前缀不同，按第二段(厂商+型号)对齐
+    fn short_id(s: &str) -> String {
+        s.split('\\').nth(1).unwrap_or(s).to_string()
+    }
     for line in raw.lines() {
         let p: Vec<&str> = line.split('|').collect();
         if p.is_empty() {
@@ -371,7 +380,7 @@ pub fn get_displays() -> Vec<DisplayInfo> {
                 rows.push((p[1].to_string(), p[2].to_string(), w, h, hz, main, ori));
             }
             "N" if p.len() >= 3 => {
-                names.insert(p[1].to_string(), p[2].to_string());
+                names.insert(short_id(p[1]), p[2].to_string());
             }
             "P" if p.len() >= 3 => {
                 ddc.insert(p[1].to_string(), p[2].trim() == "1");
@@ -392,7 +401,7 @@ pub fn get_displays() -> Vec<DisplayInfo> {
     let mut result: Vec<DisplayInfo> = Vec::new();
     for (dev, uid, w, h, hz, main, ori) in rows {
         let name = names
-            .get(&uid)
+            .get(&short_id(&uid))
             .cloned()
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| format!("显示器 {}", result.len() + 1));
