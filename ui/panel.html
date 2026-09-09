@@ -96,18 +96,19 @@ async function load(){
     box.innerHTML = ds.map(d=>`
       <div class="grp open">
         <div class="grp-h">
-          <div><div class="grp-title">${d.name||d.id}</div><div class="grp-meta">${d.resolution||''}${d.hz?' · '+d.hz+'Hz':''}</div></div>
-          <div class="grp-right"><span class="badge">DDC</span></div>
+          <div><div class="grp-title">${d.name||d.id}</div><div class="grp-meta">${d.resolution||''}${d.hz?' · '+d.hz+'Hz':''}${d.main?' · 主屏':''}${d.color_profile?' · '+d.color_profile:''}</div></div>
+          <div class="grp-right">${d.ddc?'<span class="badge">DDC</span>':'<span class="badge" style="background:rgba(255,160,80,.12);color:#e8a75c;border-color:rgba(255,160,80,.3)">无DDC</span>'}</div>
         </div>
+        ${d.ddc ? `
         <div class="grp-body">
           <div class="srow"><label>亮度</label><input type="range" min="0" max="100" value="${d.brightness??50}" data-id="${d.id}" data-k="brightness"><span class="val">${d.brightness??50}%</span></div>
           <div class="srow"><label>音量</label><input type="range" min="0" max="100" value="${d.volume??50}" data-id="${d.id}" data-k="volume"><span class="val">${d.volume??50}%</span></div>
-        </div>
+        </div>` : '<div class="grp-body"><div class="hint">此显示器不支持 DDC/CI，请用硬件按钮调节</div></div>'}
       </div>`).join('');
     box.querySelectorAll('input[type=range]').forEach(sl=>{
       sl.addEventListener('input', async ev=>{ const v=ev.target.value,k=sl.dataset.k; sl.parentElement.querySelector('.val').textContent=v+'%'; try{ k==='brightness'?await invoke('set_brightness',{displayId:sl.dataset.id,value:+v}):await invoke('set_volume',{displayId:sl.dataset.id,value:+v}); }catch(e){ sl.parentElement.querySelector('.val').textContent='!'; } });
     });
-  } catch(e){ box.innerHTML='<div class="empty">无法读取显示器</div>'; }
+  } catch(e){ box.innerHTML='<div class="empty">无法读取显示器：请确认 displayplacer 与 BetterDisplay 已安装并运行</div>'; }
 }
 
 document.getElementById('quick').querySelectorAll('.cell').forEach(c=>{
@@ -119,7 +120,7 @@ document.getElementById('quick').querySelectorAll('.cell').forEach(c=>{
     case 'ppi': await invoke('match_ppi'); break;
     case 'rotate': await invoke('rotate_secondary'); break;
     case 'span': await invoke('span_video'); break;
-  }}catch(e){} };
+  }}catch(e){ c.style.borderColor='#ef6a6a'; setTimeout(()=>{c.style.borderColor='';},700); } };
 });
 document.getElementById('refresh-btn').onclick=load;
 document.getElementById('main-btn').onclick=()=>invoke('open_main');

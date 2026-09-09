@@ -83,31 +83,33 @@ pub fn set_volume(display_id: &str, value: u32) -> Result<(), String> {
     .map(|_| ())
 }
 
-pub fn apply_color_space(_space: &str) -> Result<(), String> {
-    // Linux 用 colormgr 或 GNOME 接口，这里留待按桌面环境实现
-    Ok(())
-}
-pub fn match_mac() -> Result<(), String> {
-    Ok(())
-}
-pub fn match_ppi() -> Result<(), String> {
-    if which("xrandr") {
-        let _ = run_cmd("xrandr", &["--output", "HDMI-1", "--mode", "1920x1080"]);
-    }
-    Ok(())
-}
-pub fn rotate_secondary() -> Result<(), String> {
-    Ok(())
+/// 未实现功能的统一错误（UI 能真实感知，不再假装成功）
+fn unsupported(feature: &str) -> Result<(), String> {
+    Err(format!("{}：Linux 版暂未实现", feature))
 }
 
+pub fn apply_color_space(_space: &str) -> Result<(), String> {
+    unsupported("色彩空间同步")
+}
+pub fn match_mac() -> Result<(), String> {
+    unsupported("对齐 Mac 内建屏")
+}
+pub fn match_ppi() -> Result<(), String> {
+    unsupported("窗口跨屏等大")
+}
+pub fn rotate_secondary() -> Result<(), String> {
+    unsupported("副屏横竖屏切换")
+}
+pub fn restore_secondary() -> Result<(), String> {
+    unsupported("恢复副屏竖屏")
+}
 pub fn span_video() -> Result<(), String> {
     if which("vlc") {
-        let _ = std::process::Command::new("vlc").spawn();
-        Ok(())
+        Err("双屏铺满：Linux 版暂未实现".into())
     } else {
         Err("未安装 VLC".into())
     }
 }
 pub fn restore_video() -> Result<(), String> {
-    Ok(())
+    unsupported("恢复播放器窗口")
 }

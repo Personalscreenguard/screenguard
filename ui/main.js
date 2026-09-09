@@ -6,7 +6,6 @@ const platformBadge = document.getElementById('platform-badge');
 
 function setStatus(msg, ok = true) {
   statusEl.textContent = msg;
-  statusEl.style.color = ok ? 'var(--text-dim)' : 'var(--err)';
   statusEl.style.color = ok ? '' : '#ef6a6a';
 }
 
@@ -36,7 +35,7 @@ async function refreshDisplays() {
 function renderDisplays(displays) {
   const box = document.getElementById('displays');
   if (!displays || displays.length === 0) {
-    box.innerHTML = '<div class="empty">未检测到显示器</div>';
+    box.innerHTML = '<div class="empty">未检测到显示器：请确认已安装并运行 displayplacer 与 BetterDisplay</div>';
     return;
   }
   box.innerHTML = ''; // 清空 + 重建（保留简洁结构）

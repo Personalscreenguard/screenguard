@@ -6,6 +6,11 @@ pub fn platform_name() -> &'static str {
 
 const PS: &str = "powershell";
 
+/// 未实现功能的统一错误（UI 能真实感知，不再假装成功）
+fn unsupported(feature: &str) -> Result<(), String> {
+    Err(format!("{}：Windows 版暂未实现", feature))
+}
+
 // C# PInvoke：通过 dxva2 的 Physical Monitor API 读写 DDC VCP
 const DDC_CS: &str = r#"
 using System;
@@ -39,8 +44,10 @@ public class DDC {
 "#;
 
 /// 运行一段 PowerShell，先注入 DDC 类再执行 op
+/// （C# 源码用单引号包裹传入 Add-Type，规避 here-string 的换行限制；
+///   注意 DDC_CS 内不含单引号，仅双引号，可安全嵌入单引号串）
 fn wddc(op: &str) -> Result<String, String> {
-    let script = format!("Add-Type -TypeDefinition @'\n{}\n'@;\n{}", DDC_CS, op);
+    let script = format!("Add-Type -TypeDefinition '{}'; {}", DDC_CS, op);
     run_cmd(
         PS,
         &[
@@ -98,22 +105,23 @@ pub fn set_volume(_display_id: &str, value: u32) -> Result<(), String> {
 }
 
 pub fn apply_color_space(_space: &str) -> Result<(), String> {
-    Ok(())
+    unsupported("色彩空间同步")
 }
 pub fn match_mac() -> Result<(), String> {
-    Ok(())
+    unsupported("对齐 Mac 内建屏")
 }
 pub fn match_ppi() -> Result<(), String> {
-    Ok(())
+    unsupported("窗口跨屏等大")
 }
 pub fn rotate_secondary() -> Result<(), String> {
-    Ok(())
+    unsupported("副屏横竖屏切换")
 }
-
+pub fn restore_secondary() -> Result<(), String> {
+    unsupported("恢复副屏竖屏")
+}
 pub fn span_video() -> Result<(), String> {
-    let _ = run_cmd(PS, &["-NoProfile", "-Command", "Start-Process vlc"]);
-    Ok(())
+    unsupported("双屏铺满")
 }
 pub fn restore_video() -> Result<(), String> {
-    Ok(())
+    unsupported("恢复播放器窗口")
 }
