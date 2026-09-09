@@ -8,6 +8,24 @@ fn get_platform() -> &'static str {
     platform::platform_name()
 }
 
+/// 返回 App 版本号（与 Cargo.toml / tauri.conf.json 一致）
+#[tauri::command]
+fn get_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// 开机自启是否已启用
+#[tauri::command]
+fn get_autostart() -> bool {
+    platform::autostart_enabled()
+}
+
+/// 设置开机自启
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<(), String> {
+    platform::set_autostart(enabled)
+}
+
 #[tauri::command]
 fn get_displays() -> Vec<DisplayInfo> {
     platform::get_displays()
@@ -85,6 +103,12 @@ pub fn run() {
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
             use tauri::Manager;
 
+            // 单实例自检：若已有另一实例在跑（例如 launchd bootstrap 新拉起的），本实例直接退出，防双托盘
+            #[cfg(target_os = "macos")]
+            if platform::another_instance_running() {
+                std::process::exit(0);
+            }
+
             // 右键菜单
             let open_main = MenuItem::with_id(app, "open_main", "打开主窗口", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
@@ -139,6 +163,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_platform,
+            get_version,
+            get_autostart,
+            set_autostart,
             get_displays,
             set_brightness,
             set_volume,

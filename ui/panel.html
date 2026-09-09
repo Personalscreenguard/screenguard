@@ -37,6 +37,8 @@
 
   .srow { display:grid; grid-template-columns:52px 1fr 40px; align-items:center; gap:10px; padding:5px 0; }
   .srow label { color:var(--dim); font-size:11.5px; }
+  .hint { color:var(--dim); font-size:11px; padding:6px 0; line-height:1.5; }
+  .ver { font-size:10px; color:var(--dim); font-weight:400; margin-left:6px; letter-spacing:.3px; }
   input[type=range]{ -webkit-appearance:none; width:100%; height:5px; border-radius:5px; background:rgba(255,255,255,.16); outline:none; }
   input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:15px; height:15px; border-radius:50%; background:var(--accent); cursor:pointer; border:none; box-shadow:0 0 0 3px rgba(79,140,255,.25); }
   .srow .val { text-align:right; font-variant-numeric:tabular-nums; font-size:11.5px; }
@@ -60,7 +62,7 @@
 <body>
 <div class="card">
   <div class="head">
-    <div class="t">🖥️ <span>屏幕守护</span></div>
+    <div class="t">🖥️ <span>屏幕守护</span><span class="ver" id="pver"></span></div>
     <div class="btns"><button class="ibtn" id="main-btn">主窗口</button><button class="ibtn" id="quit-btn">退出</button></div>
   </div>
 
@@ -80,7 +82,8 @@
 
   <div class="foot">
     <button class="fbtn" id="refresh-btn">⟳ 刷新</button>
-    <button class="fbtn" id="main-btn2">🖥️ 打开主窗口</button>
+    <button class="fbtn" id="main-btn2">🖥️ 主窗口</button>
+    <button class="fbtn" id="autostart-btn">⚡ 自启：检测中</button>
   </div>
 </div>
 
@@ -126,7 +129,35 @@ document.getElementById('refresh-btn').onclick=load;
 document.getElementById('main-btn').onclick=()=>invoke('open_main');
 document.getElementById('main-btn2').onclick=()=>invoke('open_main');
 document.getElementById('quit-btn').onclick=()=>invoke('quit_app');
+
+// 版本号 + 开机自启开关
+const autostartBtn = document.getElementById('autostart-btn');
+function paintAutostart(on){
+  autostartBtn.textContent = on ? '⚡ 自启：开' : '⚡ 自启：关';
+  autostartBtn.style.color = on ? '#7fb0ff' : '';
+}
+async function refreshAutostart(){
+  try { paintAutostart(await invoke('get_autostart')); }
+  catch(e){ autostartBtn.textContent='⚡ 自启：?'; }
+}
+autostartBtn.onclick = async ()=>{
+  const want = !(autostartBtn.textContent.includes('开'));
+  autostartBtn.textContent = '⚡ 设置中…';
+  try {
+    await invoke('set_autostart', { enabled: want });
+    paintAutostart(want);
+  } catch(e){
+    autostartBtn.textContent = '⚡ 失败';
+    autostartBtn.style.color = '#ef6a6a';
+    setTimeout(()=>{ refreshAutostart(); autostartBtn.style.color=''; }, 900);
+  }
+};
+try {
+  const v = await invoke('get_version');
+  document.getElementById('pver').textContent = 'v'+v;
+} catch(e){ /* 预览模式静默 */ }
 load();
+refreshAutostart();
 </script>
 </body>
 </html>

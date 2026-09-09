@@ -4,6 +4,44 @@ pub fn platform_name() -> &'static str {
     "linux"
 }
 
+// ===== 开机自启（XDG autostart desktop 文件）=====
+const AUTOSTART_DIR: &str = ".config/autostart";
+const AUTOSTART_FILE: &str = "screenguard.desktop";
+
+fn autostart_path() -> Option<std::path::PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    Some(std::path::PathBuf::from(home).join(AUTOSTART_DIR).join(AUTOSTART_FILE))
+}
+
+fn desktop_entry(exe: &str) -> String {
+    format!(
+        "[Desktop Entry]\nType=Application\nName=Screenguard\nComment=跨平台显示器控制与色彩/多屏助手\nExec={}\nX-GNOME-Autostart-enabled=true\n",
+        exe
+    )
+}
+
+pub fn autostart_enabled() -> bool {
+    autostart_path().map(|p| p.exists()).unwrap_or(false)
+}
+
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    let path = autostart_path().ok_or("无法定位 ~/.config/autostart")?;
+    if enabled {
+        let exe = std::env::current_exe()
+            .map_err(|e| format!("无法定位程序自身路径：{}", e))?;
+        std::fs::create_dir_all(path.parent().ok_or("无效路径")?)
+            .map_err(|e| format!("创建 autostart 目录失败：{}", e))?;
+        std::fs::write(&path, desktop_entry(&exe.to_string_lossy()))
+            .map_err(|e| format!("写入自启配置失败：{}", e))
+    } else {
+        match std::fs::remove_file(&path) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("移除自启配置失败：{}", e)),
+        }
+    }
+}
+
 /// 解析 `xrandr --query` 得到显示器列表
 pub fn get_displays() -> Vec<DisplayInfo> {
     let mut result = Vec::new();

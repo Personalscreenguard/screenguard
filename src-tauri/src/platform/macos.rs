@@ -7,6 +7,93 @@ pub fn platform_name() -> &'static str {
     "macos"
 }
 
+// ===== 开机自启（LaunchAgent）=====
+const LA_LABEL: &str = "com.nanyu.screenguard";
+const LA_PLIST: &str = "com.nanyu.screenguard.plist";
+const LA_BIN: &str = "/Applications/Screenguard.app/Contents/MacOS/screenguard";
+
+fn launch_agents_plist() -> Option<std::path::PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    Some(std::path::PathBuf::from(home).join("Library/LaunchAgents").join(LA_PLIST))
+}
+
+fn current_uid() -> String {
+    std::env::var("UID")
+        .unwrap_or_else(|_| run_cmd("id", &["-u"]).unwrap_or_default().trim().to_string())
+}
+
+/// LaunchAgent 当前是否已加载到 launchd（在跑或曾跑过）
+fn la_loaded(label: &str) -> bool {
+    let uid = current_uid();
+    run_cmd("launchctl", &["print", &format!("gui/{}/{}", uid, label)]).is_ok()
+}
+
+/// 是否已有另一个本程序实例在运行（防 bootstrap 双开）
+pub fn another_instance_running() -> bool {
+    run_cmd("pgrep", &["-x", "screenguard"])
+        .map(|o| o.lines().count() > 1)
+        .unwrap_or(false)
+}
+
+fn la_plist_xml() -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+</dict>
+</plist>
+"#,
+        LA_LABEL, LA_BIN
+    )
+}
+
+/// 开机自启是否已启用（LaunchAgent plist 存在 = 下次登录会自启）
+pub fn autostart_enabled() -> bool {
+    launch_agents_plist()
+        .map(|p| p.exists())
+        .unwrap_or(false)
+}
+
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    let plist = launch_agents_plist().ok_or("无法定位 ~/Library/LaunchAgents")?;
+    let uid = current_uid();
+    let domain = format!("gui/{}", uid);
+    if enabled {
+        // 写入 plist（覆盖旧内容，保证指向当前安装路径）
+        std::fs::create_dir_all(plist.parent().ok_or("无效路径")?)
+            .map_err(|e| format!("创建 LaunchAgents 目录失败：{}", e))?;
+        std::fs::write(&plist, la_plist_xml())
+            .map_err(|e| format!("写入自启配置失败：{}", e))?;
+        // 仅当 agent 尚未加载时才 bootstrap（已加载时重复加载会报错；
+        // 新拉起的实例会因单实例自检自动退出，不会双开）
+        if !la_loaded(LA_LABEL) {
+            run_cmd("launchctl", &["bootstrap", &domain, &plist.to_string_lossy()])
+                .map(|_| ())
+                .map_err(|e| format!("注册自启失败：{}", e.trim()))?;
+        }
+        Ok(())
+    } else {
+        // 只删 plist（下次登录不再自启），不 bootout——
+        // bootout 会终止当前由 launchd 拉起的自身实例，等于点"关"把自己杀掉
+        match std::fs::remove_file(&plist) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("移除自启配置失败：{}", e)),
+        }
+    }
+}
+
 /// BetterDisplay 必须已安装且正在运行，CLI 才可用
 fn betterdisplay_available() -> bool {
     if !std::path::Path::new(BETTERDISPLAY).exists() {

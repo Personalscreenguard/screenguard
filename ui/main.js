@@ -124,5 +124,10 @@ document.getElementById('refresh-btn').onclick = () => refreshDisplays();
     if (e.message === 'TAURI_CORE_UNAVAILABLE') setBadge('预览模式');
     else setBadge('出错了');
   }
+  try {
+    const v = await invoke('get_version');
+    const verEl = document.getElementById('version');
+    if (verEl) verEl.textContent = 'v' + v;
+  } catch (e) { /* 预览模式：静默 */ }
   await refreshDisplays();
 })();

@@ -6,6 +6,40 @@ pub fn platform_name() -> &'static str {
 
 const PS: &str = "powershell";
 
+// ===== 开机自启（HKCU Run 注册表项）=====
+const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_NAME: &str = "Screenguard";
+
+fn current_exe_path() -> Result<String, String> {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| format!("无法定位程序自身路径：{}", e))
+}
+
+pub fn autostart_enabled() -> bool {
+    std::process::Command::new("reg")
+        .args(["query", RUN_KEY, "/v", RUN_NAME])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+pub fn set_autostart(enabled: bool) -> Result<(), String> {
+    let exe = current_exe_path()?;
+    if enabled {
+        run_cmd(
+            "reg",
+            &["add", RUN_KEY, "/v", RUN_NAME, "/t", "REG_SZ", "/d", &exe, "/f"],
+        )
+        .map(|_| ())
+        .map_err(|e| format!("写入开机自启失败：{}", e.trim()))
+    } else {
+        // 删除注册表项（不存在时 reg delete 会报错，忽略之）
+        let _ = run_cmd("reg", &["delete", RUN_KEY, "/v", RUN_NAME, "/f"]);
+        Ok(())
+    }
+}
+
 /// 未实现功能的统一错误（UI 能真实感知，不再假装成功）
 fn unsupported(feature: &str) -> Result<(), String> {
     Err(format!("{}：Windows 版暂未实现", feature))
