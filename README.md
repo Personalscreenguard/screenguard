@@ -50,6 +50,8 @@ npm run build:linux    # Linux 打包
 
 ## 版本历史
 
+- **v0.2.3**（2026-09-10）：**修复 DDC/CI 真正生效的关键 bug**——`GetPhysicalMonitorsFromHMONITOR` 的数组参数缺 `[Out]` 标注，marshaler 不回写导致句柄恒为 0（此前误判为"显示器不支持 DDC/CI"）。参考 emoacht/Monitorian 实现。亮度/音量现已实测可读写；列表加载时顺带读回真实亮度/音量值
+
 - **v0.2.2**（2026-09-09）：修复 DDC/CI 的 P/Invoke 签名错误（输出参数错位导致读写必失败）+ 加读写重试；PPI 诊断改按厂商型号匹配注册表；代码整理（零编译 warning）
 
 - **v0.2.1**（2026-09-09）：Windows 端完整实现（PowerShell + C# Win32 桥接：显示器枚举/DDC/旋转/ICC/双屏铺满，零额外 Rust 依赖）；修复新版 Windows 下显示器 UID 错位、名字匹配；主窗口关闭改驻留托盘

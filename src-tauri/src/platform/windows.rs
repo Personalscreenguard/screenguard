@@ -117,7 +117,10 @@ public class SGCore {
   delegate bool EnumMonProc(IntPtr h, IntPtr hdc, IntPtr rc, IntPtr lp);
 
   [DllImport("dxva2.dll")] static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(IntPtr h, out uint n);
-  [DllImport("dxva2.dll")] static extern bool GetPhysicalMonitorsFromHMONITOR(IntPtr h, uint n, SGPHYS_MON[] arr);
+  // 关键：arr 含 string 字段(非 blittable)，必须标 [Out] 才会把 API 写入的句柄/描述复制回托管端。
+  // 缺 [Out] 时 .NET 只传临时副本且不回传 → 拿到无效句柄 → DDC 读写全部失败
+  // （曾因此误判"显示器不支持 DDC/CI"，同机 monitorcontrol 却能正常读）。
+  [DllImport("dxva2.dll")] static extern bool GetPhysicalMonitorsFromHMONITOR(IntPtr h, uint n, [Out] SGPHYS_MON[] arr);
   [DllImport("dxva2.dll")] static extern bool DestroyPhysicalMonitors(uint n, SGPHYS_MON[] arr);
   [DllImport("dxva2.dll")] static extern bool SetVCPFeature(IntPtr h, byte code, uint val);
   // 注意：真实签名是 (h, code, pvct, pdwCurrentValue, pdwMaximumValue)——两个独立 DWORD 输出，
@@ -372,13 +375,15 @@ fn resolve_dev(uid: &str) -> Result<String, String> {
 // ---------- 显示器列表 ----------
 pub fn get_displays() -> Vec<DisplayInfo> {
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays();\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ Write-Output ('P|' + $dev + '|' + [SGCore]::DDCProbe($dev)) }}",
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays() -split ([char]10);\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ $pr = [SGCore]::DDCProbe($dev); $b = ''; $v = ''; if ($pr -eq '1') {{ $b = [SGCore]::DDCRead($dev, [byte]0x10); $v = [SGCore]::DDCRead($dev, [byte]0x62) }}; Write-Output ('P|' + $dev + '|' + $pr + '|' + $b + '|' + $v) }}",
         cs = CORE_CS
     );
     let raw = ps(&script).unwrap_or_default();
     let mut rows: Vec<(String, String, u32, u32, u32, bool, u32)> = Vec::new(); // dev,uid,w,h,hz,main,ori
     let mut names: HashMap<String, String> = HashMap::new();
     let mut ddc: HashMap<String, bool> = HashMap::new();
+    let mut bri: HashMap<String, u32> = HashMap::new();
+    let mut vol: HashMap<String, u32> = HashMap::new();
     for line in raw.lines() {
         let p: Vec<&str> = line.split('|').collect();
         if p.is_empty() {
@@ -397,7 +402,17 @@ pub fn get_displays() -> Vec<DisplayInfo> {
                 names.insert(short_id(p[1]), p[2].to_string());
             }
             "P" if p.len() >= 3 => {
-                ddc.insert(p[1].to_string(), p[2].trim() == "1");
+                let has = p[2].trim() == "1";
+                ddc.insert(p[1].to_string(), has);
+                if has {
+                    // P|dev|1|亮度|音量（探测时顺带读回真实值，避免 UI 滑块初值错误）
+                    if let Some(v) = p.get(3).and_then(|s| s.trim().parse::<u32>().ok()) {
+                        bri.insert(p[1].to_string(), v);
+                    }
+                    if let Some(v) = p.get(4).and_then(|s| s.trim().parse::<u32>().ok()) {
+                        vol.insert(p[1].to_string(), v);
+                    }
+                }
             }
             _ => {}
         }
@@ -433,8 +448,8 @@ pub fn get_displays() -> Vec<DisplayInfo> {
             main,
             connected: true,
             ddc: ddc.get(&dev).copied().unwrap_or(false),
-            brightness: None,
-            volume: None,
+            brightness: bri.get(&dev).copied(),
+            volume: vol.get(&dev).copied(),
             color_profile: None,
             ddc_id: None,
         });
