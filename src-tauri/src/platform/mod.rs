@@ -15,8 +15,9 @@ pub struct DisplayInfo {
     pub volume: Option<u32>,
     /// 当前色彩配置文件名（ColorSync profile）
     pub color_profile: Option<String>,
-    /// 平台特定的显示器句柄（macOS=CGDirectDisplayID，Windows/Linux 用内部 id）
+    /// 平台特定的显示器句柄（macOS=CGDirectDisplayID；Windows/Linux 用内部 id）
     #[serde(skip_serializing)]
+    #[allow(dead_code)] // macOS 用于 DDC 句柄；Windows/Linux 恒为 None，非死代码
     pub ddc_id: Option<u32>,
 }
 
@@ -36,7 +37,8 @@ pub fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// 判断某命令是否存在于 PATH
+/// 判断某命令是否存在于 PATH（macOS/Linux 用；Windows 走 PowerShell/注册表，无需此函数）
+#[cfg(not(target_os = "windows"))]
 pub fn which(program: &str) -> bool {
     Command::new("which")
         .arg(program)

@@ -107,9 +107,6 @@ public struct SGMONITORINFO {
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
 public struct SGPHYS_MON { public IntPtr h; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string name; }
 
-[StructLayout(LayoutKind.Sequential)]
-public struct SGVCPR { public uint ver, cur, max, min; }
-
 public class SGCore {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplayDevicesW(string dev, uint i, ref SGDISPLAY_DEVICE d, uint f);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplaySettingsW(string dev, int mode, IntPtr dm);
@@ -123,7 +120,9 @@ public class SGCore {
   [DllImport("dxva2.dll")] static extern bool GetPhysicalMonitorsFromHMONITOR(IntPtr h, uint n, SGPHYS_MON[] arr);
   [DllImport("dxva2.dll")] static extern bool DestroyPhysicalMonitors(uint n, SGPHYS_MON[] arr);
   [DllImport("dxva2.dll")] static extern bool SetVCPFeature(IntPtr h, byte code, uint val);
-  [DllImport("dxva2.dll")] static extern bool GetVCPFeatureAndVCPFeatureReply(IntPtr h, byte code, ref SGVCPR r);
+  // 注意：真实签名是 (h, code, pvct, pdwCurrentValue, pdwMaximumValue)——两个独立 DWORD 输出，
+  // 不是结构体。写成结构体会导致输出参数错位、DDC 读写必然全部失败。
+  [DllImport("dxva2.dll")] static extern bool GetVCPFeatureAndVCPFeatureReply(IntPtr h, byte code, IntPtr pvct, ref uint cur, ref uint max);
 
   [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr v);
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out SGRECT r);
@@ -178,8 +177,8 @@ public class SGCore {
     return sb.ToString();
   }
 
-  /// 对指定显示设备执行 DDC/CI（VCP 读或写），返回是否命中
-  static bool TryVCP(string dev, byte code, bool write, uint val, out uint cur) {
+  /// 对指定显示设备执行 DDC/CI（VCP 读或写），返回是否命中；retries 为最大重试次数
+  static bool TryVCP(string dev, byte code, bool write, uint val, int retries, out uint cur) {
     cur = 0;
     var curBox = new uint[1];
     var anyBox = new bool[1];
@@ -192,10 +191,22 @@ public class SGCore {
           var arr = new SGPHYS_MON[n];
           if (GetPhysicalMonitorsFromHMONITOR(h, n, arr)) {
             foreach (var pm in arr) {
-              if (write) { if (SetVCPFeature(pm.h, code, val)) anyBox[0] = true; }
-              else {
-                var r = new SGVCPR();
-                if (GetVCPFeatureAndVCPFeatureReply(pm.h, code, ref r)) { curBox[0] = r.cur; anyBox[0] = true; }
+              if (write) {
+                // DDC 写入偶发失败，重试
+                for (int t = 0; t < retries && !anyBox[0]; t++) {
+                  if (SetVCPFeature(pm.h, code, val)) anyBox[0] = true;
+                  else System.Threading.Thread.Sleep(120);
+                }
+              } else {
+                // 显示器 DDC 响应慢：单次读取常失败，必须重试
+                // 注意：变量不能叫 cur/max——与外层参数 out cur 同名的局部变量会 C# 编译失败
+                uint curVal = 0, maxVal = 0;
+                bool ok = false;
+                for (int t = 0; t < retries && !ok; t++) {
+                  ok = GetVCPFeatureAndVCPFeatureReply(pm.h, code, IntPtr.Zero, ref curVal, ref maxVal);
+                  if (!ok) System.Threading.Thread.Sleep(120);
+                }
+                if (ok) { curBox[0] = curVal; anyBox[0] = true; }
               }
             }
             DestroyPhysicalMonitors(n, arr);
@@ -211,19 +222,19 @@ public class SGCore {
   /// 读 VCP 值，失败返回 ERR
   public static string DDCRead(string dev, byte code) {
     uint cur;
-    return TryVCP(dev, code, false, 0, out cur) ? cur.ToString() : "ERR";
+    return TryVCP(dev, code, false, 0, 5, out cur) ? cur.ToString() : "ERR";
   }
 
   /// 写 VCP 值，返回 OK / ERR
   public static string DDCWrite(string dev, byte code, uint val) {
     uint cur;
-    return TryVCP(dev, code, true, val, out cur) ? "OK" : "ERR:该显示器不支持 DDC/CI";
+    return TryVCP(dev, code, true, val, 3, out cur) ? "OK" : "ERR:该显示器不支持 DDC/CI";
   }
 
-  /// 探测是否支持 DDC（VCP 0x10 亮度可读）
+  /// 探测是否支持 DDC（VCP 0x10 亮度可读）。重试少：列表刷新会逐屏调用，需快速返回。
   public static string DDCProbe(string dev) {
     uint cur;
-    return TryVCP(dev, 0x10, false, 0, out cur) ? "1" : "0";
+    return TryVCP(dev, 0x10, false, 0, 2, out cur) ? "1" : "0";
   }
 
   /// 旋转副屏。newOri: 0=横, 1=顺时针90, 3=逆时针90
@@ -310,6 +321,14 @@ public class SGCore {
 "#;
 
 // ---------- uid -> devName 缓存（显示器重插后由 get_displays 刷新） ----------
+/// 从显示器标识里提取「厂商+型号」段。
+/// uid 形如 "MONITOR\XMI27B3\{GUID}\0007"，WMI InstanceName 形如
+/// "DISPLAY\XMI27B3\5&...&UID4352"，PerMonitorSettings 键名形如 "XMI27B30_0A_..."。
+/// 三者前缀不同，统一取第二段对齐（用于名字匹配与 DPI 档匹配）。
+fn short_id(s: &str) -> String {
+    s.split('\\').nth(1).unwrap_or(s).to_string()
+}
+
 fn dev_cache() -> &'static Mutex<Option<HashMap<String, String>>> {
     static CACHE: OnceLock<Mutex<Option<HashMap<String, String>>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(None))
@@ -360,11 +379,6 @@ pub fn get_displays() -> Vec<DisplayInfo> {
     let mut rows: Vec<(String, String, u32, u32, u32, bool, u32)> = Vec::new(); // dev,uid,w,h,hz,main,ori
     let mut names: HashMap<String, String> = HashMap::new();
     let mut ddc: HashMap<String, bool> = HashMap::new();
-    // uid 是 "MONITOR\XMI27B3\{GUID}\0007" 而 WMI InstanceName 是
-    // "DISPLAY\XMI27B3\5&...&UID4352"，两者前缀不同，按第二段(厂商+型号)对齐
-    fn short_id(s: &str) -> String {
-        s.split('\\').nth(1).unwrap_or(s).to_string()
-    }
     for line in raw.lines() {
         let p: Vec<&str> = line.split('|').collect();
         if p.is_empty() {
@@ -558,15 +572,19 @@ pub fn match_ppi() -> Result<(), String> {
     let raw = ps(script).unwrap_or_default();
     let mut dpi_main: Option<u32> = None;
     let mut dpi_sec: Option<u32> = None;
+    // PerMonitorSettings 键名形如 "XMI27B30_0A_07EA_47^HASH"（厂商型号开头），
+    // 用 uid 的第二段(厂商+型号)做前缀匹配；同一屏可能有多条历史键，取首个命中。
+    let main_key = short_id(&main.id).to_lowercase();
+    let sec_key = short_id(&sec.id).to_lowercase();
     for line in raw.lines() {
         let p: Vec<&str> = line.split('|').collect();
         if p.len() >= 3 && p[0] == "S" {
             let key = p[1].to_lowercase();
             let val: u32 = p[2].trim().parse().unwrap_or(0);
-            if main.id.to_lowercase().contains(&key) || key.contains(&main.id.to_lowercase().replace('\\', "")) {
+            if !main_key.is_empty() && key.starts_with(&main_key) && dpi_main.is_none() {
                 dpi_main = Some(val);
             }
-            if sec.id.to_lowercase().contains(&key) || key.contains(&sec.id.to_lowercase().replace('\\', "")) {
+            if !sec_key.is_empty() && key.starts_with(&sec_key) && dpi_sec.is_none() {
                 dpi_sec = Some(val);
             }
         }

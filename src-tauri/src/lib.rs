@@ -77,15 +77,20 @@ fn restore_video() -> Result<(), String> {
     platform::restore_video()
 }
 
-/// 菜单栏面板：打开主窗口
-#[tauri::command]
-fn open_main(app: tauri::AppHandle) -> Result<(), String> {
+/// 显示并聚焦主窗口（命令、托盘菜单共用）
+fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+}
+
+/// 菜单栏面板：打开主窗口
+#[tauri::command]
+fn open_main(app: tauri::AppHandle) -> Result<(), String> {
+    show_main_window(&app);
     Ok(())
 }
 
@@ -138,13 +143,7 @@ pub fn run() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app_handle, event| match event.id.as_ref() {
-                    "open_main" => {
-                        if let Some(w) = app_handle.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.unminimize();
-                            let _ = w.set_focus();
-                        }
-                    }
+                    "open_main" => show_main_window(app_handle),
                     "quit" => app_handle.exit(0),
                     _ => {}
                 })
