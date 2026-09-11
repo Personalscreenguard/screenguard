@@ -44,4 +44,5 @@ jobs:
         run: cargo check --locked
       - name: 内嵌 C# 桥接编译检查（仅 Windows）
         if: runner.os == 'Windows'
+        working-directory: .
         run: python scripts/check_cs.py
