@@ -105,6 +105,26 @@ function renderDisplays(displays) {
   });
 }
 
+// ===== 按平台调整文案（各平台能力/依赖不同，避免误导） =====
+function applyPlatformCopy(p) {
+  const matchMac = document.getElementById('match-mac');
+  const note = document.getElementById('color-note');
+  if (p === 'windows') {
+    // Windows 没有内建 P3 屏，「对齐 Mac 内建屏」改为语义成立的「对齐主屏色彩」
+    matchMac.textContent = '对齐主屏色彩';
+    matchMac.title = '把主屏当前关联的 ICC 配置应用到其余屏幕';
+    if (note) note.textContent = 'P3 / Adobe RGB 需自备 .icc 放到 %LOCALAPPDATA%\\screenguard_icc｜变更显示器色彩配置需管理员权限';
+  } else if (p === 'linux') {
+    matchMac.disabled = true;
+    matchMac.title = 'Linux 版暂未实现';
+    const apply = document.getElementById('apply-color');
+    if (apply) { apply.disabled = true; apply.title = 'Linux 版暂未实现'; }
+    if (note) note.textContent = 'Linux 版色彩同步暂未实现（可先用系统级 colord 配置）';
+  } else {
+    matchMac.title = '外接屏对齐 Mac 内建屏（Display P3）';
+  }
+}
+
 // ===== 按钮事件 =====
 function errText(e) {
   if (typeof e === 'string') return e;
@@ -120,7 +140,10 @@ document.getElementById('apply-color').onclick = () => {
   const space = document.getElementById('color-space').value;
   run('apply_color_space', { space }, `已应用 ${space} 到所有屏幕`);
 };
-document.getElementById('match-mac').onclick = () => run('match_mac', {}, '已对齐 Mac 内建屏');
+document.getElementById('match-mac').onclick = () => {
+  const label = document.getElementById('match-mac').textContent;
+  run('match_mac', {}, `已${label}`);
+};
 document.getElementById('match-ppi').onclick = () => run('match_ppi', {}, '已匹配 PPI（窗口跨屏不再变小）');
 document.getElementById('rotate-secondary').onclick = () => run('rotate_secondary', {}, '已切换副屏横竖屏');
 document.getElementById('restore-secondary').onclick = () => run('restore_secondary', {}, '已恢复副屏为竖屏');
@@ -134,6 +157,7 @@ document.getElementById('refresh-btn').onclick = () => refreshDisplays();
     const p = await invoke('get_platform');
     const names = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
     setBadge(names[p] || p);
+    applyPlatformCopy(p);
   } catch (e) {
     if (e.message === 'TAURI_CORE_UNAVAILABLE') setBadge('预览模式');
     else setBadge('出错了');

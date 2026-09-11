@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capability for the main window","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Default capability for the main window and the tray quick panel","local":true,"windows":["main","panel"],"permissions":["core:default"]}}

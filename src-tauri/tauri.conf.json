@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Screenguard",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "identifier": "com.nanyu.screenguard",
   "build": {
     "frontendDist": "../ui"
@@ -40,17 +40,29 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "app",
-      "dmg"
-    ],
+    "targets": "all",
     "category": "Utility",
+    "publisher": "nanyu",
+    "copyright": "Copyright © 2026 陆冠霖",
+    "shortDescription": "跨平台显示器控制与多屏助手",
+    "longDescription": "屏幕守护（Screenguard）：跨平台显示器控制与多屏助手。DDC/CI 亮度音量、色彩同步、副屏横竖切换、双屏铺满看电影、开机自启。",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ]
+      }
+    }
   }
 }

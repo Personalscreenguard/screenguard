@@ -63,7 +63,7 @@
 <div class="card">
   <div class="head">
     <div class="t">🖥️ <span>屏幕守护</span><span class="ver" id="pver"></span></div>
-    <div class="btns"><button class="ibtn" id="main-btn">主窗口</button><button class="ibtn" id="quit-btn">退出</button></div>
+    <div class="btns"><button class="ibtn" id="hide-btn" title="隐藏面板（Esc）">✕</button><button class="ibtn" id="main-btn">主窗口</button><button class="ibtn" id="quit-btn">退出</button></div>
   </div>
 
   <div class="sec-label">显示器</div>
@@ -71,13 +71,13 @@
 
   <div class="sec-label">快捷控制</div>
   <div class="grid" id="quick">
-    <div class="cell" data-act="color-srgb"><span class="ico">🎨</span><span class="lbl">sRGB</span></div>
-    <div class="cell" data-act="color-p3"><span class="ico">🌈</span><span class="lbl">P3</span></div>
-    <div class="cell" data-act="color-adobe"><span class="ico">🖼️</span><span class="lbl">AdobeRGB</span></div>
-    <div class="cell" data-act="align-mac"><span class="ico">🍎</span><span class="lbl">对齐Mac</span></div>
-    <div class="cell" data-act="ppi"><span class="ico">🪟</span><span class="lbl">窗口不变小</span></div>
-    <div class="cell" data-act="rotate"><span class="ico">🔄</span><span class="lbl">横竖屏</span></div>
-    <div class="cell" data-act="span"><span class="ico">🎬</span><span class="lbl">双屏铺满</span></div>
+    <div class="cell" id="cell-srgb" data-act="color-srgb"><span class="ico">🎨</span><span class="lbl">sRGB</span></div>
+    <div class="cell" id="cell-p3" data-act="color-p3"><span class="ico">🌈</span><span class="lbl">P3</span></div>
+    <div class="cell" id="cell-adobe" data-act="color-adobe"><span class="ico">🖼️</span><span class="lbl">AdobeRGB</span></div>
+    <div class="cell" id="cell-align" data-act="align-mac"><span class="ico">🍎</span><span class="lbl">对齐Mac</span></div>
+    <div class="cell" id="cell-ppi" data-act="ppi"><span class="ico">🪟</span><span class="lbl">窗口不变小</span></div>
+    <div class="cell" id="cell-rotate" data-act="rotate"><span class="ico">🔄</span><span class="lbl">横竖屏</span></div>
+    <div class="cell" id="cell-span" data-act="span"><span class="ico">🎬</span><span class="lbl">双屏铺满</span></div>
   </div>
 
   <div class="foot">
@@ -149,6 +149,9 @@ document.getElementById('refresh-btn').onclick=load;
 document.getElementById('main-btn').onclick=()=>invoke('open_main');
 document.getElementById('main-btn2').onclick=()=>invoke('open_main');
 document.getElementById('quit-btn').onclick=()=>invoke('quit_app');
+// 面板独立关闭：只隐藏浮窗，不退出应用（此前只有「退出」，一点就杀掉整个程序）
+document.getElementById('hide-btn').onclick=()=>invoke('hide_panel');
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') invoke('hide_panel'); });
 
 // 版本号 + 开机自启开关
 const autostartBtn = document.getElementById('autostart-btn');
@@ -177,6 +180,25 @@ autostartBtn.onclick = async ()=>{
 invoke('get_version')
   .then(v => { document.getElementById('pver').textContent = 'v' + v; })
   .catch(() => { /* 预览模式静默 */ });
+// 按平台调整文案/可用性：
+// Windows 没有内建 P3 屏，「对齐Mac」的等价语义是「把主屏色彩配置对齐到其它屏」；
+// Linux 端这些能力尚未实现，置灰并标注，避免点了只弹错。
+invoke('get_platform').then(p=>{
+  const align=document.getElementById('cell-align');
+  if(p==='windows'){
+    align.querySelector('.ico').textContent='🖥️';
+    align.querySelector('.lbl').textContent='对齐主屏';
+    align.title='把主屏当前的色彩配置应用到其它屏';
+  }else if(p==='macos'){
+    align.title='外接屏对齐 Mac 内建屏（Display P3）';
+  }
+  if(p==='linux'){
+    ['cell-srgb','cell-p3','cell-adobe','cell-align','cell-ppi','cell-rotate'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el){ el.style.opacity='.45'; el.title='Linux 版暂未实现'; }
+    });
+  }
+}).catch(()=>{ /* 预览模式静默 */ });
 load();
 refreshAutostart();
 </script>

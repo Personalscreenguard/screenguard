@@ -385,39 +385,111 @@ fn apply_sec_layout(main: &Screen, sec: &Screen, sec_res: &str, sec_deg: u32) ->
     run_cmd(DISPLAYPLACER, &[&main_spec, &sec_spec]).map(|_| ())
 }
 
-fn is_standard_hidpi(sec: &Screen) -> bool {
-    // 副屏标准 2x 档：横屏 1920x1080 / 竖屏 1080x1920（4K 面板 @2x）
-    if sec.degree != 0 {
-        sec.w == 1080 && sec.h == 1920
+// ===== 原生分辨率探测：目标档位全部动态推导，不硬编码任何分辨率 =====
+/// 从 "3840 x 2160 (4K UHD)" / "1920 x 1080 @ 60.00Hz" 之类的字符串里取出宽高
+fn parse_wh(s: &str) -> Option<(u32, u32)> {
+    let t: Vec<&str> = s.split_whitespace().collect();
+    for w in t.windows(3) {
+        if w[1].eq_ignore_ascii_case("x") {
+            if let (Ok(a), Ok(b)) = (w[0].parse::<u32>(), w[2].parse::<u32>()) {
+                return Some((a, b));
+            }
+        }
+    }
+    None
+}
+
+/// (原生宽, 原生高, 逻辑宽, 逻辑高)
+type SpScreen = (u32, u32, u32, u32);
+
+/// 解析 `system_profiler SPDisplaysDataType`，得到每块屏的原生像素与逻辑像素。
+/// 解析失败返回空表 —— 调用方回退到「跟随主屏逻辑分辨率」，功能不会因此不可用。
+fn screens_native() -> Vec<SpScreen> {
+    let raw = match run_cmd("system_profiler", &["SPDisplaysDataType"]) {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
+    let mut out: Vec<SpScreen> = Vec::new();
+    let mut native: Option<(u32, u32)> = None;
+    let mut logical: Option<(u32, u32)> = None;
+    for line in raw.lines() {
+        let indent = line.len() - line.trim_start().len();
+        let t = line.trim();
+        // 8 空格缩进且以冒号结尾 = 新的一块显示器，落盘上一块
+        if indent == 8 && t.ends_with(':') && !t.is_empty() {
+            if let Some(n) = native {
+                let l = logical.unwrap_or(n);
+                out.push((n.0, n.1, l.0, l.1));
+            }
+            native = None;
+            logical = None;
+            continue;
+        }
+        if let Some(v) = t.strip_prefix("Resolution:") {
+            if let Some(wh) = parse_wh(v) {
+                // 外接 1x 屏此处就是当前分辨率；内建 Retina 屏是原生像素
+                native = Some(wh);
+            }
+        } else if let Some(v) = t.strip_prefix("UI Looks like:") {
+            if let Some(wh) = parse_wh(v) {
+                logical = Some(wh);
+            }
+        }
+    }
+    if let Some(n) = native {
+        let l = logical.unwrap_or(n);
+        out.push((n.0, n.1, l.0, l.1));
+    }
+    out
+}
+
+/// 在探测表里按「逻辑分辨率」匹配同一块屏（横竖屏都试）
+fn find_native<'a>(sps: &'a [SpScreen], s: &Screen) -> Option<&'a SpScreen> {
+    sps.iter()
+        .find(|(_, _, lw, lh)| (*lw, *lh) == (s.w, s.h) || (*lh, *lw) == (s.w, s.h))
+}
+
+/// 副屏的「2x 逻辑档」目标 = 原生像素 ÷ 2（方向随横竖屏）。
+/// 5K 面板得 2560x1440、4K 面板得 1920x1080、2K 面板得 1280x720，
+/// 不再硬编码 1920x1080。探不到原生信息时回退为「跟随主屏逻辑分辨率」。
+fn hidpi_target(sps: &[SpScreen], main: &Screen, sec: &Screen, portrait: bool) -> (String, u32) {
+    let (lw, lh) = match find_native(sps, sec) {
+        Some((nw, nh, _, _)) => ((nw / 2).max(1), (nh / 2).max(1)),
+        None => (main.w.max(1), main.h.max(1)),
+    };
+    if portrait {
+        (format!("{}x{}", lh, lw), 270)
     } else {
-        sec.w == 1920 && sec.h == 1080
+        (format!("{}x{}", lw, lh), 0)
     }
 }
 
+/// 主屏是否已处于 2x 档（原生像素 = 逻辑像素 × 2）；探不到时返回 None（不阻塞）
+fn main_at_2x(sps: &[SpScreen], main: &Screen) -> Option<bool> {
+    find_native(sps, main).map(|(nw, nh, _, _)| (main.w, main.h) == (nw / 2, nh / 2))
+}
+
 /// "窗口拖到另一屏不变小"：让副屏处于与主屏一致的 2x 逻辑档位。
-/// 只按副屏当前方向恢复标准 2x 分辨率，绝不动主屏、绝不把 4K 面板降到 1080p 物理档。
+/// 只按副屏原生像素推导目标档、只动副屏，绝不动主屏、绝不把高分辨率面板降到低物理档。
 pub fn match_ppi() -> Result<(), String> {
     let screens = parse_screens();
     if screens.is_empty() {
         return Err("displayplacer 不可用或没有显示器".into());
     }
     let (main, sec) = main_secondary(&screens)?;
-    // 主屏必须已是 1080p 逻辑档（27" 4K @2x），否则无法保证跨屏一致
-    if main.w != 1920 || main.h != 1080 {
+    let sps = screens_native();
+    if let Some(false) = main_at_2x(&sps, main) {
         return Err(format!(
-            "主屏当前逻辑分辨率为 {}，请先将其设为 1920x1080（2x 档）再匹配",
+            "主屏当前逻辑分辨率为 {}，不是其原生像素的 2x 档；请先在「系统设置 → 显示器」把它设为 2x 档再匹配",
             main.res_str()
         ));
     }
-    if is_standard_hidpi(sec) {
+    let portrait = sec.degree != 0;
+    let (target, deg) = hidpi_target(&sps, main, sec, portrait);
+    if format!("{}x{}", sec.w, sec.h) == target && sec.degree == deg {
         return Ok(()); // 已就位，不动
     }
-    let (res, deg) = if sec.degree != 0 {
-        ("1080x1920".to_string(), 270u32)
-    } else {
-        ("1920x1080".to_string(), 0u32)
-    };
-    match apply_sec_layout(main, sec, &res, deg) {
+    match apply_sec_layout(main, sec, &target, deg) {
         Ok(_) => Ok(()),
         Err(e) => Err(format!("匹配失败：{}", e.trim())),
     }
@@ -427,18 +499,22 @@ pub fn match_ppi() -> Result<(), String> {
 pub fn rotate_secondary() -> Result<(), String> {
     let screens = parse_screens();
     let (main, sec) = main_secondary(&screens)?;
-    if sec.degree == 0 {
-        apply_sec_layout(main, sec, "1080x1920", 270) // 横屏 -> 竖屏
-    } else {
-        apply_sec_layout(main, sec, "1920x1080", 0) // 竖屏 -> 横屏
-    }
+    let sps = screens_native();
+    let portrait = sec.degree == 0; // 当前横屏 → 转竖屏
+    let (target, deg) = hidpi_target(&sps, main, sec, portrait);
+    apply_sec_layout(main, sec, &target, deg)
 }
 
 /// 恢复副屏为竖屏（安全复位）
 pub fn restore_secondary() -> Result<(), String> {
     let screens = parse_screens();
     let (main, sec) = main_secondary(&screens)?;
-    apply_sec_layout(main, sec, "1080x1920", 270)
+    if sec.degree != 0 {
+        return Ok(()); // 已是竖屏，不动
+    }
+    let sps = screens_native();
+    let (target, deg) = hidpi_target(&sps, main, sec, true);
+    apply_sec_layout(main, sec, &target, deg)
 }
 
 /// 所有已连接屏幕的包围盒（逻辑坐标），用于跨屏铺满

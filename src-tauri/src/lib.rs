@@ -100,6 +100,16 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// 菜单栏面板：隐藏浮窗（不退出应用；面板的 ✕ 按钮与 Esc 键调用）
+#[tauri::command]
+fn hide_panel(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window("panel") {
+        w.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -186,7 +196,8 @@ pub fn run() {
             span_video,
             restore_video,
             open_main,
-            quit_app
+            quit_app,
+            hide_panel
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

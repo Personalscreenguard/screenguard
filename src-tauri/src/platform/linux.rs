@@ -135,8 +135,9 @@ fn unsupported(feature: &str) -> Result<(), String> {
 pub fn apply_color_space(_space: &str) -> Result<(), String> {
     unsupported("色彩空间同步")
 }
+/// 与 macOS「对齐内建屏」/ Windows「对齐主屏色彩」对应；Linux 端走 colord，尚未实现
 pub fn match_mac() -> Result<(), String> {
-    unsupported("对齐 Mac 内建屏")
+    unsupported("色彩对齐")
 }
 pub fn match_ppi() -> Result<(), String> {
     unsupported("窗口跨屏等大")

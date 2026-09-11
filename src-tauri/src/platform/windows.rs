@@ -73,41 +73,24 @@ const CORE_CS: &str = r#"using System;
 using System.Text;
 using System.Runtime.InteropServices;
 
-[StructLayout(LayoutKind.Explicit)]
-public struct SGDEVMODE {
-  [FieldOffset(64)] public ushort dmSpecVersion;
-  [FieldOffset(66)] public ushort dmDriverVersion;
-  [FieldOffset(68)] public ushort dmSize;
-  [FieldOffset(70)] public ushort dmDriverExtra;
-  [FieldOffset(72)] public uint dmFields;
-  [FieldOffset(76)] public short dmOrientation;
-  [FieldOffset(84)] public uint dmDisplayOrientation;
-  [FieldOffset(88)] public uint dmDisplayFixedOutput;
-  [FieldOffset(92)] public short dmColor;
-  [FieldOffset(166)] public ushort dmLogPixels;
-  [FieldOffset(168)] public uint dmBitsPerPel;
-  [FieldOffset(172)] public uint dmPelsWidth;
-  [FieldOffset(176)] public uint dmPelsHeight;
-  [FieldOffset(180)] public uint dmDisplayFlags;
-  [FieldOffset(184)] public uint dmDisplayFrequency;
-  [FieldOffset(188)] public uint dmICMMethod;
-  [FieldOffset(204)] public uint dmReserved1;
-  [FieldOffset(212)] public uint dmPanningWidth;
-  [FieldOffset(216)] public uint dmPanningHeight;
-}
+// DEVMODEW 不再用结构体映射，改为按固定偏移直接读写（Marshal.Read/WriteInt32）。
+// 原因：① Explicit 布局只声明需要的字段时，StructureToPtr 会把未声明区间（dmDeviceName /
+// dmFormName / dmICMIntent 等）清零，读改写回不干净；② Sequential 布局的字段对齐依赖
+// marshaller 实现，无法在本机验证。按偏移直读直写既确定又无损。
+// 偏移见 SGCore 内的 OFF_* 常量（本机 Win11 24H2 用 ctypes 实测校准，DEVMODEW 共 220 字节）。
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
 public struct SGDISPLAY_DEVICE {
   public int cb;
   [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
   [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
-  // 关键：实测本机(2026, Win11 24H2+) EnumDisplayDevicesW 实际布局在 DeviceString
-  // 后多 4 字节(疑似新 SDK 隐藏字段)，缺此 pad 会导致 DeviceID/DeviceKey 整体
-  // 错位 4 字节，读到 \u0003 之类垃圾 → uid 全坏、按屏操作无法定位。勿删！
-  public int _pad;
+  // 文档布局（DISPLAY_DEVICEW，共 840 字节）：StateFlags 紧跟 DeviceString，之后才是
+  // DeviceID / DeviceKey。旧实现的「_pad 隐藏字段」是误诊——实测（ctypes 与 .NET 双路验证）
+  // Win11 24H2 起本机 EnumDisplayDevicesW 对「适配器上挂的监视器」的枚举直接失败
+  // （返回 FALSE），与 cb 取 840/844 无关；uid 因此改由调用方做回退处理（见 ListDisplays）。
+  public int StateFlags;
   [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
   [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
-  public int StateFlags;
 }
 
 public struct SGRECT { public int Left, Top, Right, Bottom; }
@@ -152,6 +135,13 @@ public class SGCore {
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool SystemParametersInfo(uint action, uint p0, ref SGRECT p1, uint f);
 
+  // 色彩配置（ICC）：GDI 设备上下文路径
+  [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateDCW(string drv, string dev, string port, IntPtr pdm);
+  [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
+  [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern bool GetICMProfileW(IntPtr hdc, ref uint size, StringBuilder name);
+  [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern bool SetICMProfileW(IntPtr hdc, string file);
+  [DllImport("mscms.dll", CharSet = CharSet.Unicode)] static extern bool InstallColorProfileW(IntPtr h, string prof);
+
   const int GWL_STYLE = -16;
   const uint WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_POPUP = 0x80000000;
   const uint SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
@@ -160,7 +150,16 @@ public class SGCore {
   const uint CDS_UPDATEREGISTRY = 0x0001, CDS_GLOBAL = 0x0008;
   const uint SPI_GETWORKAREA = 0x0030;
 
-  static IntPtr AllocDevMode() { return Marshal.AllocHGlobal(220); }
+  // DEVMODEW（220 字节）关键字段偏移，本机 Win11 24H2 用 ctypes 实测校准
+  const int DEVMODE_SIZE = 220;
+  const int OFF_DMSIZE = 68;
+  const int OFF_DMFIELDS = 72;
+  const int OFF_ORIENTATION = 84;
+  const int OFF_PELSWIDTH = 172;
+  const int OFF_PELSHEIGHT = 176;
+  const int OFF_FREQUENCY = 184;
+
+  static IntPtr AllocDevMode() { return Marshal.AllocHGlobal(DEVMODE_SIZE); }
 
   /// 枚举已连接的显示器（EnumDisplayMonitors 路径，兼容各会话/混合显卡）。
   /// 行: D|<dev>|<uid>|<w>|<h>|<hz>|<main>|<ori>
@@ -174,7 +173,11 @@ public class SGCore {
         var b = AllocDevMode();
         try {
           if (EnumDisplaySettingsW(dev, -1, b)) {
-            var dm = Marshal.PtrToStructure<SGDEVMODE>(b);
+            // 按偏移直读，不做结构体映射
+            uint dw = (uint)Marshal.ReadInt32(b, OFF_PELSWIDTH);
+            uint dh = (uint)Marshal.ReadInt32(b, OFF_PELSHEIGHT);
+            uint dhz = (uint)Marshal.ReadInt32(b, OFF_FREQUENCY);
+            uint dori = (uint)Marshal.ReadInt32(b, OFF_ORIENTATION);
             string uid = "";
             uint j = 0;
             while (true) {
@@ -184,11 +187,15 @@ public class SGCore {
               uid = m.DeviceID;
               j++;
             }
+            // Win11 24H2 起 EnumDisplayDevicesW 不再枚举适配器上挂的监视器（实测恒返回
+            // FALSE，cb=840/844 均如此）→ uid 取不到。回退用 dev 名作会话内唯一 id：
+            // get_displays 每次全量重建 id↔dev 映射，dev 名在会话内稳定，功能等价。
+            if (string.IsNullOrEmpty(uid)) uid = dev;
             int main = (mi.dwFlags & 1) != 0 ? 1 : 0;
             sb.Append("D|").Append(dev).Append("|").Append(uid).Append("|")
-              .Append(dm.dmPelsWidth).Append("|").Append(dm.dmPelsHeight).Append("|")
-              .Append(dm.dmDisplayFrequency).Append("|").Append(main).Append("|")
-              .Append(dm.dmDisplayOrientation).Append("\n");
+              .Append(dw).Append("|").Append(dh).Append("|")
+              .Append(dhz).Append("|").Append(main).Append("|")
+              .Append(dori).Append("\n");
           }
         } finally { Marshal.FreeHGlobal(b); }
       }
@@ -258,22 +265,23 @@ public class SGCore {
   }
 
   /// 旋转副屏。newOri: 0=横, 1=顺时针90, 3=逆时针90
+  /// 按 DEVMODEW 固定偏移「就地改」：只写 dmSize / dmFields / 方向 / 宽高，其余字节原样不动。
+  /// （旧实现用 Explicit 结构体 PtrToStructure→StructureToPtr 整块回写，未声明区间会被清零）
   public static string Rotate(string dev, uint newOri) {
     var b = AllocDevMode();
     try {
       if (!EnumDisplaySettingsW(dev, -1, b)) return "ERR:读取当前显示模式失败";
-      var dm = Marshal.PtrToStructure<SGDEVMODE>(b);
-      uint curOri = dm.dmDisplayOrientation;
+      uint w = (uint)Marshal.ReadInt32(b, OFF_PELSWIDTH);
+      uint h = (uint)Marshal.ReadInt32(b, OFF_PELSHEIGHT);
+      uint curOri = (uint)Marshal.ReadInt32(b, OFF_ORIENTATION);
       bool curP = (curOri == 1 || curOri == 3);
       bool newP = (newOri == 1 || newOri == 3);
-      uint w = dm.dmPelsWidth, h = dm.dmPelsHeight;
       if (curP != newP) { uint t = w; w = h; h = t; }
-      dm.dmDisplayOrientation = newOri;
-      dm.dmPelsWidth = w;
-      dm.dmPelsHeight = h;
-      dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY | DM_DISPLAYORIENTATION;
-      dm.dmSize = 220;
-      Marshal.StructureToPtr(dm, b, false);
+      Marshal.WriteInt32(b, OFF_ORIENTATION, (int)newOri);
+      Marshal.WriteInt32(b, OFF_PELSWIDTH, (int)w);
+      Marshal.WriteInt32(b, OFF_PELSHEIGHT, (int)h);
+      Marshal.WriteInt32(b, OFF_DMFIELDS, (int)(DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY | DM_DISPLAYORIENTATION));
+      Marshal.WriteInt16(b, OFF_DMSIZE, (short)DEVMODE_SIZE);
       int r = ChangeDisplaySettingsExW(dev, b, IntPtr.Zero, CDS_UPDATEREGISTRY | CDS_GLOBAL, IntPtr.Zero);
       return r == 0 ? "OK" : ("ERR:ChangeDisplaySettingsEx 返回 " + r);
     } finally { Marshal.FreeHGlobal(b); }
@@ -337,6 +345,48 @@ public class SGCore {
     }
     return "OK";
   }
+
+  // ---------------- 色彩配置（ICC）关联 ----------------
+  // 走 GDI 设备上下文——实测这是 Windows 色彩引擎真正读取的路径。
+  // 实测无效、已弃用的做法：WcsAssociateColorProfileWithDevice 无论设备名对错都返回 TRUE，
+  // 关联却从不落地；SetICMProfileW 在权限不足时同样返回 TRUE 但不生效 → 因此必须回读校验。
+  static string IccOnHandle(IntPtr hdc) {
+    var sb = new StringBuilder(1024);
+    uint cb = 1024;
+    return GetICMProfileW(hdc, ref cb, sb) ? sb.ToString() : null;
+  }
+
+  /// 开一个**新**的设备上下文读当前关联（必须用新 DC：
+  /// 同一 DC 会缓存刚 SetICMProfileW 写入的值，用它回读会得出「总是成功」的假象）
+  static string IccReadFresh(string dev) {
+    IntPtr hdc = CreateDCW("DISPLAY", dev, null, IntPtr.Zero);
+    if (hdc == IntPtr.Zero) return null;
+    try { return IccOnHandle(hdc); } finally { DeleteDC(hdc); }
+  }
+
+  /// 读某显示设备当前关联的 ICC 路径 → OK:<path> / ERR:<原因>
+  public static string IccGet(string dev) {
+    string p = IccReadFresh(dev);
+    return p == null ? "ERR:无法打开显示设备或 GetICMProfile 无返回" : ("OK:" + p);
+  }
+
+  /// 关联 ICC 到指定显示设备 → OK / ERR:<原因>
+  /// 关键：写入后**另开 DC** 回读校验才算成功
+  /// （Windows 权限不足时 SetICMProfileW 照样返回 TRUE，但关联不会落到设备上）
+  public static string IccSet(string dev, string profile) {
+    IntPtr hdc = CreateDCW("DISPLAY", dev, null, IntPtr.Zero);
+    if (hdc == IntPtr.Zero) return "ERR:无法打开显示设备";
+    try { SetICMProfileW(hdc, profile); } finally { DeleteDC(hdc); }
+    string now = IccReadFresh(dev);
+    if (now != null && string.Equals(now, profile, StringComparison.OrdinalIgnoreCase)) return "OK";
+    return "ERR:未生效(回读=" + (now == null ? "读取失败" : now) + ")";
+  }
+
+  /// 安装 ICC 到系统色彩目录（Windows 只认该目录下的配置；实测非管理员可用）
+  public static string IccInstall(string profile) {
+    try { return InstallColorProfileW(IntPtr.Zero, profile) ? "OK" : "ERR:InstallColorProfile 失败"; }
+    catch { return "ERR:InstallColorProfile 异常"; }
+  }
 }
 "#;
 
@@ -366,11 +416,7 @@ fn resolve_dev(uid: &str) -> Result<String, String> {
         }
     }
     // 重新枚举填充
-    let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n[SGCore]::ListDisplays()",
-        cs = CORE_CS
-    );
-    let raw = ps(&script)?;
+    let raw = ps_core("[SGCore]::ListDisplays()")?;
     let mut map: HashMap<String, String> = HashMap::new();
     for line in raw.lines() {
         let p: Vec<&str> = line.split('|').collect();
@@ -392,7 +438,7 @@ fn resolve_dev(uid: &str) -> Result<String, String> {
 // ---------- 显示器列表 ----------
 pub fn get_displays() -> Vec<DisplayInfo> {
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays() -split ([char]10);\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ $pr = [SGCore]::DDCProbe($dev); $b = ''; $v = ''; if ($pr -eq '1') {{ $b = [SGCore]::DDCRead($dev, [byte]0x10); $v = [SGCore]::DDCRead($dev, [byte]0x62) }}; Write-Output ('P|' + $dev + '|' + $pr + '|' + $b + '|' + $v) }}",
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays() -split ([char]10);\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($_.Active -and $nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ $pr = [SGCore]::DDCProbe($dev); $b = ''; $v = ''; if ($pr -eq '1') {{ $b = [SGCore]::DDCRead($dev, [byte]0x10); $v = [SGCore]::DDCRead($dev, [byte]0x62) }}; Write-Output ('P|' + $dev + '|' + $pr + '|' + $b + '|' + $v); Write-Output ('C|' + $dev + '|' + [SGCore]::IccGet($dev)) }}",
         cs = CORE_CS
     );
     let raw = ps(&script).unwrap_or_default();
@@ -401,6 +447,7 @@ pub fn get_displays() -> Vec<DisplayInfo> {
     let mut ddc: HashMap<String, bool> = HashMap::new();
     let mut bri: HashMap<String, u32> = HashMap::new();
     let mut vol: HashMap<String, u32> = HashMap::new();
+    let mut icc: HashMap<String, String> = HashMap::new();
     for line in raw.lines() {
         let p: Vec<&str> = line.split('|').collect();
         if p.is_empty() {
@@ -431,6 +478,16 @@ pub fn get_displays() -> Vec<DisplayInfo> {
                     }
                 }
             }
+            // C|dev|OK:<完整 ICC 路径> —— UI 只展示文件名
+            "C" if p.len() >= 3 => {
+                if let Some(full) = p[2].trim().strip_prefix("OK:") {
+                    if let Some(base) = full.rsplit('\\').next() {
+                        if !base.is_empty() {
+                            icc.insert(p[1].to_string(), base.to_string());
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -444,12 +501,41 @@ pub fn get_displays() -> Vec<DisplayInfo> {
             *dev_cache().lock().unwrap() = Some(map);
         }
     }
+    // 名字匹配：
+    //  ① uid 为真实 MONITOR 路径 / WMI 实例时，按「第二段（厂商+型号）」对齐（原有逻辑）
+    //  ② Win11 24H2 起 uid 回退为 dev 名（无型号段）→ 走 1↔1 兜底：WMI 活动监视器与
+    //     活跃显示行本就一一对应，段匹配用掉的名字之外的「唯一剩余名字」可安全配给
+    //     「唯一剩余行」；两侧都不唯一时不猜，回退默认命名
+    let mut matched: Vec<Option<String>> = rows
+        .iter()
+        .map(|(_, uid, _, _, _, _, _)| {
+            let key = short_id(uid);
+            if key.is_empty() {
+                None
+            } else {
+                names.get(&key).cloned().filter(|n| !n.is_empty())
+            }
+        })
+        .collect();
+    {
+        let used = matched.iter().filter(|m| m.is_some()).count();
+        let unmatched: Vec<usize> = matched
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.is_none())
+            .map(|(i, _)| i)
+            .collect();
+        if unmatched.len() == 1 && names.len() == used + 1 {
+            if let Some(n) = names.values().next() {
+                matched[unmatched[0]] = Some(n.clone());
+            }
+        }
+    }
     let mut result: Vec<DisplayInfo> = Vec::new();
-    for (dev, uid, w, h, hz, main, ori) in rows {
-        let name = names
-            .get(&short_id(&uid))
-            .cloned()
-            .filter(|n| !n.is_empty())
+    for (i, (dev, uid, w, h, hz, main, ori)) in rows.into_iter().enumerate() {
+        let name = matched
+            .get(i)
+            .and_then(|m| m.clone())
             .unwrap_or_else(|| format!("显示器 {}", result.len() + 1));
         let res = if w > 0 && h > 0 {
             format!("{}x{}", w, h)
@@ -467,7 +553,7 @@ pub fn get_displays() -> Vec<DisplayInfo> {
             ddc: ddc.get(&dev).copied().unwrap_or(false),
             brightness: bri.get(&dev).copied(),
             volume: vol.get(&dev).copied(),
-            color_profile: None,
+            color_profile: icc.get(&dev).cloned(),
             ddc_id: None,
         });
     }
@@ -477,22 +563,16 @@ pub fn get_displays() -> Vec<DisplayInfo> {
 // ---------- DDC：亮度 / 音量（按显示器精确控制） ----------
 fn vcp_op(display_id: &str, code: u8, value: Option<u32>) -> Result<(), String> {
     let dev = resolve_dev(display_id)?;
-    let script = match value {
+    let call = match value {
         Some(v) => format!(
-            "Add-Type -TypeDefinition '{cs}';\n[SGCore]::DDCWrite('{dev}',[byte]{code},[uint32]{v})",
-            cs = CORE_CS,
+            "[SGCore]::DDCWrite('{dev}',[byte]{code},[uint32]{v})",
             dev = dev,
             code = code,
             v = v
         ),
-        None => format!(
-            "Add-Type -TypeDefinition '{cs}';\n[SGCore]::DDCRead('{dev}',[byte]{code})",
-            cs = CORE_CS,
-            dev = dev,
-            code = code
-        ),
+        None => format!("[SGCore]::DDCRead('{dev}',[byte]{code})", dev = dev, code = code),
     };
-    let out = ps(&script)?;
+    let out = ps_core(&call)?;
     let t = out.trim();
     if t == "OK" {
         Ok(())
@@ -516,13 +596,30 @@ pub fn set_volume(display_id: &str, value: u32) -> Result<(), String> {
     vcp_op(display_id, 0x62, Some(v))
 }
 
-// ---------- 色彩同步 ----------
+// ---------- 色彩同步（ICC 关联） ----------
+//
+// 以下实现方式由本机（Win11 24H2 双屏、非管理员）实测确定：
+//   ① WcsAssociateColorProfileWithDevice：设备名无论对错都返回 TRUE，关联却从不落地 → 已弃用
+//   ② GetICMProfileW / SetICMProfileW（GDI 设备上下文）才是色彩引擎真正读取的路径，读取可靠
+//   ③ 非管理员下 SetICMProfileW 同样返回 TRUE 却**不生效** → 必须回读校验（校验在 C# 侧 IccSet 内）
+//   ④ InstallColorProfileW 非管理员可用，可把用户自备的 P3 / AdobeRGB 装进系统色彩目录
 const COLOR_DIR: &str = "screenguard_icc";
+/// 系统色彩目录：Windows 只认这里的配置文件
+const SYSTEM_COLOR_DIR: &str = r"C:\Windows\System32\spool\drivers\color";
 
-/// 定位目标 ICC：sRGB 用系统内置；P3 / AdobeRGB 需要在用户目录存在（可由用户放置/下载）
+/// 定位目标 ICC 文件。
+/// sRGB 用系统内置；Display P3 / Adobe RGB 系统不带，需用户自备放到
+/// %LOCALAPPDATA%\screenguard_icc\，由 apply_color_space 自动安装进系统色彩目录。
 fn icc_path(space: &str) -> Result<String, String> {
     match space.to_lowercase().as_str() {
-        "srgb" => Ok("C:\\Windows\\System32\\spool\\drivers\\color\\sRGB Color Space Profile.icm".to_string()),
+        "srgb" => {
+            let p = format!(r"{}\sRGB Color Space Profile.icm", SYSTEM_COLOR_DIR);
+            if std::path::Path::new(&p).exists() {
+                Ok(p)
+            } else {
+                Err("未找到系统内置 sRGB 配置（sRGB Color Space Profile.icm）".to_string())
+            }
+        }
         "p3" | "adobergb" => {
             let dir = format!("{}\\{}", std::env::var("LOCALAPPDATA").unwrap_or_default(), COLOR_DIR);
             let file = if space.eq_ignore_ascii_case("p3") {
@@ -535,7 +632,7 @@ fn icc_path(space: &str) -> Result<String, String> {
                 Ok(path)
             } else {
                 Err(format!(
-                    "缺少色彩配置文件：请将 {} 放到 {}（Windows 无内置 Display P3/AdobeRGB 配置）",
+                    "缺少色彩配置文件 {}：请先把它放到 {}（Windows 不自带 Display P3 / Adobe RGB；macOS 上可从 /System/Library/ColorSync/Profiles/ 复制）",
                     file, dir
                 ))
             }
@@ -544,45 +641,130 @@ fn icc_path(space: &str) -> Result<String, String> {
     }
 }
 
-/// Windows 端「色彩同步」：把 ICC 配置文件关联到所有显示设备。
-/// 关联本身无副作用、可随时改回，失败会真实报错。
-pub fn apply_color_space(space: &str) -> Result<(), String> {
-    let profile = icc_path(space)?;
-    // 依次取各显示设备的 device path（\\?\DISPLAY#...#{e6f07b5f-...}）并关联
+/// 在已加载 CORE_CS 的会话里执行一段桥接调用
+fn ps_core(call: &str) -> Result<String, String> {
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\n\
-         $prof = '{profile}';\n\
-         $mon = Get-PnpDevice -Class Monitor -Status OK -ErrorAction SilentlyContinue;\n\
-         $ok = 0; $errs = @();\n\
-         foreach ($m in $mon) {{\n\
-           try {{\n\
-             $devPath = '\\\\?\\' + ($m.InstanceId -replace '\\\\','#') + '#{{e6f07b5f-ee97-4a90-b076-33f57bf4ba84}}';\n\
-             Add-Type -TypeDefinition '\n\
-             using System; using System.Runtime.InteropServices;\n\
-             public class SGWCS {{\n\
-               [DllImport(\"mscms.dll\", CharSet = CharSet.Unicode)] public static extern bool WcsAssociateColorProfileWithDevice(IntPtr h, string prof, string dev);\n\
-               [DllImport(\"mscms.dll\", CharSet = CharSet.Unicode)] public static extern bool WcsDisassociateColorProfileFromDevice(IntPtr h, string prof, string dev);\n\
-               [DllImport(\"mscms.dll\", CharSet = CharSet.Unicode)] public static extern uint InstallColorProfileW(IntPtr h, string prof);\n\
-             }}';\n\
-             [SGWCS]::InstallColorProfileW([IntPtr]::Zero, $prof) | Out-Null;\n\
-             if ([SGWCS]::WcsAssociateColorProfileWithDevice([IntPtr]::Zero, $prof, $devPath)) {{ $ok++ }} else {{ $errs += $m.FriendlyName }}\n\
-           }} catch {{ $errs += $m.FriendlyName }}\n\
-         }};\n\
-         if ($ok -gt 0) {{ Write-Output ('OK:' + $ok) }} else {{ Write-Output ('ERR:' + ($errs -join ',')) }}",
-        profile = profile
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n{call}",
+        cs = CORE_CS,
+        call = call
     );
-    let out = ps(&script)?;
-    let t = out.trim();
-    if t.starts_with("OK") {
-        Ok(())
+    ps(&script)
+}
+
+/// 所有显示屏的设备名（\\.\DISPLAYn，即 CreateDC / EnumDisplaySettings 用的名字）
+fn display_devs() -> Result<Vec<String>, String> {
+    let raw = ps_core("[SGCore]::ListDisplays()")?;
+    let devs: Vec<String> = raw
+        .lines()
+        .filter_map(|l| {
+            let p: Vec<&str> = l.split('|').collect();
+            if p.len() >= 8 && p[0] == "D" && !p[1].is_empty() {
+                Some(p[1].to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    if devs.is_empty() {
+        Err("未枚举到显示器".to_string())
     } else {
-        Err(format!("色彩关联失败：{}", t))
+        Ok(devs)
     }
 }
 
-/// 对齐 Mac 内建屏 = 将外接屏对齐 Display P3（Mac 内建屏为 P3）
+/// 读某设备当前关联的 ICC 完整路径
+fn icc_get(dev: &str) -> Option<String> {
+    let out = ps_core(&format!("[SGCore]::IccGet('{d}')", d = dev)).ok()?;
+    out.trim()
+        .strip_prefix("OK:")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 安装 ICC 到系统色彩目录
+fn icc_install(profile: &str) -> Result<(), String> {
+    let out = ps_core(&format!("[SGCore]::IccInstall('{p}')", p = profile))?;
+    let t = out.trim();
+    if t == "OK" {
+        Ok(())
+    } else if let Some(e) = t.strip_prefix("ERR:") {
+        Err(e.to_string())
+    } else {
+        Err(t.to_string())
+    }
+}
+
+/// 关联 ICC（含回读校验，校验在 C# 侧完成）
+fn icc_set(dev: &str, profile: &str) -> Result<(), String> {
+    let out = ps_core(&format!("[SGCore]::IccSet('{d}','{p}')", d = dev, p = profile))?;
+    let t = out.trim();
+    if t == "OK" {
+        Ok(())
+    } else if let Some(e) = t.strip_prefix("ERR:") {
+        Err(e.to_string())
+    } else {
+        Err(t.to_string())
+    }
+}
+
+/// 当前进程是否已提权（whoami /groups 的完整性级别：S-1-16-12288 = 高完整性 = 管理员）
+fn is_elevated() -> bool {
+    run_cmd("whoami", &["/groups"])
+        .map(|o| o.contains("S-1-16-12288"))
+        .unwrap_or(false)
+}
+
+/// 把指定 ICC 关联到所有显示屏；至少一台成功即算成功，全部失败则给出可操作的原因
+fn associate_all(profile: &str) -> Result<(), String> {
+    let devs = display_devs()?;
+    let mut ok = 0usize;
+    let mut errs: Vec<String> = Vec::new();
+    for d in &devs {
+        match icc_set(d, profile) {
+            Ok(()) => ok += 1,
+            Err(e) => errs.push(format!("{} {}", d, e)),
+        }
+    }
+    if ok > 0 {
+        return Ok(());
+    }
+    let hint = if is_elevated() {
+        "请在「设置 → 系统 → 显示 → 高级显示 → 颜色管理」中指定配置文件".to_string()
+    } else {
+        "Windows 变更显示器色彩配置需要管理员权限：请右键本程序选「以管理员身份运行」".to_string()
+    };
+    Err(format!(
+        "色彩关联未生效（{} 台设备全部失败）→ {}{}",
+        devs.len(),
+        hint,
+        if errs.is_empty() { String::new() } else { format!("（{}）", errs.join("；")) }
+    ))
+}
+
+/// Windows 端「色彩同步」：把 ICC 关联到所有显示屏。
+/// 关联可随时改回、无破坏性；失败会给出真实原因，不再静默假装成功。
+pub fn apply_color_space(space: &str) -> Result<(), String> {
+    let profile = icc_path(space)?;
+    // 先安装进系统色彩目录（Windows 只认该目录下的配置）；sRGB 为系统自带，装不上可忽略
+    if let Err(e) = icc_install(&profile) {
+        if !profile.starts_with(SYSTEM_COLOR_DIR) {
+            return Err(format!("无法安装色彩配置：{}", e));
+        }
+    }
+    associate_all(&profile)
+}
+
+/// 「对齐 Mac 内建屏」在 Windows 没有对应物（Windows 无内建 P3 屏），
+/// 因此语义改为：以主屏当前关联的 ICC 为准，把其余屏全部对齐到主屏。
 pub fn match_mac() -> Result<(), String> {
-    apply_color_space("p3")
+    let displays = get_displays();
+    if displays.len() < 2 {
+        return Err("需要主屏 + 副屏各一块才能使用此功能".to_string());
+    }
+    let main = displays.iter().find(|d| d.main).ok_or("未找到主屏")?;
+    let dev = resolve_dev(&main.id)?;
+    let profile = icc_get(&dev).ok_or("读取主屏当前色彩配置失败（GetICMProfile 无返回）")?;
+    associate_all(&profile)
 }
 
 /// 匹配两屏 PPI：检查主/副屏 DPI 缩放是否一致（窗口跨屏等大的前提）。
@@ -638,11 +820,7 @@ pub fn match_ppi() -> Result<(), String> {
 // ---------- 副屏旋转 ----------
 /// 副屏 = 第一块非主屏
 fn secondary_dev() -> Result<(String, u32), String> {
-    let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n[SGCore]::ListDisplays()",
-        cs = CORE_CS
-    );
-    let raw = ps(&script)?;
+    let raw = ps_core("[SGCore]::ListDisplays()")?;
     let mut main_dev: Option<String> = None;
     let mut sec: Option<(String, u32)> = None;
     for line in raw.lines() {
@@ -665,13 +843,12 @@ fn secondary_dev() -> Result<(String, u32), String> {
 pub fn rotate_secondary() -> Result<(), String> {
     let (dev, ori) = secondary_dev()?;
     let target = if ori == 1 || ori == 3 { 0 } else { 3 };
-    let script = format!(
-        "Add-Type -TypeDefinition '{cs}';\n[SGCore]::Rotate('{dev}',[uint32]{target})",
-        cs = CORE_CS,
+    let call = format!(
+        "[SGCore]::Rotate('{dev}',[uint32]{target})",
         dev = dev,
         target = target
     );
-    let out = ps(&script)?;
+    let out = ps_core(&call)?;
     let t = out.trim();
     if t == "OK" {
         Ok(())
@@ -688,12 +865,8 @@ pub fn restore_secondary() -> Result<(), String> {
     if ori == 3 || ori == 1 {
         return Ok(());
     }
-    let script = format!(
-        "Add-Type -TypeDefinition '{cs}';\n[SGCore]::Rotate('{dev}',[uint32]3)",
-        cs = CORE_CS,
-        dev = dev
-    );
-    let out = ps(&script)?;
+    let call = format!("[SGCore]::Rotate('{dev}',[uint32]3)", dev = dev);
+    let out = ps_core(&call)?;
     let t = out.trim();
     if t == "OK" {
         Ok(())
@@ -752,13 +925,12 @@ fn player_hwnd() -> Result<i64, String> {
 /// 双屏铺满：播放器窗口拉伸到所有屏幕的包围盒
 pub fn span_video() -> Result<(), String> {
     let hwnd = player_hwnd()?;
-    let script = format!(
-        "Add-Type -TypeDefinition '{cs}';\n[SGCore]::SpanVideo([IntPtr]{hwnd}, '{sf}')",
-        cs = CORE_CS,
+    let call = format!(
+        "[SGCore]::SpanVideo([IntPtr]{hwnd}, '{sf}')",
         hwnd = hwnd,
         sf = state_file()
     );
-    let out = ps(&script)?;
+    let out = ps_core(&call)?;
     let t = out.trim();
     if t == "OK" {
         Ok(())
@@ -772,13 +944,12 @@ pub fn span_video() -> Result<(), String> {
 /// 恢复播放器窗口
 pub fn restore_video() -> Result<(), String> {
     let hwnd = player_hwnd()?;
-    let script = format!(
-        "Add-Type -TypeDefinition '{cs}';\n[SGCore]::RestoreVideo([IntPtr]{hwnd}, '{sf}')",
-        cs = CORE_CS,
+    let call = format!(
+        "[SGCore]::RestoreVideo([IntPtr]{hwnd}, '{sf}')",
         hwnd = hwnd,
         sf = state_file()
     );
-    let out = ps(&script)?;
+    let out = ps_core(&call)?;
     let t = out.trim();
     if t == "OK" {
         Ok(())
