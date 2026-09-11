@@ -10,6 +10,20 @@ pub fn platform_name() -> &'static str {
     "windows"
 }
 
+/// 是否已有更早启动的同名实例在跑（防双开 / 防开出多个托盘图标）。
+/// 用 PID 比较而不是单纯计数：两个实例几乎同时启动时会「各自都看到 2 个进程」，
+/// 若只判断数量会双双退出；改为「PID 更小的那个留下」，保证恰好一个存活。
+pub fn another_instance_running() -> bool {
+    let me = std::process::id();
+    let script = format!(
+        "$p = Get-Process -Name screenguard -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -lt {} }}; if ($p) {{ '1' }} else {{ '0' }}",
+        me
+    );
+    run_cmd(PS, &["-NoProfile", "-Command", script.as_str()])
+        .map(|o| o.trim() == "1")
+        .unwrap_or(false)
+}
+
 const PS: &str = "powershell";
 
 // ===== 开机自启（HKCU Run 注册表项）=====
@@ -33,9 +47,12 @@ pub fn autostart_enabled() -> bool {
 pub fn set_autostart(enabled: bool) -> Result<(), String> {
     let exe = current_exe_path()?;
     if enabled {
+        // 路径必须带引号：Run 键的值含空格时（如 C:\Program Files\...）无引号会被
+        // Windows 按空格切分，可能误去启动 C:\Program.exe 导致自启静默失效
+        let quoted = format!("\"{}\"", exe);
         run_cmd(
             "reg",
-            &["add", RUN_KEY, "/v", RUN_NAME, "/t", "REG_SZ", "/d", &exe, "/f"],
+            &["add", RUN_KEY, "/v", RUN_NAME, "/t", "REG_SZ", "/d", quoted.as_str(), "/f"],
         )
         .map(|_| ())
         .map_err(|e| format!("写入开机自启失败：{}", e.trim()))
@@ -539,7 +556,7 @@ pub fn apply_color_space(space: &str) -> Result<(), String> {
          $ok = 0; $errs = @();\n\
          foreach ($m in $mon) {{\n\
            try {{\n\
-             $devPath = '\\\\?\\DISPLAY#' + $m.InstanceId + '#{{e6f07b5f-ee97-4a90-b076-33f57bf4ba84}}';\n\
+             $devPath = '\\\\?\\' + ($m.InstanceId -replace '\\\\','#') + '#{{e6f07b5f-ee97-4a90-b076-33f57bf4ba84}}';\n\
              Add-Type -TypeDefinition '\n\
              using System; using System.Runtime.InteropServices;\n\
              public class SGWCS {{\n\
@@ -705,7 +722,8 @@ fn player_hwnd() -> Result<i64, String> {
             }
         }
     }
-    // 2) 启动 PotPlayer
+    // 2) 依次尝试启动 PotPlayer / VLC：某个没起来就继续试下一个
+    //    （此前无论成败都无条件 break，装了 PotPlayer 但启动慢时会直接失败，不会回退 VLC）
     let candidates = [
         "C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe",
         "C:\\Program Files (x86)\\DAUM\\PotPlayer\\PotPlayerMini.exe",
@@ -713,21 +731,22 @@ fn player_hwnd() -> Result<i64, String> {
         "C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe",
     ];
     for path in candidates.iter() {
-        if std::path::Path::new(path).exists() {
-            let _ = std::process::Command::new(path).spawn();
-            std::thread::sleep(std::time::Duration::from_millis(2500));
+        if !std::path::Path::new(path).exists() {
+            continue;
+        }
+        let _ = std::process::Command::new(path).spawn();
+        // 最多等 6 秒（0.5s × 12）：窗口一出现立即返回，不必等满
+        for _ in 0..12 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
             if let Ok(out) = ps(probe) {
                 let t = out.trim();
-                if !t.is_empty() {
-                    if let Ok(h) = t.parse::<i64>() {
-                        return Ok(h);
-                    }
+                if let Ok(h) = t.parse::<i64>() {
+                    return Ok(h);
                 }
             }
-            break;
         }
     }
-    Err("未找到播放器：请先打开 PotPlayer 或 VLC（双屏铺满依赖播放器窗口）".to_string())
+    Err("未找到播放器：请先手动打开 PotPlayer 或 VLC（双屏铺满依赖播放器窗口）".to_string())
 }
 
 /// 双屏铺满：播放器窗口拉伸到所有屏幕的包围盒

@@ -20,6 +20,26 @@ function invoke(cmd, args = {}) {
   return Promise.reject(new Error('TAURI_CORE_UNAVAILABLE'));
 }
 
+// DDC 写入串行化 + 合并最新值：拖动滑块时最多只有 1 个后台进程在跑，
+// 中间值被覆盖、最终值保证送达（此前每格都新起 powershell 进程，拖动即卡死）
+const vpState = new Map();
+function sendVCP(kind, id, val) {
+  const key = kind + ':' + id;
+  let st = vpState.get(key);
+  if (!st) { st = { latest: null, busy: false }; vpState.set(key, st); }
+  st.latest = val;
+  if (st.busy) return;
+  st.busy = true;
+  (async () => {
+    while (st.latest !== null) {
+      const v = st.latest; st.latest = null;
+      const cmd = kind === 'brightness' ? 'set_brightness' : 'set_volume';
+      try { await invoke(cmd, { displayId: id, value: Number(v) }); } catch (e) { /* 忽略瞬时失败 */ }
+    }
+    st.busy = false;
+  })();
+}
+
 async function refreshDisplays() {
   try {
     setStatus('读取显示器…');
@@ -35,7 +55,7 @@ async function refreshDisplays() {
 function renderDisplays(displays) {
   const box = document.getElementById('displays');
   if (!displays || displays.length === 0) {
-    box.innerHTML = '<div class="empty">未检测到显示器：请确认已安装并运行 displayplacer 与 BetterDisplay</div>';
+    box.innerHTML = '<div class="empty">未检测到显示器：请确认显示器已连接，并检查依赖是否就绪</div>';
     return;
   }
   box.innerHTML = ''; // 清空 + 重建（保留简洁结构）
@@ -75,18 +95,12 @@ function renderDisplays(displays) {
 
   // 绑定滑块
   box.querySelectorAll('input[type=range]').forEach(sl => {
-    sl.addEventListener('input', async (ev) => {
+    sl.addEventListener('input', (ev) => {
       const valEl = ev.target.parentElement.querySelector('.val');
       if (valEl) valEl.textContent = ev.target.value;
       const kind = ev.target.dataset.kind;
-      const dispId = ev.target.dataset.display;
-      try {
-        if (kind === 'brightness') await invoke('set_brightness', { displayId: dispId, value: Number(ev.target.value) });
-        else await invoke('set_volume', { displayId: dispId, value: Number(ev.target.value) });
-        setStatus(`${kind === 'brightness' ? '亮度' : '音量'} → ${ev.target.value}`);
-      } catch (e) {
-        setStatus('控制失败：' + e.message, false);
-      }
+      sendVCP(kind, ev.target.dataset.display, ev.target.value);
+      setStatus(`${kind === 'brightness' ? '亮度' : '音量'} → ${ev.target.value}`);
     });
   });
 }
@@ -110,7 +124,7 @@ document.getElementById('match-mac').onclick = () => run('match_mac', {}, '已�
 document.getElementById('match-ppi').onclick = () => run('match_ppi', {}, '已匹配 PPI（窗口跨屏不再变小）');
 document.getElementById('rotate-secondary').onclick = () => run('rotate_secondary', {}, '已切换副屏横竖屏');
 document.getElementById('restore-secondary').onclick = () => run('restore_secondary', {}, '已恢复副屏为竖屏');
-document.getElementById('span-video').onclick = () => run('span_video', {}, '正在用 VLC 铺满双屏…');
+document.getElementById('span-video').onclick = () => run('span_video', {}, '正在铺满双屏…');
 document.getElementById('restore-video').onclick = () => run('restore_video', {}, '已恢复播放器窗口');
 document.getElementById('refresh-btn').onclick = () => refreshDisplays();
 

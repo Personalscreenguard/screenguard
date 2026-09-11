@@ -47,30 +47,36 @@ pub fn get_displays() -> Vec<DisplayInfo> {
     let mut result = Vec::new();
     if let Ok(raw) = run_cmd("xrandr", &["--query"]) {
         for line in raw.lines() {
-            let t = line.trim();
-            if t.starts_with("connected") {
-                // eDP-1 connected 2560x1440+0+0 (main) ...
-                let parts: Vec<&str> = t.split_whitespace().collect();
-                let id = parts[0].to_string();
-                let main = t.contains("primary");
-                let res = parts
-                    .get(2)
-                    .map(|s| s.split('+').next().unwrap_or("").to_string())
-                    .unwrap_or_default();
-                result.push(DisplayInfo {
-                    id,
-                    name: format!("显示器 {}", result.len() + 1),
-                    resolution: res,
-                    hz: None,
-                    main,
-                    connected: true,
-                    ddc: which("ddcutil"),
-                    brightness: None,
-                    volume: None,
-                    color_profile: None,
-                    ddc_id: None,
-                });
+            // 实际输出形如：eDP-1 connected primary 2560x1440+0+0 (normal ...) 344mm x 194mm
+            // 行首是接口名，所以必须按第二个字段判断 connected
+            //（此前写成 line.trim().starts_with("connected")，永远不成立 → 检测不到任何显示器）
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 3 || parts[1] != "connected" {
+                continue;
             }
+            let id = parts[0].to_string();
+            let main = parts.iter().any(|p| *p == "primary");
+            // 分辨率字段是唯一同时含 'x' 与 '+' 的（如 2560x1440+0+0），
+            // 借此避开 "primary" 以及尺寸串 "344mm x 194mm" 的干扰
+            let res = parts
+                .iter()
+                .find(|p| p.contains('x') && p.contains('+'))
+                .and_then(|s| s.split('+').next())
+                .unwrap_or("")
+                .to_string();
+            result.push(DisplayInfo {
+                id,
+                name: format!("显示器 {}", result.len() + 1),
+                resolution: res,
+                hz: None,
+                main,
+                connected: true,
+                ddc: which("ddcutil"),
+                brightness: None,
+                volume: None,
+                color_profile: None,
+                ddc_id: None,
+            });
         }
     }
     result

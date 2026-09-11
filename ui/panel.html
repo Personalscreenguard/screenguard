@@ -91,6 +91,26 @@
 function invoke(cmd, args={}){ if(window.__TAURI__&&window.__TAURI__.core) return window.__TAURI__.core.invoke(cmd,args); return Promise.reject(new Error('NO_TAURI')); }
 function flash(el){ el.classList.add('active'); setTimeout(()=>el.classList.remove('active'),300); }
 
+// DDC 写入串行化 + 合并最新值：拖动滑块时最多只有 1 个后台进程在跑，
+// 中间值被覆盖、最终值保证送达（此前每格都新起 powershell 进程，拖动即卡死）
+const vpState = new Map();
+function sendVCP(kind, id, val){
+  const key = kind + ':' + id;
+  let st = vpState.get(key);
+  if (!st) { st = { latest: null, busy: false }; vpState.set(key, st); }
+  st.latest = val;
+  if (st.busy) return;
+  st.busy = true;
+  (async () => {
+    while (st.latest !== null) {
+      const v = st.latest; st.latest = null;
+      const cmd = kind === 'brightness' ? 'set_brightness' : 'set_volume';
+      try { await invoke(cmd, { displayId: id, value: Number(v) }); } catch (e) {}
+    }
+    st.busy = false;
+  })();
+}
+
 async function load(){
   const box = document.getElementById('scroll');
   try {
@@ -109,9 +129,9 @@ async function load(){
         </div>` : '<div class="grp-body"><div class="hint">此显示器不支持 DDC/CI，请用硬件按钮调节</div></div>'}
       </div>`).join('');
     box.querySelectorAll('input[type=range]').forEach(sl=>{
-      sl.addEventListener('input', async ev=>{ const v=ev.target.value,k=sl.dataset.k; sl.parentElement.querySelector('.val').textContent=v+'%'; try{ k==='brightness'?await invoke('set_brightness',{displayId:sl.dataset.id,value:+v}):await invoke('set_volume',{displayId:sl.dataset.id,value:+v}); }catch(e){ sl.parentElement.querySelector('.val').textContent='!'; } });
+      sl.addEventListener('input', ev=>{ const v=ev.target.value; sl.parentElement.querySelector('.val').textContent=v+'%'; sendVCP(sl.dataset.k, sl.dataset.id, v); });
     });
-  } catch(e){ box.innerHTML='<div class="empty">无法读取显示器：请确认 displayplacer 与 BetterDisplay 已安装并运行</div>'; }
+  } catch(e){ box.innerHTML='<div class="empty">无法读取显示器：请确认显示器已连接，并检查依赖是否就绪</div>'; }
 }
 
 document.getElementById('quick').querySelectorAll('.cell').forEach(c=>{
@@ -152,10 +172,11 @@ autostartBtn.onclick = async ()=>{
     setTimeout(()=>{ refreshAutostart(); autostartBtn.style.color=''; }, 900);
   }
 };
-try {
-  const v = await invoke('get_version');
-  document.getElementById('pver').textContent = 'v'+v;
-} catch(e){ /* 预览模式静默 */ }
+// 注意：这是经典脚本(type 未标 module)，不能用顶层 await——否则整段脚本语法报错、
+// 面板全部功能失效（刷新/自启/快捷操作/滑块都点不动）。
+invoke('get_version')
+  .then(v => { document.getElementById('pver').textContent = 'v' + v; })
+  .catch(() => { /* 预览模式静默 */ });
 load();
 refreshAutostart();
 </script>

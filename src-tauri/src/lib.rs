@@ -108,8 +108,9 @@ pub fn run() {
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
             use tauri::Manager;
 
-            // 单实例自检：若已有另一实例在跑（例如 launchd bootstrap 新拉起的），本实例直接退出，防双托盘
-            #[cfg(target_os = "macos")]
+            // 单实例自检：若已有更早启动的实例在跑，本实例直接退出，防双托盘
+            // （macOS 用于避免 launchd bootstrap 双开；Windows 用于避免双击图标开出多个托盘）
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             if platform::another_instance_running() {
                 std::process::exit(0);
             }
