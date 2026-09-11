@@ -107,6 +107,32 @@ public struct SGMONITORINFO {
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
 public struct SGPHYS_MON { public IntPtr h; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string name; }
 
+// ---------- DisplayConfig（CCD）路径查询：GDI 设备名 → 显示器友好名 ----------
+// Win11 24H2 实测：EnumDisplayDevicesW 的监视器枚举与 WMI 监视器类可能整体失效，
+// DisplayConfig 是与驱动栈状态无关的权威来源。结构布局已对照本机 SDK wingdi.h 核实：
+//   SOURCE_INFO=20(无 reserved！) TARGET_INFO=48 PATH_INFO=72
+//   SOURCE_NAME=84(头20+WCHAR[32]) TARGET_NAME=420(头20+flags4+outputTechnology4
+//   +edidManufactureId2+edidProductCodeId2+connectorInstance4+名WCHAR[64]+路径WCHAR[128])
+// 路径数组按偏移直读（每条 72 字节）：
+//   +0 源adapterId.Lo +4 源adapterId.Hi +8 源id +20 目标adapterId.Lo +24 目标adapterId.Hi
+//   +28 目标id +68 flags(1=ACTIVE)
+[StructLayout(LayoutKind.Sequential)]
+public struct SGLUID { public uint LowPart; public int HighPart; }
+
+[StructLayout(LayoutKind.Sequential)]
+public struct SGDC_HEADER { public uint type; public uint size; public SGLUID adapterId; public uint id; }
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+public struct SGDC_SRC_NAME { public SGDC_HEADER header; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string viewGdiDeviceName; }
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+public struct SGDC_DST_NAME {
+  public SGDC_HEADER header; public uint flags; public uint outputTechnology;
+  public ushort edidManufactureId; public ushort edidProductCodeId; public uint connectorInstance;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string monitorFriendlyDeviceName;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string monitorDevicePath;
+}
+
 public class SGCore {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplayDevicesW(string dev, uint i, ref SGDISPLAY_DEVICE d, uint f);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplaySettingsW(string dev, int mode, IntPtr dm);
@@ -141,6 +167,14 @@ public class SGCore {
   [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern bool GetICMProfileW(IntPtr hdc, ref uint size, StringBuilder name);
   [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern bool SetICMProfileW(IntPtr hdc, string file);
   [DllImport("mscms.dll", CharSet = CharSet.Unicode)] static extern bool InstallColorProfileW(IntPtr h, string prof);
+
+  // DisplayConfig（CCD）：活动路径与设备名查询（与 PnP/WMI 监视器状态无关）。
+  // 路径/模式数组必须走原始指针：实测 .NET 结构体数组经 marshaller 进出后数据全零
+  // （与 dxva2 GetPhysicalMonitorsFromHMONITOR 必须 [Out] 是同一类坑，这里干脆绕开 marshaller）
+  [DllImport("user32.dll")] static extern int GetDisplayConfigBufferSizes(uint flags, out uint nPaths, out uint nModes);
+  [DllImport("user32.dll", EntryPoint = "QueryDisplayConfig")] static extern int QueryDisplayConfigRaw(uint flags, ref uint nPaths, IntPtr paths, ref uint nModes, IntPtr modes, IntPtr topo);
+  [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref SGDC_SRC_NAME pkt);
+  [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref SGDC_DST_NAME pkt);
 
   const int GWL_STYLE = -16;
   const uint WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_POPUP = 0x80000000;
@@ -202,6 +236,43 @@ public class SGCore {
       return true;
     }, IntPtr.Zero);
     return sb.ToString();
+  }
+
+  /// 活动显示路径映射：GDI 设备名(\\.\DISPLAYn) → 显示器友好名。
+  /// 行: M|<dev>|<name>。失败/无路径返回空串（调用方回退 WMI → 默认命名）。
+  public static string DisplayNameMap() {
+    uint nPaths, nModes;
+    // 注意：QDC_ONLY_ACTIVE_PATHS=2（QDC_ALL_PATHS 才是 1）——拿全部路径会得到几十条
+    // 非活动路径，其源设备名是 WinDisc 占位、目标名查询直接报 87
+    if (GetDisplayConfigBufferSizes(2 /*QDC_ONLY_ACTIVE_PATHS*/, out nPaths, out nModes) != 0 || nPaths == 0) return "";
+    IntPtr pa = Marshal.AllocHGlobal((int)(nPaths * 72));
+    IntPtr ma = Marshal.AllocHGlobal((int)(nModes * 64));
+    try {
+      uint p = nPaths, m = nModes;
+      if (QueryDisplayConfigRaw(2, ref p, pa, ref m, ma, IntPtr.Zero) != 0) return "";
+      var sb = new StringBuilder();
+      var seen = new System.Collections.Generic.HashSet<string>();
+      for (int i = 0; i < p; i++) {
+        int off = i * 72;
+        var src = new SGDC_SRC_NAME();
+        src.header.type = 1; src.header.size = (uint)Marshal.SizeOf(typeof(SGDC_SRC_NAME)); // GET_SOURCE_NAME
+        src.header.adapterId.LowPart = (uint)Marshal.ReadInt32(pa, off);
+        src.header.adapterId.HighPart = Marshal.ReadInt32(pa, off + 4);
+        src.header.id = (uint)Marshal.ReadInt32(pa, off + 8);
+        if (DisplayConfigGetDeviceInfo(ref src) != 0) continue;
+        var dst = new SGDC_DST_NAME();
+        dst.header.type = 2; dst.header.size = (uint)Marshal.SizeOf(typeof(SGDC_DST_NAME)); // GET_TARGET_NAME
+        dst.header.adapterId.LowPart = (uint)Marshal.ReadInt32(pa, off + 20);
+        dst.header.adapterId.HighPart = Marshal.ReadInt32(pa, off + 24);
+        dst.header.id = (uint)Marshal.ReadInt32(pa, off + 28);
+        if (DisplayConfigGetDeviceInfo(ref dst) != 0) continue;
+        string dev = src.viewGdiDeviceName, nm = dst.monitorFriendlyDeviceName;
+        if (string.IsNullOrEmpty(dev) || string.IsNullOrEmpty(nm)) continue;
+        if (!seen.Add(dev.ToUpperInvariant())) continue;
+        sb.Append("M|").Append(dev).Append("|").Append(nm).Append("\n");
+      }
+      return sb.ToString();
+    } finally { Marshal.FreeHGlobal(pa); Marshal.FreeHGlobal(ma); }
   }
 
   /// 对指定显示设备执行 DDC/CI（VCP 读或写），返回是否命中；retries 为最大重试次数
@@ -438,11 +509,12 @@ fn resolve_dev(uid: &str) -> Result<String, String> {
 // ---------- 显示器列表 ----------
 pub fn get_displays() -> Vec<DisplayInfo> {
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays() -split ([char]10);\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($_.Active -and $nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ $pr = [SGCore]::DDCProbe($dev); $b = ''; $v = ''; if ($pr -eq '1') {{ $b = [SGCore]::DDCRead($dev, [byte]0x10); $v = [SGCore]::DDCRead($dev, [byte]0x62) }}; Write-Output ('P|' + $dev + '|' + $pr + '|' + $b + '|' + $v); Write-Output ('C|' + $dev + '|' + [SGCore]::IccGet($dev)) }}",
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays() -split ([char]10);\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\n[SGCore]::DisplayNameMap();\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($_.Active -and $nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ $pr = [SGCore]::DDCProbe($dev); $b = ''; $v = ''; if ($pr -eq '1') {{ $b = [SGCore]::DDCRead($dev, [byte]0x10); $v = [SGCore]::DDCRead($dev, [byte]0x62) }}; Write-Output ('P|' + $dev + '|' + $pr + '|' + $b + '|' + $v); Write-Output ('C|' + $dev + '|' + [SGCore]::IccGet($dev)) }}",
         cs = CORE_CS
     );
     let raw = ps(&script).unwrap_or_default();
     let mut rows: Vec<(String, String, u32, u32, u32, bool, u32)> = Vec::new(); // dev,uid,w,h,hz,main,ori
+    let mut dc_names: HashMap<String, String> = HashMap::new(); // DisplayConfig: dev(小写) → 友好名
     let mut names: HashMap<String, String> = HashMap::new();
     let mut ddc: HashMap<String, bool> = HashMap::new();
     let mut bri: HashMap<String, u32> = HashMap::new();
@@ -464,6 +536,10 @@ pub fn get_displays() -> Vec<DisplayInfo> {
             }
             "N" if p.len() >= 3 => {
                 names.insert(short_id(p[1]), p[2].to_string());
+            }
+            // M|\\.\DISPLAYn|<友好名> —— DisplayConfig 权威映射（与驱动栈状态无关）
+            "M" if p.len() >= 3 => {
+                dc_names.insert(p[1].trim().to_lowercase(), p[2].to_string());
             }
             "P" if p.len() >= 3 => {
                 let has = p[2].trim() == "1";
@@ -501,31 +577,37 @@ pub fn get_displays() -> Vec<DisplayInfo> {
             *dev_cache().lock().unwrap() = Some(map);
         }
     }
-    // 名字匹配：
-    //  ① uid 为真实 MONITOR 路径 / WMI 实例时，按「第二段（厂商+型号）」对齐（原有逻辑）
-    //  ② Win11 24H2 起 uid 回退为 dev 名（无型号段）→ 走 1↔1 兜底：WMI 活动监视器与
-    //     活跃显示行本就一一对应，段匹配用掉的名字之外的「唯一剩余名字」可安全配给
-    //     「唯一剩余行」；两侧都不唯一时不猜，回退默认命名
-    let mut matched: Vec<Option<String>> = rows
-        .iter()
-        .map(|(_, uid, _, _, _, _, _)| {
+    // 名字匹配（优先级从高到低）：
+    //  ① DisplayConfig 权威映射（GDI 设备名 → 友好名）：与 PnP/WMI 监视器状态无关，
+    //     Win11 24H2 上那两者失效时它是唯一可靠来源
+    //  ② uid 第二段（厂商+型号）对齐 WMI 名字（原有逻辑）
+    //  ③ 1↔1 兜底：仅当 ② 恰好用掉 N-1 个名字且恰剩一行未配时才猜（两侧都不唯一时不猜）
+    let mut matched: Vec<Option<String>> = Vec::with_capacity(rows.len());
+    let mut seg_used = 0usize;
+    for (dev, uid, _, _, _, _, _) in rows.iter() {
+        let mut name = dc_names
+            .get(&dev.to_lowercase())
+            .cloned()
+            .filter(|n| !n.is_empty());
+        if name.is_none() {
             let key = short_id(uid);
-            if key.is_empty() {
-                None
-            } else {
-                names.get(&key).cloned().filter(|n| !n.is_empty())
+            if !key.is_empty() {
+                name = names.get(&key).cloned().filter(|n| !n.is_empty());
+                if name.is_some() {
+                    seg_used += 1;
+                }
             }
-        })
-        .collect();
+        }
+        matched.push(name);
+    }
     {
-        let used = matched.iter().filter(|m| m.is_some()).count();
         let unmatched: Vec<usize> = matched
             .iter()
             .enumerate()
             .filter(|(_, m)| m.is_none())
             .map(|(i, _)| i)
             .collect();
-        if unmatched.len() == 1 && names.len() == used + 1 {
+        if unmatched.len() == 1 && names.len() == seg_used + 1 {
             if let Some(n) = names.values().next() {
                 matched[unmatched[0]] = Some(n.clone());
             }

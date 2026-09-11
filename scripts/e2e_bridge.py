@@ -68,6 +68,8 @@ foreach ($l in $lines) {
   if ($p.Count -ge 8 -and $p[0] -eq 'D') { $devs += $p[1] }
 }
 Write-Output ("DEVCOUNT|" + $devs.Count)
+Write-Output "NAMEMAP-START";
+[SGCore]::DisplayNameMap() -split ([char]10) | ForEach-Object { if ($_.Trim()) { Write-Output ("MAP|" + $_) } }
 foreach ($d in $devs) { Write-Output ("ICC|" + $d + "|" + [SGCore]::IccGet($d)) }
 Write-Output ("INSTALL|" + [SGCore]::IccInstall('PROFILE_PLACEHOLDER'))
 """
@@ -118,6 +120,7 @@ foreach ($d in $devs) {
         sys.exit(1)
     print("✅ 桥接调用成功。判读要点：")
     print("   * RAW| 行的 uid 形如 MONITOR\\XMI27B3\\{4d36e96e-...}\\0007 → 结构体布局正确")
+    print("   * MAP| 行应形如 M|\\\\.\\DISPLAY1|<友好名> → DisplayConfig 映射正常（24H2 上名字的权威来源）")
     print("   * ICC| 行应为 OK:C:\\WINDOWS\\...\\sRGB Color Space Profile.icm")
     print("   * SET_SAME| 行应为 OK（关联同一配置，幂等；ERR 说明回读校验判定未生效）")
     if not write_mode:
