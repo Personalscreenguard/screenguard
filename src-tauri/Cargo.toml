@@ -1,6 +1,6 @@
 [package]
 name = "screenguard"
-version = "0.2.7"
+version = "0.2.8"
 description = "跨平台显示器控制与色彩/多屏助手"
 authors = ["陆冠霖"]
 license = "MIT"

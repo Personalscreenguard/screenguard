@@ -276,43 +276,56 @@ public class SGCore {
   }
 
   /// 对指定显示设备执行 DDC/CI（VCP 读或写），返回是否命中；retries 为最大重试次数
+  /// 加固（v0.2.8）：① 整体 try/catch——显卡驱动崩溃/TDR 期间 dxva2 调用可能抛异常或返回无效句柄，
+  ///   此前无保护会让异常沿 EnumDisplayMonitors 回调冒泡、甚至崩掉承载的 PowerShell 进程；
+  ///   ② DestroyPhysicalMonitors 放进 finally——确保任何路径都释放物理显示器句柄，防泄漏；
+  ///   ③ 单次失败不再盲目 sleep 重试——驱动复位循环里 DDC 反复超时是加剧 TDR 的元凶，快速失败更安全。
   static bool TryVCP(string dev, byte code, bool write, uint val, int retries, out uint cur) {
     cur = 0;
     var curBox = new uint[1];
     var anyBox = new bool[1];
-    EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (h, hdc, rc, lp) => {
-      var mi = new SGMONITORINFO();
-      mi.cb = Marshal.SizeOf(typeof(SGMONITORINFO));
-      if (GetMonitorInfo(h, ref mi) && mi.szDevice.Equals(dev, StringComparison.OrdinalIgnoreCase)) {
+    try {
+      EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (h, hdc, rc, lp) => {
+        var mi = new SGMONITORINFO();
+        mi.cb = Marshal.SizeOf(typeof(SGMONITORINFO));
+        if (!GetMonitorInfo(h, ref mi)) return true;
+        if (!mi.szDevice.Equals(dev, StringComparison.OrdinalIgnoreCase)) return true;
         uint n;
-        if (GetNumberOfPhysicalMonitorsFromHMONITOR(h, out n) && n > 0) {
-          var arr = new SGPHYS_MON[n];
-          if (GetPhysicalMonitorsFromHMONITOR(h, n, arr)) {
-            foreach (var pm in arr) {
-              if (write) {
-                // DDC 写入偶发失败，重试
-                for (int t = 0; t < retries && !anyBox[0]; t++) {
-                  if (SetVCPFeature(pm.h, code, val)) anyBox[0] = true;
-                  else System.Threading.Thread.Sleep(120);
-                }
-              } else {
-                // 显示器 DDC 响应慢：单次读取常失败，必须重试
-                // 注意：变量不能叫 cur/max——与外层参数 out cur 同名的局部变量会 C# 编译失败
-                uint curVal = 0, maxVal = 0;
-                bool ok = false;
-                for (int t = 0; t < retries && !ok; t++) {
-                  ok = GetVCPFeatureAndVCPFeatureReply(pm.h, code, IntPtr.Zero, ref curVal, ref maxVal);
-                  if (!ok) System.Threading.Thread.Sleep(120);
-                }
-                if (ok) { curBox[0] = curVal; anyBox[0] = true; }
+        if (!GetNumberOfPhysicalMonitorsFromHMONITOR(h, out n) || n == 0) return true;
+        var arr = new SGPHYS_MON[n];
+        if (!GetPhysicalMonitorsFromHMONITOR(h, n, arr)) return true;
+        try {
+          foreach (var pm in arr) {
+            if (pm.h == IntPtr.Zero) continue;
+            if (write) {
+              // DDC 写入偶发失败，重试；一旦成功即止
+              for (int t = 0; t < retries && !anyBox[0]; t++) {
+                if (SetVCPFeature(pm.h, code, val)) anyBox[0] = true;
+                else if (t + 1 < retries) System.Threading.Thread.Sleep(80);
               }
+            } else {
+              // 显示器 DDC 响应慢：单次读取常失败，必须重试
+              // 注意：变量不能叫 cur/max——与外层参数 out cur 同名的局部变量会 C# 编译失败
+              uint curVal = 0, maxVal = 0;
+              bool ok = false;
+              for (int t = 0; t < retries && !ok; t++) {
+                ok = GetVCPFeatureAndVCPFeatureReply(pm.h, code, IntPtr.Zero, ref curVal, ref maxVal);
+                if (!ok && t + 1 < retries) System.Threading.Thread.Sleep(80);
+              }
+              if (ok) { curBox[0] = curVal; anyBox[0] = true; }
             }
-            DestroyPhysicalMonitors(n, arr);
           }
+        } finally {
+          // 无论读写成败都释放句柄，避免物理显示器句柄泄漏（泄漏会在热插拔/驱动复位后累积）
+          try { DestroyPhysicalMonitors(n, arr); } catch { }
         }
-      }
-      return true;
-    }, IntPtr.Zero);
+        return true;
+      }, IntPtr.Zero);
+    } catch {
+      // 驱动栈异常（如 nvlddmkm TDR 崩溃循环、显示器刚被热插拔）时静默快速失败，
+      // 不再让异常向上冒泡。返回 false 让上层按“DDC 不可用”走 WMI/提示兜底。
+      return false;
+    }
     cur = curBox[0];
     return anyBox[0];
   }
