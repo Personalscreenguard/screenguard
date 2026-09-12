@@ -37,6 +37,23 @@
       </div>
     </section>
 
+    <!-- ===== 系统音量 ===== -->
+    <section class="card" id="audio-card" style="display:none">
+      <div class="card-head">
+        <h2>🔊 系统音量</h2>
+        <span class="hint" id="audio-dev">读取中…</span>
+      </div>
+      <div class="slider-row">
+        <label>音量</label>
+        <input type="range" min="0" max="100" value="0" id="sys-vol" disabled>
+        <span class="val" id="sys-vol-val">-</span>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" id="mute-btn">🔇 静音</button>
+      </div>
+      <div class="hint" id="audio-hint">控制当前默认输出设备（与托盘音量同源：笔记本喇叭 / 耳机 / HDMI 音频都走这里）</div>
+    </section>
+
     <!-- ===== 色彩 & 校准 ===== -->
     <section class="card">
       <div class="card-head">

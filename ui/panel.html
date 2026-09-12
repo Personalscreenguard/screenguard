@@ -66,6 +66,16 @@
     <div class="btns"><button class="ibtn" id="hide-btn" title="隐藏面板（Esc）">✕</button><button class="ibtn" id="main-btn">主窗口</button><button class="ibtn" id="quit-btn">退出</button></div>
   </div>
 
+  <div class="sec-label" id="audio-sec" style="display:none">系统音量</div>
+  <div style="padding:0 8px">
+    <div class="grp open" id="audio-grp" style="display:none">
+      <div class="grp-body">
+        <div class="srow"><label>音量</label><input type="range" min="0" max="100" value="0" id="sys-vol" disabled><span class="val" id="sys-vol-val">-</span></div>
+        <div class="hint" id="audio-dev">读取中…</div>
+      </div>
+    </div>
+  </div>
+
   <div class="sec-label">显示器</div>
   <div class="scroll" id="scroll" style="flex:0 0 auto"><div class="empty">读取显示器…</div></div>
 
@@ -116,18 +126,22 @@ async function load(){
   try {
     const ds = await invoke('get_displays');
     if(!ds||!ds.length){ box.innerHTML='<div class="empty">未检测到显示器</div>'; return; }
-    box.innerHTML = ds.map(d=>`
-      <div class="grp open">
-        <div class="grp-h">
-          <div><div class="grp-title">${d.name||d.id}</div><div class="grp-meta">${d.resolution||''}${d.hz?' · '+d.hz+'Hz':''}${d.main?' · 主屏':''}${d.color_profile?' · '+d.color_profile:''}</div></div>
-          <div class="grp-right">${d.ddc?'<span class="badge">DDC</span>':'<span class="badge" style="background:rgba(255,160,80,.12);color:#e8a75c;border-color:rgba(255,160,80,.3)">无DDC</span>'}</div>
-        </div>
-        ${d.ddc ? `
-        <div class="grp-body">
-          <div class="srow"><label>亮度</label><input type="range" min="0" max="100" value="${d.brightness??50}" data-id="${d.id}" data-k="brightness"><span class="val">${d.brightness??50}%</span></div>
-          <div class="srow"><label>音量</label><input type="range" min="0" max="100" value="${d.volume??50}" data-id="${d.id}" data-k="volume"><span class="val">${d.volume??50}%</span></div>
-        </div>` : '<div class="grp-body"><div class="hint">此显示器不支持 DDC/CI，请用硬件按钮调节</div></div>'}
-      </div>`).join('');
+    box.innerHTML = ds.map(d=>{
+      const hasBri = d.ddc || d.brightness != null; // DDC 或 WMI（内屏）亮度
+      const badge = d.ddc ? '<span class="badge">DDC</span>' : (hasBri ? '<span class="badge">WMI</span>' : '<span class="badge" style="background:rgba(255,160,80,.12);color:#e8a75c;border-color:rgba(255,160,80,.3)">无DDC</span>');
+      const briRow = hasBri ? '<div class="srow"><label>亮度</label><input type="range" min="0" max="100" value="'+(d.brightness??50)+'" data-id="'+d.id+'" data-k="brightness"><span class="val">'+(d.brightness??50)+'%</span></div>' : '';
+      const volRow = d.ddc ? '<div class="srow"><label>音量</label><input type="range" min="0" max="100" value="'+(d.volume??50)+'" data-id="'+d.id+'" data-k="volume"><span class="val">'+(d.volume??50)+'%</span></div>' : '';
+      let hint = '';
+      if (hasBri && !d.ddc) hint = '<div class="hint">内屏：亮度走系统 WMI；喇叭/耳机音量用上方「系统音量」。</div>';
+      else if (!hasBri && !d.ddc) hint = '<div class="hint">此屏不支持 DDC/CI，请用硬件按键调节</div>';
+      return '<div class="grp open">'+
+        '<div class="grp-h">'+
+          '<div><div class="grp-title">'+(d.name||d.id)+'</div><div class="grp-meta">'+(d.resolution||'')+(d.hz?' · '+d.hz+'Hz':'')+(d.main?' · 主屏':'')+(d.color_profile?' · '+d.color_profile:'')+'</div></div>'+
+          '<div class="grp-right">'+badge+'</div>'+
+        '</div>'+
+        '<div class="grp-body">'+briRow+volRow+hint+'</div>'+
+      '</div>';
+    }).join('');
     box.querySelectorAll('input[type=range]').forEach(sl=>{
       sl.addEventListener('input', ev=>{ const v=ev.target.value; sl.parentElement.querySelector('.val').textContent=v+'%'; sendVCP(sl.dataset.k, sl.dataset.id, v); });
     });
@@ -177,6 +191,41 @@ autostartBtn.onclick = async ()=>{
 };
 // 注意：这是经典脚本(type 未标 module)，不能用顶层 await——否则整段脚本语法报错、
 // 面板全部功能失效（刷新/自启/快捷操作/滑块都点不动）。
+// 系统音量（Windows 才显示）：拖动串行化，与主窗口同一策略
+const sysVol = { latest: null, busy: false };
+function sendSysVol(val){
+  sysVol.latest = val;
+  if (sysVol.busy) return;
+  sysVol.busy = true;
+  (async () => {
+    while (sysVol.latest !== null) {
+      const v = sysVol.latest; sysVol.latest = null;
+      try { await invoke('set_system_volume', { value: Number(v) }); } catch(e){}
+    }
+    sysVol.busy = false;
+  })();
+}
+async function loadAudio(){
+  try {
+    const p = await invoke('get_platform');
+    if (p !== 'windows') return;
+    const a = await invoke('get_system_audio');
+    document.getElementById('audio-sec').style.display = '';
+    document.getElementById('audio-grp').style.display = '';
+    const sl = document.getElementById('sys-vol');
+    sl.disabled = !a.adjustable;
+    sl.value = a.volume;
+    document.getElementById('sys-vol-val').textContent = a.volume + '%';
+    let txt = a.name || '默认输出设备';
+    if (!a.adjustable) txt += '｜固定音量端点：显示器喇叭请用对应屏的 DDC 音量滑块';
+    document.getElementById('audio-dev').textContent = txt;
+    sl.addEventListener('input', ev=>{
+      document.getElementById('sys-vol-val').textContent = ev.target.value + '%';
+      sendSysVol(ev.target.value);
+    });
+  } catch(e){ /* 预览模式静默 */ }
+}
+
 invoke('get_version')
   .then(v => { document.getElementById('pver').textContent = 'v' + v; })
   .catch(() => { /* 预览模式静默 */ });
@@ -200,6 +249,7 @@ invoke('get_platform').then(p=>{
   }
 }).catch(()=>{ /* 预览模式静默 */ });
 load();
+loadAudio();
 refreshAutostart();
 </script>
 </body>

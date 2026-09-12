@@ -41,6 +41,24 @@ fn set_volume(display_id: String, value: u32) -> Result<(), String> {
     platform::set_volume(&display_id, value)
 }
 
+/// 系统默认输出设备信息（名称 / 音量 / 静音 / 是否可调 / 形态因子）
+#[tauri::command]
+fn get_system_audio() -> Result<platform::SystemAudio, String> {
+    platform::get_system_audio()
+}
+
+/// 设置系统默认输出设备音量 0-100（托盘滑块同源；笔记本喇叭/耳机/HDMI 音频都走这里）
+#[tauri::command]
+fn set_system_volume(value: u32) -> Result<(), String> {
+    platform::set_system_volume(value)
+}
+
+/// 系统静音开关
+#[tauri::command]
+fn set_system_mute(on: bool) -> Result<(), String> {
+    platform::set_system_mute(on)
+}
+
 #[tauri::command]
 fn apply_color_space(space: String) -> Result<(), String> {
     platform::apply_color_space(&space)
@@ -188,6 +206,9 @@ pub fn run() {
             get_displays,
             set_brightness,
             set_volume,
+            get_system_audio,
+            set_system_volume,
+            set_system_mute,
             apply_color_space,
             match_mac,
             match_ppi,

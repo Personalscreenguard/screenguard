@@ -3,6 +3,7 @@
 //! C# 代码用单引号包裹传入 Add-Type（C# 内不含单引号字符）。
 
 use super::{run_cmd, DisplayInfo};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -459,6 +460,162 @@ public class SGCore {
     catch { return "ERR:InstallColorProfile 异常"; }
   }
 }
+
+// ---------------- 系统音频端点（CoreAudio COM） ----------------
+// 为什么只有 DDC 0x62 不够：0x62 只作用于「显示器内置喇叭」，笔记本内建喇叭 /
+// 耳机 / 蓝牙根本没有这条通路；而部分 HDMI/DP 显示器音频端点是固定音量，
+// Windows 系统滑块也调不动——所以补上「系统默认输出设备」的音量控制，两者互补。
+// 接口序与 CoreAudio 官方 vtable 严格一致；接口声明省略尾部方法不影响已声明方法。
+[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+public class SGMMEnumerator { }
+
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface SGIMMEnum {
+  int EnumAudioEndpoints(int flow, int mask, out SGIMMColl coll);
+  int GetDefaultAudioEndpoint(int flow, int role, out SGIMMDev dev);
+}
+
+[Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface SGIMMColl {
+  int GetCount(out int count);
+  int Item(int index, out SGIMMDev dev);
+}
+
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface SGIMMDev {
+  int Activate(ref Guid iid, uint clsCtx, IntPtr actParams, [MarshalAs(UnmanagedType.IUnknown)] out object iface);
+  int OpenPropertyStore(int stgm, out SGPropStore store);
+  int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
+  int GetState(out int state);
+}
+
+[Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface SGPropStore {
+  int GetCount(out int count);
+  int GetAt(int index, out SGPKEY key);
+  int GetValue(ref SGPKEY key, out SGPV value);
+}
+
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface SGEndVol {
+  int RegisterControlChangeNotify(IntPtr n);
+  int UnregisterControlChangeNotify(IntPtr n);
+  int GetChannelCount(out uint c);
+  int SetMasterVolumeLevel(float db, IntPtr ctx);
+  int SetMasterVolumeLevelScalar(float level, IntPtr ctx);
+  int GetMasterVolumeLevel(out float db);
+  int GetMasterVolumeLevelScalar(out float level);
+  int SetChannelVolumeLevel(uint ch, float db, IntPtr ctx);
+  int SetChannelVolumeLevelScalar(uint ch, float level, IntPtr ctx);
+  int GetChannelVolumeLevel(uint ch, out float db);
+  int GetChannelVolumeLevelScalar(uint ch, out float level);
+  // 注意：这里必须用 int（Win32 BOOL，4 字节）。COM 互操作里 bool 默认按
+  // VARIANT_BOOL（2 字节）编组，而 IAudioEndpointVolume 的静音参数是 BOOL——
+  // API 写 4 字节进 2 字节缓冲会破坏栈帧，下一句托管代码报 NullReferenceException
+  // （实测：AudioGet 因此全挂，AudioSet 因不调 GetMute 而幸存）。
+  int SetMute(int mute, IntPtr ctx);
+  int GetMute(out int mute);
+  int GetVolumeStepInfo(out uint step, out uint steps);
+  int VolumeStepUp(IntPtr ctx);
+  int VolumeStepDown(IntPtr ctx);
+  int QueryHardwareSupport(out uint mask);
+  int GetVolumeRange(out float minDb, out float maxDb, out float incDb);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct SGPKEY { public Guid fmtid; public uint pid; }
+
+// PROPVARIANT 只消费两种：VT_LPWSTR(31) 指针 / VT_UI4(19) 内联整数。
+// 关键坑：内联值放在 union 本体里，若把它当指针 Marshal.ReadInt32(v.p) =
+// 按值解引用 → 访问违例，进程直接崩（PS 的 try/catch 也拦不住）。
+// 必须用重叠字段原地读。
+[StructLayout(LayoutKind.Explicit)]
+public struct SGPV {
+  [FieldOffset(0)] public ushort vt;
+  [FieldOffset(8)] public IntPtr p;
+  [FieldOffset(8)] public int i32;
+}
+
+public class SGAudio {
+  static Guid IID_VOL = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
+
+  static string Esc(string s) {
+    if (s == null) return "";
+    return s.Replace("|", "/").Replace("\r", " ").Replace("\n", " ");
+  }
+
+  // 默认渲染端点（eRender + eMultimedia：媒体应用的默认输出，与系统托盘一致）
+  static SGIMMDev DefaultDev() {
+    var en = (SGIMMEnum)(object)new SGMMEnumerator();
+    SGIMMDev dev;
+    return en.GetDefaultAudioEndpoint(0, 1, out dev) == 0 ? dev : null;
+  }
+
+  static SGEndVol VolOf(SGIMMDev dev) {
+    object o;
+    if (dev.Activate(ref IID_VOL, 23, IntPtr.Zero, out o) != 0 || o == null) return null;
+    return (SGEndVol)o;
+  }
+
+  /// 默认输出端点信息：OK|名称|音量0-100|静音|硬件支持掩码|形态因子(9=HDMI/DP音频)
+  /// 全程分步防御：任何一步失败返回带步骤标记的 ERR，而不是笼统的 NRE
+  public static string AudioGet() {
+    try {
+      var en = (SGIMMEnum)(object)new SGMMEnumerator();
+      SGIMMDev dev;
+      int hr = en.GetDefaultAudioEndpoint(0, 1, out dev);
+      if (hr != 0 || dev == null) return "ERR:枚举默认设备失败 hr=" + hr;
+      string name = "", ff = "";
+      try {
+        SGPropStore store;
+        if (dev.OpenPropertyStore(0, out store) == 0 && store != null) {
+          SGPV v;
+          SGPKEY kn = new SGPKEY(); kn.fmtid = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"); kn.pid = 14;
+          if (store.GetValue(ref kn, out v) == 0 && v.vt == 31 && v.p != IntPtr.Zero) {
+            string s = Marshal.PtrToStringUni(v.p);
+            if (s != null) name = s;
+          }
+          SGPKEY kf = new SGPKEY(); kf.fmtid = new Guid("1da5d803-d492-4edd-8c23-e0c0ffee7f0e"); kf.pid = 0;
+          if (store.GetValue(ref kf, out v) == 0 && (v.vt == 19 || v.vt == 3)) ff = v.i32.ToString();
+        }
+      } catch (Exception) { name = name.Length > 0 ? name : "默认输出设备"; }
+      object o;
+      Guid iid = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
+      int ahr = dev.Activate(ref iid, 23, IntPtr.Zero, out o);
+      if (ahr != 0 || o == null) return "ERR:端点激活失败 hr=" + ahr;
+      SGEndVol vol = (SGEndVol)o;
+      float lvl; uint mask; int mute;
+      vol.GetMasterVolumeLevelScalar(out lvl);
+      vol.QueryHardwareSupport(out mask);
+      vol.GetMute(out mute);
+      return "OK|" + Esc(name) + "|" + Math.Round(lvl * 100) + "|" + (mute != 0 ? 1 : 0) + "|" + mask + "|" + ff;
+    } catch (Exception e) { return "ERR:" + Esc(e.Message); }
+  }
+
+  /// 设置系统音量 0-100（默认输出端点）
+  public static string AudioSet(uint v) {
+    try {
+      SGIMMDev dev = DefaultDev();
+      if (dev == null) return "ERR:没有默认输出设备";
+      SGEndVol vol = VolOf(dev);
+      if (vol == null) return "ERR:端点激活失败";
+      if (v > 100) v = 100;
+      return vol.SetMasterVolumeLevelScalar(v / 100f, IntPtr.Zero) == 0
+        ? "OK" : "ERR:设置失败（端点可能为固定音量，常见于部分 HDMI/DP 音频）";
+    } catch (Exception e) { return "ERR:" + Esc(e.Message); }
+  }
+
+  /// 系统静音开关：on 非 0 = 静音
+  public static string AudioMute(uint on) {
+    try {
+      SGIMMDev dev = DefaultDev();
+      if (dev == null) return "ERR:没有默认输出设备";
+      SGEndVol vol = VolOf(dev);
+      if (vol == null) return "ERR:端点激活失败";
+      return vol.SetMute(on != 0 ? 1 : 0, IntPtr.Zero) == 0 ? "OK" : "ERR:静音设置失败";
+    } catch (Exception e) { return "ERR:" + Esc(e.Message); }
+  }
+}
 "#;
 
 // ---------- uid -> devName 缓存（显示器重插后由 get_displays 刷新） ----------
@@ -509,7 +666,7 @@ fn resolve_dev(uid: &str) -> Result<String, String> {
 // ---------- 显示器列表 ----------
 pub fn get_displays() -> Vec<DisplayInfo> {
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays() -split ([char]10);\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\n[SGCore]::DisplayNameMap();\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($_.Active -and $nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ $pr = [SGCore]::DDCProbe($dev); $b = ''; $v = ''; if ($pr -eq '1') {{ $b = [SGCore]::DDCRead($dev, [byte]0x10); $v = [SGCore]::DDCRead($dev, [byte]0x62) }}; Write-Output ('P|' + $dev + '|' + $pr + '|' + $b + '|' + $v); Write-Output ('C|' + $dev + '|' + [SGCore]::IccGet($dev)) }}",
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays() -split ([char]10);\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\n[SGCore]::DisplayNameMap();\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($_.Active -and $nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ $pr = [SGCore]::DDCProbe($dev); $b = ''; $v = ''; if ($pr -eq '1') {{ $b = [SGCore]::DDCRead($dev, [byte]0x10); $v = [SGCore]::DDCRead($dev, [byte]0x62) }}; Write-Output ('P|' + $dev + '|' + $pr + '|' + $b + '|' + $v); Write-Output ('C|' + $dev + '|' + [SGCore]::IccGet($dev)) }};\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue | ForEach-Object {{ $sg = ($_.InstanceName -split '\\\\')[1]; if ($sg) {{ Write-Output ('W|' + $sg + '|' + $_.CurrentBrightness) }} }}",
         cs = CORE_CS
     );
     let raw = ps(&script).unwrap_or_default();
@@ -520,6 +677,8 @@ pub fn get_displays() -> Vec<DisplayInfo> {
     let mut bri: HashMap<String, u32> = HashMap::new();
     let mut vol: HashMap<String, u32> = HashMap::new();
     let mut icc: HashMap<String, String> = HashMap::new();
+    // WMI 亮度（笔记本内屏：无 DDC/CI，走 root\wmi 的 ACPI 亮度）键 = uid 第二段
+    let mut wmi_bri: HashMap<String, u32> = HashMap::new();
     for line in raw.lines() {
         let p: Vec<&str> = line.split('|').collect();
         if p.is_empty() {
@@ -562,6 +721,12 @@ pub fn get_displays() -> Vec<DisplayInfo> {
                             icc.insert(p[1].to_string(), base.to_string());
                         }
                     }
+                }
+            }
+            // W|<厂商型号段>|<当前亮度> —— WMI 内屏亮度（无 DDC 的显示器的回退来源）
+            "W" if p.len() >= 3 => {
+                if let Ok(v) = p[2].trim().parse::<u32>() {
+                    wmi_bri.insert(p[1].to_string(), v);
                 }
             }
             _ => {}
@@ -633,7 +798,7 @@ pub fn get_displays() -> Vec<DisplayInfo> {
             main,
             connected: true,
             ddc: ddc.get(&dev).copied().unwrap_or(false),
-            brightness: bri.get(&dev).copied(),
+            brightness: bri.get(&dev).copied().or_else(|| wmi_bri.get(&short_id(&uid)).copied()),
             volume: vol.get(&dev).copied(),
             color_profile: icc.get(&dev).cloned(),
             ddc_id: None,
@@ -670,7 +835,28 @@ fn vcp_op(display_id: &str, code: u8, value: Option<u32>) -> Result<(), String> 
 
 pub fn set_brightness(display_id: &str, value: u32) -> Result<(), String> {
     let v = value.clamp(0, 100);
-    vcp_op(display_id, 0x10, Some(v))
+    if vcp_op(display_id, 0x10, Some(v)).is_ok() {
+        return Ok(());
+    }
+    // DDC 失败的典型场景：笔记本内屏（eDP 面板根本没有 DDC/CI 通路）。
+    // 回退 WMI 亮度（ACPI _BCM，内屏的标准控制方式，与系统亮度滑块同源）。
+    let seg = short_id(display_id);
+    if !seg.is_empty() && seg.chars().all(|c| c.is_ascii_alphanumeric() || "_- &{}".contains(c)) {
+        let script = format!(
+            "$b = Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue | Where-Object {{ ($_.InstanceName -split '\\\\')[1] -eq '{seg}' }} | Select-Object -First 1; if ($b) {{ Invoke-CimMethod -InputObject $b -MethodName WmiSetBrightness -Arguments @{{Timeout=0; Brightness={v}}} | Out-Null; Write-Output OK }} else {{ Write-Output 'ERR:no-wmi-brightness' }}",
+            seg = seg,
+            v = v
+        );
+        let out = ps(&script)?;
+        if out.trim() == "OK" {
+            return Ok(());
+        }
+        return Err(format!(
+            "此屏不支持 DDC/CI 且 WMI 亮度不可用（{}）。外接屏请在显示器 OSD 菜单开启 DDC/CI；内屏亮度失败常见于驱动栈异常，可按 Win+Ctrl+Shift+B 重启图形驱动后重试",
+            out.trim().trim_start_matches("ERR:").trim()
+        ));
+    }
+    Err("该显示器不支持 DDC/CI".to_string())
 }
 
 pub fn set_volume(display_id: &str, value: u32) -> Result<(), String> {
@@ -678,6 +864,61 @@ pub fn set_volume(display_id: &str, value: u32) -> Result<(), String> {
     vcp_op(display_id, 0x62, Some(v))
 }
 
+// ---------- 系统音量（CoreAudio 默认输出端点） ----------
+
+/// 系统默认输出设备（eMultimedia 角色，与托盘音量一致）
+#[derive(Serialize, Clone, Debug)]
+pub struct SystemAudio {
+    /// 端点友好名（如「扬声器 (2- Realtek(R) Audio)」「NE160QDM-NZ8 (NVIDIA High Definition Audio)」）
+    pub name: String,
+    /// 当前音量 0-100
+    pub volume: u32,
+    /// 是否静音
+    pub mute: bool,
+    /// false = 固定音量端点：Windows 滑块也无效（部分 HDMI/DP 音频如此），
+    /// 此时显示器喇叭音量请用对应显示器的 DDC 0x62 滑块
+    pub adjustable: bool,
+    /// 端点形态因子（9 = DigitalAudioDisplayDevice，即 HDMI/DP 显示器音频）
+    pub form_factor: u32,
+}
+
+pub fn get_system_audio() -> Result<SystemAudio, String> {
+    let out = ps_core("[SGAudio]::AudioGet()")?;
+    let t = out.trim();
+    if let Some(rest) = t.strip_prefix("OK|") {
+        let p: Vec<&str> = rest.split('|').collect();
+        if p.len() >= 5 {
+            return Ok(SystemAudio {
+                name: p[0].to_string(),
+                volume: p[1].parse().unwrap_or(0),
+                mute: p[2] == "1",
+                adjustable: p[3].parse::<u32>().unwrap_or(0) & 1 != 0,
+                form_factor: p[4].parse().unwrap_or(0),
+            });
+        }
+    }
+    Err(t.strip_prefix("ERR:").unwrap_or(t).to_string())
+}
+
+pub fn set_system_volume(v: u32) -> Result<(), String> {
+    let out = ps_core(&format!("[SGAudio]::AudioSet([uint32]{})", v.clamp(0, 100)))?;
+    let t = out.trim();
+    if t == "OK" {
+        Ok(())
+    } else {
+        Err(t.strip_prefix("ERR:").unwrap_or(t).to_string())
+    }
+}
+
+pub fn set_system_mute(on: bool) -> Result<(), String> {
+    let out = ps_core(&format!("[SGAudio]::AudioMute([uint32]{})", if on { 1 } else { 0 }))?;
+    let t = out.trim();
+    if t == "OK" {
+        Ok(())
+    } else {
+        Err(t.strip_prefix("ERR:").unwrap_or(t).to_string())
+    }
+}
 // ---------- 色彩同步（ICC 关联） ----------
 //
 // 以下实现方式由本机（Win11 24H2 双屏、非管理员）实测确定：
