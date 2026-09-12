@@ -15,6 +15,13 @@ import subprocess
 import sys
 import tempfile
 
+# GitHub windows runner 的 stdout 默认 cp1252，直接 print 中文/✅ 会 UnicodeEncodeError
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 UI = os.path.join(ROOT, "ui")
 INLINE_RE = re.compile(r"<script(?P<attrs>[^>]*)>(?P<code>.*?)</script>", re.S)

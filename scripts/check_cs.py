@@ -6,6 +6,13 @@ import re
 import subprocess
 import sys
 
+# GitHub windows runner 的 stdout 默认 cp1252，直接 print 中文会 UnicodeEncodeError
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 RS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                    "..", "src-tauri", "src", "platform", "windows.rs"))
 
