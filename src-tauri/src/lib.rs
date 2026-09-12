@@ -59,6 +59,12 @@ fn set_system_mute(on: bool) -> Result<(), String> {
     platform::set_system_mute(on)
 }
 
+/// 电池设备列表（带电池的连接设备：笔记本内电池 / USB·无线键鼠 / 蓝牙）
+#[tauri::command]
+fn get_batteries() -> Result<Vec<platform::BatteryInfo>, String> {
+    platform::get_batteries()
+}
+
 #[tauri::command]
 fn apply_color_space(space: String) -> Result<(), String> {
     platform::apply_color_space(&space)
@@ -209,6 +215,7 @@ pub fn run() {
             get_system_audio,
             set_system_volume,
             set_system_mute,
+            get_batteries,
             apply_color_space,
             match_mac,
             match_ppi,

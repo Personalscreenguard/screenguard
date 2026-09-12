@@ -54,6 +54,18 @@
       <div class="hint" id="audio-hint">控制当前默认输出设备（与托盘音量同源：笔记本喇叭 / 耳机 / HDMI 音频都走这里）</div>
     </section>
 
+    <!-- ===== 电池设备 ===== -->
+    <section class="card" id="battery-card" style="display:none">
+      <div class="card-head">
+        <h2>🔋 电池设备</h2>
+        <button class="ghost" id="battery-refresh-btn" title="刷新电池列表">⟳ 刷新</button>
+      </div>
+      <div class="displays" id="batteries">
+        <div class="empty">正在读取带电池的设备…</div>
+      </div>
+      <div class="hint">覆盖笔记本内电池、USB / 2.4G 无线键鼠、蓝牙耳机等所有带电池的连接设备，显示电量与充电状态</div>
+    </section>
+
     <!-- ===== 色彩 & 校准 ===== -->
     <section class="card">
       <div class="card-head">

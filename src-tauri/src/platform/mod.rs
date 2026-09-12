@@ -80,6 +80,28 @@ pub fn set_system_mute(_on: bool) -> Result<(), String> {
     Err("系统音量控制仅支持 Windows".to_string())
 }
 
+/// 带电池的连接设备（笔记本内电池 / USB·2.4G 无线键鼠 / 蓝牙耳机鼠标等）
+/// Windows 经 Battery 设备类枚举；结构体放共享层，非 Windows 由存根兜底
+#[derive(Serialize, Clone, Debug)]
+pub struct BatteryInfo {
+    /// 设备名（注册表友好名，兜底电池栈设备名）
+    pub name: String,
+    /// 电量百分比 0-100；-1 = 读取不到
+    pub percent: i32,
+    /// 充电中
+    pub charging: bool,
+    /// 已接外接电源（满电 / 浮充）
+    pub on_ac: bool,
+    /// 连接类型：内置 / 蓝牙 / USB/无线 / USB / 其它
+    pub conn: String,
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
+    // macOS/Linux 的外设电量走 IOKit/upower，后续版本再做；先明确告知
+    Err("电池设备监控仅支持 Windows".to_string())
+}
+
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]

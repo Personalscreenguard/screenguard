@@ -168,6 +168,57 @@ async function loadAudio() {
   }
 }
 
+// ===== 电池设备（Windows：Battery 设备类枚举，内电池 / USB·无线键鼠 / 蓝牙） =====
+function battIcon(conn) {
+  if (conn === '内置') return '💻';
+  if (conn === '蓝牙') return '🎧';
+  if (conn === 'USB/无线' || conn === 'USB') return '🖱️';
+  return '🔋';
+}
+function battState(charging, onAc, percent) {
+  if (percent < 0) return { cls: 'unknown', txt: '读取不到' };
+  if (charging) return { cls: 'charging', txt: '充电中' };
+  if (onAc) return { cls: 'ac', txt: '已接通电源' };
+  return { cls: 'idle', txt: '放电中' };
+}
+async function loadBatteries() {
+  const card = document.getElementById('battery-card');
+  const box = document.getElementById('batteries');
+  try {
+    const list = await invoke('get_batteries');
+    card.style.display = '';
+    if (!list || list.length === 0) {
+      box.innerHTML = '<div class="empty">未检测到带电池的设备</div>';
+      return;
+    }
+    box.innerHTML = '';
+    list.forEach(b => {
+      const st = battState(b.charging, b.on_ac, b.percent);
+      const pct = b.percent >= 0 ? b.percent : null;
+      const barCls = pct == null ? '' : (b.charging ? ' charging' : (pct <= 20 ? ' low' : ''));
+      const barWidth = pct == null ? 0 : pct;
+      const row = document.createElement('div');
+      row.className = 'batt-row';
+      row.innerHTML = `
+        <div class="batt-icon">${battIcon(b.conn)}</div>
+        <div class="batt-main">
+          <div class="batt-name">${b.name || '电池设备'}</div>
+          <div class="batt-meta">${b.conn || '其它'}</div>
+        </div>
+        <div class="batt-right">
+          <div class="batt-bar"><i class="${barCls}" style="width:${barWidth}%"></i></div>
+          <div class="batt-pct">${pct == null ? '—' : pct + '%'}</div>
+          <div class="batt-state ${st.cls}">${st.txt}</div>
+        </div>
+      `;
+      box.appendChild(row);
+    });
+  } catch (e) {
+    card.style.display = '';
+    box.innerHTML = '<div class="empty">读取电池设备失败：' + errText(e) + '</div>';
+  }
+}
+
 // ===== 按平台调整文案（各平台能力/依赖不同，避免误导） =====
 function applyPlatformCopy(p) {
   const matchMac = document.getElementById('match-mac');
@@ -213,6 +264,7 @@ document.getElementById('restore-secondary').onclick = () => run('restore_second
 document.getElementById('span-video').onclick = () => run('span_video', {}, '正在铺满双屏…');
 document.getElementById('restore-video').onclick = () => run('restore_video', {}, '已恢复播放器窗口');
 document.getElementById('refresh-btn').onclick = () => refreshDisplays();
+document.getElementById('battery-refresh-btn').onclick = () => loadBatteries();
 
 // 系统音量（Windows 才显示；在 startup 里按平台加载）
 document.getElementById('sys-vol').addEventListener('input', (ev) => {
@@ -244,6 +296,8 @@ document.getElementById('mute-btn').onclick = async () => {
       // 系统音量卡：仅 Windows（CoreAudio 默认输出端点）
       document.getElementById('audio-card').style.display = '';
       await loadAudio();
+      // 电池设备卡：仅 Windows（Battery 设备类枚举）
+      await loadBatteries();
     }
   } catch (e) {
     if (e.message === 'TAURI_CORE_UNAVAILABLE') setBadge('预览模式');

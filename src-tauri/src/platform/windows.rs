@@ -2,7 +2,7 @@
 //! 延续项目「零额外 Rust 依赖」的风格。每个命令独立 powershell 进程，
 //! C# 代码用单引号包裹传入 Add-Type（C# 内不含单引号字符）。
 
-use super::{run_cmd, DisplayInfo, SystemAudio};
+use super::{run_cmd, DisplayInfo, SystemAudio, BatteryInfo};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -371,6 +371,31 @@ public class SGCore {
     } finally { Marshal.FreeHGlobal(b); }
   }
 
+  /// 设置指定显示设备的分辨率/刷新率（就地改 DEVMODE，只写宽/高/频率 + dmFields，其余字节原样保留）。
+  /// 返回 OK / ERR:<原因>。w/h 为 0 表示该项不修改；hz 为 0 表示不修改刷新率。
+  /// 用于驱动崩溃后把降级的分辨率恢复回显示器原生模式（等价于系统「设置→显示」里改分辨率）。
+  public static string SetMode(string dev, uint w, uint h, uint hz) {
+    var b = AllocDevMode();
+    try {
+      if (!EnumDisplaySettingsW(dev, -1, b)) return "ERR:读取当前显示模式失败";
+      uint fields = 0;
+      if (w != 0 && h != 0) {
+        Marshal.WriteInt32(b, OFF_PELSWIDTH, (int)w);
+        Marshal.WriteInt32(b, OFF_PELSHEIGHT, (int)h);
+        fields |= DM_PELSWIDTH | DM_PELSHEIGHT;
+      }
+      if (hz != 0) {
+        Marshal.WriteInt32(b, OFF_FREQUENCY, (int)hz);
+        fields |= DM_DISPLAYFREQUENCY;
+      }
+      if (fields == 0) return "ERR:未指定要修改的项";
+      Marshal.WriteInt32(b, OFF_DMFIELDS, (int)fields);
+      Marshal.WriteInt16(b, OFF_DMSIZE, (short)DEVMODE_SIZE);
+      int r = ChangeDisplaySettingsExW(dev, b, IntPtr.Zero, CDS_UPDATEREGISTRY | CDS_GLOBAL, IntPtr.Zero);
+      return r == 0 ? "OK" : ("ERR:ChangeDisplaySettingsEx 返回 " + r);
+    } finally { Marshal.FreeHGlobal(b); }
+  }
+
   /// 铺满所有屏幕的包围盒（双屏拼接看视频）。记录原窗口位置到 stateFile
   public static string SpanVideo(IntPtr hwnd, string stateFile) {
     if (!IsWindow(hwnd)) return "ERR:播放器窗口不存在";
@@ -626,6 +651,182 @@ public class SGAudio {
       if (vol == null) return "ERR:端点激活失败";
       return vol.SetMute(on != 0 ? 1 : 0, IntPtr.Zero) == 0 ? "OK" : "ERR:静音设置失败";
     } catch (Exception e) { return "ERR:" + Esc(e.Message); }
+  }
+}
+
+// ============ 电池设备（SetupAPI + Battery IOCTL） ============
+// 所有带电池的连接设备——笔记本内电池 / USB·2.4G 无线 HID 键鼠 / 蓝牙（含 BLE GATT
+// 电量服务 0x180F）——都在 Battery 设备类注册接口；电池驱动注册的设备接口 GUID 恰好
+// 就是 GUID_DEVCLASS_BATTERY(72631E54-78A4-11D0-BCF7-00AA00B7B32A)，因此用
+// DIGCF_DEVICEINTERFACE | DIGCF_PRESENT 枚举。与驱动栈状态无关，不碰注册表只读。
+[StructLayout(LayoutKind.Sequential)]
+public struct SGIFACE_DATA { public int cb; public Guid cls; public uint Flags; public IntPtr Reserved; }
+
+[StructLayout(LayoutKind.Sequential)]
+public struct SGDEVINFO_DATA { public int cb; public Guid cls; public uint DevInst; public IntPtr Reserved; }
+
+public class SGBatt {
+  // IOCTL_BATTERY_*：FILE_DEVICE_BATTERY=0x29，FILE_READ_ACCESS=1，METHOD_BUFFERED=0
+  // CTL_CODE(0x29, Function, 0, 1) = 0x290000|0x4000|(Function<<2)
+  const uint IOCTL_TAG = 0x294040;        // QUERY_TAG      (Function 0x10)
+  const uint IOCTL_INFO = 0x294044;       // QUERY_INFORMATION (Function 0x11)
+  const uint IOCTL_STATUS = 0x29404c;     // QUERY_STATUS   (Function 0x13)
+  // BATTERY_QUERY_INFORMATION.InformationLevel
+  const int LEVEL_INFO = 0, LEVEL_NAME = 4;
+  // BATTERY_STATUS.PowerState 位（ntddbat.h）
+  const uint ST_ON_LINE = 0x1, ST_DISCHARGING = 0x2, ST_CHARGING = 0x4;
+
+  [DllImport("setupapi.dll", CharSet = CharSet.Unicode)] static extern IntPtr SetupDiGetClassDevsW(ref Guid g, string e, IntPtr p, uint f);
+  [DllImport("setupapi.dll", CharSet = CharSet.Unicode)] static extern bool SetupDiEnumDeviceInterfaces(IntPtr h, IntPtr di, ref Guid g, uint i, ref SGIFACE_DATA d);
+  [DllImport("setupapi.dll", CharSet = CharSet.Unicode)] static extern bool SetupDiGetDeviceInterfaceDetailW(IntPtr h, ref SGIFACE_DATA d, IntPtr det, uint sz, out uint need, ref SGDEVINFO_DATA di);
+  [DllImport("setupapi.dll", CharSet = CharSet.Unicode)] static extern bool SetupDiGetDeviceRegistryPropertyW(IntPtr h, ref SGDEVINFO_DATA di, uint prop, out uint t, IntPtr buf, uint sz, out uint need);
+  [DllImport("setupapi.dll")] static extern bool SetupDiDestroyDeviceInfoList(IntPtr h);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateFileW(string p, uint a, uint s, IntPtr sa, uint disp, uint flags, IntPtr tpl);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool DeviceIoControl(IntPtr h, uint ctl, IntPtr inp, uint ins, IntPtr outp, uint outs, out uint ret, IntPtr ov);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+
+  static string Esc(string s) {
+    if (s == null) return "";
+    return s.Replace("|", "/").Replace("\r", " ").Replace("\n", " ");
+  }
+
+  // 注册表字符串属性（SPDRP_FRIENDLYNAME=0x0C / SPDRP_DEVICEDESC=0）
+  static string RegProp(IntPtr hdev, ref SGDEVINFO_DATA di, uint prop) {
+    try {
+      uint t, need;
+      if (!SetupDiGetDeviceRegistryPropertyW(hdev, ref di, prop, out t, IntPtr.Zero, 0, out need)) return "";
+      if (need == 0 || need > 1024) return "";
+      IntPtr buf = Marshal.AllocHGlobal((int)need);
+      try {
+        if (SetupDiGetDeviceRegistryPropertyW(hdev, ref di, prop, out t, buf, need, out need)) {
+          string s = Marshal.PtrToStringUni(buf);
+          if (s != null) return s.Trim();
+        }
+      } finally { Marshal.FreeHGlobal(buf); }
+    } catch (Exception) { }
+    return "";
+  }
+
+  /// 枚举所有带电池的设备。行: B|<名称>|<百分比或-1>|<状态位1=充电,2=接电>|<连接类型>
+  public static string List() {
+    var sb = new StringBuilder();
+    try {
+      Guid bat = new Guid(0x72631E54, 0x78A4, 0x11D0, 0xBC, 0xF7, 0x00, 0xAA, 0x00, 0xB7, 0xB3, 0x2A);
+      IntPtr hdev = SetupDiGetClassDevsW(ref bat, null, IntPtr.Zero, 0x12); // DIGCF_PRESENT|DIGCF_DEVICEINTERFACE
+      if (hdev == new IntPtr(-1)) return "ERR:SetupDiGetClassDevs 失败";
+      try {
+        uint idx = 0;
+        while (true) {
+          var ifd = new SGIFACE_DATA(); ifd.cb = Marshal.SizeOf(typeof(SGIFACE_DATA));
+          if (!SetupDiEnumDeviceInterfaces(hdev, IntPtr.Zero, ref bat, idx, ref ifd)) break;
+          idx++;
+          try { EmitBattery(hdev, ref ifd, ref bat, sb); } catch (Exception) { }
+        }
+      } finally { SetupDiDestroyDeviceInfoList(hdev); }
+      return sb.ToString();
+    } catch (Exception e) { return "ERR:" + Esc(e.Message); }
+  }
+
+  static void EmitBattery(IntPtr hdev, ref SGIFACE_DATA ifd, ref Guid bat, StringBuilder sb) {
+    // 1) 接口路径。cbSize 在 x64 必须写 8（sizeof 含对齐尾填充，API 校验值），
+    //    但 DevicePath 本身在偏移 4（紧跟 DWORD cbSize，x64 实测）——按偏移直读绕开 marshaller
+    uint need;
+    var di = new SGDEVINFO_DATA(); di.cb = Marshal.SizeOf(typeof(SGDEVINFO_DATA));
+    SetupDiGetDeviceInterfaceDetailW(hdev, ref ifd, IntPtr.Zero, 0, out need, ref di); // 预期失败，need 已写入
+    if (need == 0 || need > 4096) return;
+    IntPtr det = Marshal.AllocHGlobal((int)need);
+    try {
+      Marshal.WriteInt32(det, 8); // SP_DEVICE_INTERFACE_DETAIL_DATA.cbSize（x64 校验值）
+      if (!SetupDiGetDeviceInterfaceDetailW(hdev, ref ifd, det, need, out need, ref di)) return;
+      string path = Marshal.PtrToStringUni(new IntPtr(det.ToInt64() + 4));
+      if (String.IsNullOrEmpty(path)) return;
+
+      // 2) 连接类型（接口路径前缀判读）
+      string pl = path.ToUpperInvariant();
+      string conn = "其它";
+      if (pl.Contains("BTHLE") || pl.Contains("BTHENUM")) conn = "蓝牙";
+      else if (pl.Contains("ACPI")) conn = "内置";
+      else if (pl.Contains("HID")) conn = "USB/无线";
+      else if (pl.Contains("USB")) conn = "USB";
+
+      // 3) 名称：注册表友好名 → 设备描述 → 电池栈设备名 → 兜底
+      string name = RegProp(hdev, ref di, 0x0C);
+      if (name.Length == 0) name = RegProp(hdev, ref di, 0);
+      bool genericName = name.Length == 0;
+      // 内置电池通常无友好名，直接用「内置电池」而非序列号；外设保留电池栈设备名兜底
+      if (genericName) name = (conn == "内置") ? "内置电池" : "电池设备";
+
+      // 4) 打开设备查状态（GENERIC_READ|GENERIC_WRITE，FILE_SHARE_RW，OPEN_EXISTING）
+      IntPtr b = CreateFileW(path, 0xC0000000u, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+      if (b == new IntPtr(-1)) {
+        sb.Append("B|").Append(Esc(name)).Append("|-1|0|").Append(conn).Append((char)10);
+        return;
+      }
+      try {
+        // 4a) QUERY_TAG：入参是 ULONG 等待超时（0 = 立即），出参 BatteryTag（0 = 电池不存在）
+        IntPtr tagBuf = Marshal.AllocHGlobal(4);
+        IntPtr waitIn = Marshal.AllocHGlobal(4);
+        try {
+          Marshal.WriteInt32(waitIn, 0);
+          uint got;
+          if (!DeviceIoControl(b, IOCTL_TAG, waitIn, 4, tagBuf, 4, out got, IntPtr.Zero) || got != 4) return;
+          int tag = Marshal.ReadInt32(tagBuf);
+          if (tag == 0) return;
+
+          // 4b) QUERY_INFORMATION(level=0)：BATTERY_INFORMATION 36 字节（含 CycleCount），
+          //     FullChargedCapacity 在偏移 16（绝对模式=mWh，相对模式=100）
+          uint full = 0;
+          IntPtr qi = Marshal.AllocHGlobal(12);   // {tag, level, atRate}
+          IntPtr info = Marshal.AllocHGlobal(48);
+          try {
+            Marshal.WriteInt32(qi, 0, tag);
+            Marshal.WriteInt32(qi, 4, LEVEL_INFO);
+            Marshal.WriteInt32(qi, 8, 0);
+            if (DeviceIoControl(b, IOCTL_INFO, qi, 12, info, 48, out got, IntPtr.Zero) && got >= 20) {
+              full = (uint)Marshal.ReadInt32(info, 16); // FullChargedCapacity
+            }
+            // 名称兜底：外设（USB/无线/蓝牙）注册表名是泛型时，读电池栈 BatteryDeviceName
+            if (genericName && conn != "内置") {
+              Marshal.WriteInt32(qi, 4, LEVEL_NAME);
+              IntPtr nbuf = Marshal.AllocHGlobal(512);
+              try {
+                if (DeviceIoControl(b, IOCTL_INFO, qi, 12, nbuf, 512, out got, IntPtr.Zero) && got >= 4) {
+                  string dn = Marshal.PtrToStringUni(nbuf);
+                  if (dn != null && dn.Trim().Length > 0) name = dn.Trim();
+                }
+              } finally { Marshal.FreeHGlobal(nbuf); }
+            }
+          } finally { Marshal.FreeHGlobal(qi); Marshal.FreeHGlobal(info); }
+
+          // 4c) QUERY_STATUS：BATTERY_WAIT_STATUS 20 字节入，BATTERY_STATUS 16 字节出
+          //     {PowerState(0), Capacity(4), Voltage(8), Rate(12)}
+          uint powerState = 0, cap = 0;
+          IntPtr ws = Marshal.AllocHGlobal(20);
+          IntPtr st = Marshal.AllocHGlobal(16);
+          try {
+            Marshal.WriteInt32(ws, 0, tag); // 其余字段全 0（不等待、不设阈值）
+            if (DeviceIoControl(b, IOCTL_STATUS, ws, 20, st, 16, out got, IntPtr.Zero) && got >= 8) {
+              powerState = (uint)Marshal.ReadInt32(st, 0);
+              cap = (uint)Marshal.ReadInt32(st, 4);
+            }
+          } finally { Marshal.FreeHGlobal(ws); Marshal.FreeHGlobal(st); }
+
+          // 5) 百分比：绝对模式 cap*100/full；相对模式（多数 HID 外设）full=100 公式同样成立；
+          //    full 读不到但 cap<=100 时视为本身就是百分比
+          int percent;
+          if (full > 0 && cap <= full) percent = (int)Math.Round(cap * 100.0 / full);
+          else if (cap > 0 && cap <= 100) percent = (int)cap;
+          else percent = -1;
+          if (percent > 100) percent = 100;
+
+          uint stateBits = 0;
+          if ((powerState & ST_CHARGING) != 0) stateBits |= 1;
+          if ((powerState & ST_ON_LINE) != 0) stateBits |= 2;
+          sb.Append("B|").Append(Esc(name)).Append("|").Append(percent).Append("|")
+            .Append(stateBits).Append("|").Append(conn).Append((char)10);
+        } finally { Marshal.FreeHGlobal(tagBuf); Marshal.FreeHGlobal(waitIn); }
+      } finally { CloseHandle(b); }
+    } finally { Marshal.FreeHGlobal(det); }
   }
 }
 "#;
@@ -915,6 +1116,40 @@ pub fn set_system_mute(on: bool) -> Result<(), String> {
     } else {
         Err(t.strip_prefix("ERR:").unwrap_or(t).to_string())
     }
+}
+
+// ---------- 电池设备（Battery 类设备：内电池 / USB·无线 HID / 蓝牙） ----------
+// BatteryInfo 结构体定义在 platform/mod.rs（三平台共享，非 Windows 由存根实现兜底）
+
+pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
+    let out = ps_core("[SGBatt]::List()")?;
+    let t = out.trim();
+    if t.starts_with("ERR:") {
+        return Err(t.strip_prefix("ERR:").unwrap_or(t).to_string());
+    }
+    let mut list = Vec::new();
+    for line in out.lines() {
+        let t = line.trim_end();
+        // B|<名称>|<百分比或-1>|<状态位1=充电,2=接电>|<连接类型>
+        let rest = match t.strip_prefix("B|") {
+            Some(r) => r,
+            None => continue,
+        };
+        let p: Vec<&str> = rest.split('|').collect();
+        if p.len() < 4 {
+            continue;
+        }
+        let percent: i32 = p[1].trim().parse().unwrap_or(-1);
+        let state: u32 = p[2].trim().parse().unwrap_or(0);
+        list.push(BatteryInfo {
+            name: p[0].to_string(),
+            percent,
+            charging: state & 1 != 0,
+            on_ac: state & 2 != 0,
+            conn: p[3].to_string(),
+        });
+    }
+    Ok(list)
 }
 // ---------- 色彩同步（ICC 关联） ----------
 //

@@ -76,6 +76,9 @@
     </div>
   </div>
 
+  <div class="sec-label" id="batt-sec" style="display:none">电池设备</div>
+  <div style="padding:0 8px" id="batt-box"></div>
+
   <div class="sec-label">显示器</div>
   <div class="scroll" id="scroll" style="flex:0 0 auto"><div class="empty">读取显示器…</div></div>
 
@@ -226,6 +229,48 @@ async function loadAudio(){
   } catch(e){ /* 预览模式静默 */ }
 }
 
+// 电池设备（Windows：Battery 设备类枚举）
+function battIcon(conn){
+  if (conn === '内置') return '💻';
+  if (conn === '蓝牙') return '🎧';
+  if (conn === 'USB/无线' || conn === 'USB') return '🖱️';
+  return '🔋';
+}
+async function loadBatteries(){
+  try {
+    const p = await invoke('get_platform');
+    if (p !== 'windows') return;
+    const list = await invoke('get_batteries');
+    document.getElementById('batt-sec').style.display = '';
+    const box = document.getElementById('batt-box');
+    if (!list || !list.length) {
+      box.innerHTML = '<div style="padding:0 8px"><div class="empty">未检测到带电池的设备</div></div>';
+      return;
+    }
+    box.innerHTML = list.map(b=>{
+      const pct = b.percent >= 0 ? b.percent : null;
+      let state = '读取不到', stateCls = '';
+      if (pct != null) {
+        if (b.charging) { state = '充电中'; stateCls = 'background:rgba(52,201,142,.15);color:#34c98e;border-color:rgba(52,201,142,.3)'; }
+        else if (b.on_ac) { state = '已接通电源'; stateCls = 'background:rgba(79,140,255,.15);color:#7fb0ff;border-color:rgba(79,140,255,.3)'; }
+        else { state = '放电中'; stateCls = 'background:rgba(168,176,191,.14);color:#a8b0bf;border-color:rgba(168,176,191,.25)'; }
+      }
+      const pctTxt = pct == null ? '—' : pct + '%';
+      const barW = pct == null ? 0 : pct;
+      const barColor = pct == null ? 'transparent' : (b.charging ? '#34c98e' : (pct <= 20 ? '#ef6a6a' : '#4f8cff'));
+      return '<div class="grp open" style="margin:4px 8px">'+
+        '<div class="grp-h">'+
+          '<div><div class="grp-title">'+battIcon(b.conn)+' '+(b.name||'电池设备')+'</div><div class="grp-meta">'+ (b.conn||'其它') +'</div></div>'+
+          '<div class="grp-right"><span class="badge" style="'+stateCls+'">'+state+'</span></div>'+
+        '</div>'+
+        '<div class="grp-body">'+
+          '<div class="srow"><label>电量</label><div style="height:5px;border-radius:5px;background:rgba(255,255,255,.16);overflow:hidden"><div style="height:100%;width:'+barW+'%;background:'+barColor+';border-radius:5px"></div></div><span class="val">'+pctTxt+'</span></div>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+  } catch(e){ /* 预览模式静默 */ }
+}
+
 invoke('get_version')
   .then(v => { document.getElementById('pver').textContent = 'v' + v; })
   .catch(() => { /* 预览模式静默 */ });
@@ -250,6 +295,7 @@ invoke('get_platform').then(p=>{
 }).catch(()=>{ /* 预览模式静默 */ });
 load();
 loadAudio();
+loadBatteries();
 refreshAutostart();
 </script>
 </body>

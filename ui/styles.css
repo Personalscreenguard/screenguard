@@ -127,6 +127,30 @@ body {
 }
 .slider-row .val { font-size: 12px; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
 
+/* 电池设备 */
+.batt-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 2px;
+}
+.batt-row + .batt-row { border-top: 1px solid var(--border); }
+.batt-icon { font-size: 20px; line-height: 1; flex: 0 0 auto; }
+.batt-main { flex: 1; min-width: 0; }
+.batt-name { font-size: 13.5px; font-weight: 600; }
+.batt-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.batt-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.batt-pct { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.batt-bar { width: 96px; height: 8px; border-radius: 6px; background: #2b3444; overflow: hidden; }
+.batt-bar > i { display: block; height: 100%; border-radius: 6px; background: var(--accent); transition: width .3s ease; }
+.batt-bar > i.low { background: #ef6a6a; }
+.batt-bar > i.charging { background: #34c98e; }
+.batt-state { font-size: 11px; padding: 3px 9px; border-radius: 12px; font-weight: 600; white-space: nowrap; }
+.batt-state.charging { background: rgba(52,201,142,.15); color: var(--ok); }
+.batt-state.ac { background: rgba(79,140,255,.14); color: var(--accent2); }
+.batt-state.idle { background: rgba(168,176,191,.14); color: var(--text-dim); }
+.batt-state.unknown { background: rgba(239,106,106,.14); color: var(--err); }
+
 /* buttons */
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 button {
