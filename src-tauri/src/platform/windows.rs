@@ -2,8 +2,7 @@
 //! 延续项目「零额外 Rust 依赖」的风格。每个命令独立 powershell 进程，
 //! C# 代码用单引号包裹传入 Add-Type（C# 内不含单引号字符）。
 
-use super::{run_cmd, DisplayInfo};
-use serde::Serialize;
+use super::{run_cmd, DisplayInfo, SystemAudio};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -865,22 +864,7 @@ pub fn set_volume(display_id: &str, value: u32) -> Result<(), String> {
 }
 
 // ---------- 系统音量（CoreAudio 默认输出端点） ----------
-
-/// 系统默认输出设备（eMultimedia 角色，与托盘音量一致）
-#[derive(Serialize, Clone, Debug)]
-pub struct SystemAudio {
-    /// 端点友好名（如「扬声器 (2- Realtek(R) Audio)」「NE160QDM-NZ8 (NVIDIA High Definition Audio)」）
-    pub name: String,
-    /// 当前音量 0-100
-    pub volume: u32,
-    /// 是否静音
-    pub mute: bool,
-    /// false = 固定音量端点：Windows 滑块也无效（部分 HDMI/DP 音频如此），
-    /// 此时显示器喇叭音量请用对应显示器的 DDC 0x62 滑块
-    pub adjustable: bool,
-    /// 端点形态因子（9 = DigitalAudioDisplayDevice，即 HDMI/DP 显示器音频）
-    pub form_factor: u32,
-}
+// SystemAudio 结构体定义在 platform/mod.rs（三平台共享，非 Windows 由存根实现兜底）
 
 pub fn get_system_audio() -> Result<SystemAudio, String> {
     let out = ps_core("[SGAudio]::AudioGet()")?;

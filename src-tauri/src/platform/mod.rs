@@ -47,6 +47,39 @@ pub fn which(program: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// 系统默认输出设备信息（CoreAudio 端点）
+/// 结构体放共享层：命令签名三平台一致，非 Windows 平台由下方存根返回明确错误
+/// （UI 侧音量卡也只在 Windows 显示，存根只是兜底）
+#[derive(Serialize, Clone, Debug)]
+pub struct SystemAudio {
+    /// 端点友好名（如「扬声器 (2- Realtek(R) Audio)」「NE160QDM-NZ8 (NVIDIA High Definition Audio)」）
+    pub name: String,
+    /// 当前音量 0-100
+    pub volume: u32,
+    /// 是否静音
+    pub mute: bool,
+    /// false = 固定音量端点：Windows 滑块也无效（部分 HDMI/DP 音频如此），
+    /// 此时显示器喇叭音量请用对应显示器的 DDC 0x62 滑块
+    pub adjustable: bool,
+    /// 端点形态因子（9 = DigitalAudioDisplayDevice，即 HDMI/DP 显示器音频）
+    pub form_factor: u32,
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn get_system_audio() -> Result<SystemAudio, String> {
+    Err("系统音量控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_system_volume(_v: u32) -> Result<(), String> {
+    Err("系统音量控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_system_mute(_on: bool) -> Result<(), String> {
+    Err("系统音量控制仅支持 Windows".to_string())
+}
+
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
