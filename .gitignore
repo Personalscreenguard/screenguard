@@ -1,13 +1,16 @@
-# Rust / Tauri
-src-tauri/target/
-src-tauri/.cargo/
-.cargo/
-
-# Node
+# 构建产物
+/target
+/src-tauri/target
 node_modules/
+dist/
 
-# macOS
-.DS_Store
+# 安装包 / 二进制产物（体积大，不进版本库）
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.deb
 
-# 临时
-*.log
+# 本地环境
+.env
+.env.local

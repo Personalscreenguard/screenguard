@@ -348,6 +348,33 @@ public class SGCore {
     return TryVCP(dev, 0x10, false, 0, 2, out cur) ? "1" : "0";
   }
 
+  // ---------- 屏幕电源控制（方案A：系统级 + DDC 精细） ----------
+  [DllImport("user32.dll", SetLastError = true)]
+  static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
+  [DllImport("user32.dll")] static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+  /// 系统级关闭所有显示器：一次让全部屏进入待机（含 DDC 不通的屏，如本机小米）。
+  /// 必须用 SendMessageTimeout 而非 SendMessage：广播是同步的，遇到无响应窗口会永久卡死
+  /// （实测 SendMessage 广播卡住 90 秒以上），SMTO_ABORTIFHUNG + 超时保证必然返回。
+  public static string ScreenOff() {
+    IntPtr r;
+    SendMessageTimeout((IntPtr)0xFFFF, 0x0112, (IntPtr)0xF170, (IntPtr)2, 0x0002, 3000, out r);
+    return "OK";
+  }
+
+  /// 唤醒屏幕：合成一次 Shift 按下/抬起（无副作用的真实输入事件，可解除显示器待机）
+  public static string ScreenWake() {
+    keybd_event(0x10, 0, 0, UIntPtr.Zero);
+    keybd_event(0x10, 0, 2, UIntPtr.Zero);
+    return "OK";
+  }
+
+  /// 读显示器电源模式（VCP 0xD6）：1=开 2=待机 4=软关 5=硬关
+  public static string DDCPowerRead(string dev) {
+    uint cur;
+    return TryVCP(dev, 0xD6, false, 0, 5, out cur) ? cur.ToString() : "ERR";
+  }
+
   /// 旋转副屏。newOri: 0=横, 1=顺时针90, 3=逆时针90
   /// 按 DEVMODEW 固定偏移「就地改」：只写 dmSize / dmFields / 方向 / 宽高，其余字节原样不动。
   /// （旧实现用 Explicit 结构体 PtrToStructure→StructureToPtr 整块回写，未声明区间会被清零）
@@ -878,9 +905,14 @@ fn resolve_dev(uid: &str) -> Result<String, String> {
 
 // ---------- 显示器列表 ----------
 pub fn get_displays() -> Vec<DisplayInfo> {
+    // C# 落盘后按路径加载（内联会撞命令行长度上限，见 core_cs_ref 注释）
+    let csp = match core_cs_ref() {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n$lines = [SGCore]::ListDisplays() -split ([char]10);\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\n[SGCore]::DisplayNameMap();\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($_.Active -and $nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ $pr = [SGCore]::DDCProbe($dev); $b = ''; $v = ''; if ($pr -eq '1') {{ $b = [SGCore]::DDCRead($dev, [byte]0x10); $v = [SGCore]::DDCRead($dev, [byte]0x62) }}; Write-Output ('P|' + $dev + '|' + $pr + '|' + $b + '|' + $v); Write-Output ('C|' + $dev + '|' + [SGCore]::IccGet($dev)) }};\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue | ForEach-Object {{ $sg = ($_.InstanceName -split '\\\\')[1]; if ($sg) {{ Write-Output ('W|' + $sg + '|' + $_.CurrentBrightness) }} }}",
-        cs = CORE_CS
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}';\n$lines = [SGCore]::ListDisplays() -split ([char]10);\n$lines | ForEach-Object {{ Write-Output $_ }};\n$devs = @();\nforeach ($l in $lines) {{ $p = $l -split '\\|'; if ($p[0] -eq 'D') {{ $devs += $p[1] }} }};\n[SGCore]::DisplayNameMap();\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue | ForEach-Object {{\n  $nm = (($_.UserFriendlyName | Where-Object {{ [int]$_ -ne 0 }} | ForEach-Object {{ [char][int]$_ }}) -join '');\n  $inst = $_.InstanceName -replace '_\\d+$', '';\n  if ($_.Active -and $nm -and $nm.Trim()) {{ Write-Output ('N|' + $inst + '|' + $nm) }}\n}};\nforeach ($dev in $devs) {{ $pr = [SGCore]::DDCProbe($dev); $b = ''; $v = ''; if ($pr -eq '1') {{ $b = [SGCore]::DDCRead($dev, [byte]0x10); $v = [SGCore]::DDCRead($dev, [byte]0x62) }}; Write-Output ('P|' + $dev + '|' + $pr + '|' + $b + '|' + $v); Write-Output ('C|' + $dev + '|' + [SGCore]::IccGet($dev)) }};\nGet-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue | ForEach-Object {{ $sg = ($_.InstanceName -split '\\\\')[1]; if ($sg) {{ Write-Output ('W|' + $sg + '|' + $_.CurrentBrightness) }} }}",
+        cs = csp
     );
     let raw = ps(&script).unwrap_or_default();
     let mut rows: Vec<(String, String, u32, u32, u32, bool, u32)> = Vec::new(); // dev,uid,w,h,hz,main,ori
@@ -959,9 +991,8 @@ pub fn get_displays() -> Vec<DisplayInfo> {
     //  ① DisplayConfig 权威映射（GDI 设备名 → 友好名）：与 PnP/WMI 监视器状态无关，
     //     Win11 24H2 上那两者失效时它是唯一可靠来源
     //  ② uid 第二段（厂商+型号）对齐 WMI 名字（原有逻辑）
-    //  ③ 1↔1 兜底：仅当 ② 恰好用掉 N-1 个名字且恰剩一行未配时才猜（两侧都不唯一时不猜）
+    //  ③ 1↔1 兜底：仅当「只剩一行没名字」且「恰好还剩一个没被 ①② 用掉的名字」时才猜
     let mut matched: Vec<Option<String>> = Vec::with_capacity(rows.len());
-    let mut seg_used = 0usize;
     for (dev, uid, _, _, _, _, _) in rows.iter() {
         let mut name = dc_names
             .get(&dev.to_lowercase())
@@ -971,24 +1002,27 @@ pub fn get_displays() -> Vec<DisplayInfo> {
             let key = short_id(uid);
             if !key.is_empty() {
                 name = names.get(&key).cloned().filter(|n| !n.is_empty());
-                if name.is_some() {
-                    seg_used += 1;
-                }
             }
         }
         matched.push(name);
     }
     {
+        // 兜底前必须先算清「哪些名字已经被用掉」——① DisplayConfig 与 ② uid 段两条来源都要计入。
+        // 只看 ② 的用量会误配：小米已由 DisplayConfig 匹配到自己的名字，副屏没有 WMI 名字时，
+        // 兜底逻辑又把同一个名字塞给副屏，于是两台屏显示成同一个名字（实测 v0.2.9 就是这个现象）。
+        let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for m in matched.iter().flatten() {
+            used.insert(m.clone());
+        }
         let unmatched: Vec<usize> = matched
             .iter()
             .enumerate()
             .filter(|(_, m)| m.is_none())
             .map(|(i, _)| i)
             .collect();
-        if unmatched.len() == 1 && names.len() == seg_used + 1 {
-            if let Some(n) = names.values().next() {
-                matched[unmatched[0]] = Some(n.clone());
-            }
+        let leftover: Vec<&String> = names.values().filter(|n| !used.contains(*n)).collect();
+        if unmatched.len() == 1 && leftover.len() == 1 {
+            matched[unmatched[0]] = Some(leftover[0].clone());
         }
     }
     let mut result: Vec<DisplayInfo> = Vec::new();
@@ -1196,11 +1230,37 @@ fn icc_path(space: &str) -> Result<String, String> {
     }
 }
 
+/// C# 桥接源码的落盘路径（%TEMP%\screenguard_core.cs）
+fn core_cs_file() -> std::path::PathBuf {
+    std::env::temp_dir().join("screenguard_core.cs")
+}
+
+/// 确保 C# 桥接源码已落盘（带 UTF-8 BOM，PowerShell 5.1 才能正确解析中文注释），
+/// 返回可传给 PowerShell 的正斜杠路径。
+///
+/// 为什么必须落盘而不是内联：整段 C# 内联进 `Add-Type -TypeDefinition '<CORE_CS>'`
+/// 会撞 Windows 命令行长度上限 —— 实测 app 报「无法启动 powershell: 文件名或扩展名太长
+/// (os error 206)」，导致显示器列表 / DDC / 旋转等所有依赖 SGCore 的命令集体失败。
+/// 改为 Add-Type -Path 后命令行只剩一个短路径，后续再加代码也不会再撞线。
+fn core_cs_ref() -> Result<String, String> {
+    let p = core_cs_file();
+    let want = CORE_CS.len() as u64 + 3; // + 3 字节 BOM
+    let ok = matches!(std::fs::metadata(&p), Ok(m) if m.len() == want);
+    if !ok {
+        let mut buf = Vec::with_capacity(CORE_CS.len() + 3);
+        buf.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+        buf.extend_from_slice(CORE_CS.as_bytes());
+        std::fs::write(&p, &buf).map_err(|e| format!("写入 C# 桥接文件失败：{}", e))?;
+    }
+    Ok(p.display().to_string().replace('\\', "/"))
+}
+
 /// 在已加载 CORE_CS 的会话里执行一段桥接调用
 fn ps_core(call: &str) -> Result<String, String> {
+    let cs = core_cs_ref()?;
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -TypeDefinition '{cs}';\n{call}",
-        cs = CORE_CS,
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}';\n{call}",
+        cs = cs,
         call = call
     );
     ps(&script)
@@ -1508,6 +1568,201 @@ pub fn restore_video() -> Result<(), String> {
     let t = out.trim();
     if t == "OK" {
         Ok(())
+    } else if t.starts_with("ERR:") {
+        Err(t[4..].to_string())
+    } else {
+        Err(t.to_string())
+    }
+}
+
+// ================= 屏幕电源控制（方案A：纯本地，不依赖网络） =================
+// 设计要点：本机小米显示器（Redmi G Pro 27U）DDC/CI 不通，无法用 DDC 控制它；
+// 因此「一次黑掉所有屏」走 Windows 系统级指令（对所有屏生效，含小米），
+// 而单台精细待机/唤醒走 DDC（实测副屏 MTI 支持 VCP 0xD6）。
+
+/// 系统级关闭所有显示器：一次让全部屏进入待机。
+/// 这是唯一能影响到无 DDC 显示器（本机小米）的软件手段。
+pub fn screen_off() -> Result<(), String> {
+    let out = ps_core("[SGCore]::ScreenOff()")?;
+    if out.trim() == "OK" {
+        Ok(())
+    } else {
+        Err(format!("关闭屏幕失败：{}", out.trim()))
+    }
+}
+
+/// 唤醒屏幕：合成一次 Shift 按键（真实输入事件，可解除系统级显示器待机）
+pub fn screen_wake() -> Result<(), String> {
+    let out = ps_core("[SGCore]::ScreenWake()")?;
+    if out.trim() == "OK" {
+        Ok(())
+    } else {
+        Err(format!("唤醒屏幕失败：{}", out.trim()))
+    }
+}
+
+/// DDC 单台电源模式：1=开 2=待机 4=软关（实测唤醒后需 2~5 秒 DDC 才恢复响应）
+pub fn set_display_power(display_id: &str, mode: u32) -> Result<(), String> {
+    vcp_op(display_id, 0xD6, Some(mode))
+}
+
+/// 读单台显示器电源模式（1=开 2=待机 4=软关 5=硬关）
+pub fn get_display_power(display_id: &str) -> Result<u32, String> {
+    let dev = resolve_dev(display_id)?;
+    let out = ps_core(&format!("[SGCore]::DDCPowerRead('{dev}')", dev = dev))?;
+    let t = out.trim();
+    if t == "ERR" {
+        return Err("该显示器不支持电源模式控制（VCP 0xD6）".to_string());
+    }
+    t.parse::<u32>()
+        .map_err(|_| format!("电源模式读取异常：{}", t))
+}
+
+/// 显示器在线快照（轻量，供联动检测轮询用）：返回当前在线显示器的稳定标识列表。
+/// 与 get_displays 的区别：不做 DDC 探测与名字查询，只枚举，适合 2~3 秒级轮询。
+pub fn display_snapshot() -> Vec<String> {
+    let raw = match ps_core("[SGCore]::ListDisplays()") {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for line in raw.lines() {
+        let p: Vec<&str> = line.split('|').collect();
+        if p.len() >= 3 && p[0] == "D" {
+            out.push(p[2].trim().to_string());
+        }
+    }
+    out.sort();
+    out
+}
+
+// ================= 方案B：ADB 联网精细控制（可选增强） =================
+// 前提：显示器开启「网络 ADB 调试」（一次性设置，类似手机开 USB 调试）。
+// 找不到 adb 不影响方案A；找到后即可：遥控器按键实时联动、精确控制电源/音量/输入源。
+
+use std::os::windows::process::CommandExt;
+
+/// 探测 adb 可执行文件：程序同目录 → 我们的下载目录 → Android SDK → PATH
+pub fn adb_exe() -> Option<std::path::PathBuf> {
+    let mut cands: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            cands.push(dir.join("platform-tools").join("adb.exe"));
+            cands.push(dir.join("adb.exe"));
+        }
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        let l = std::path::PathBuf::from(&local);
+        cands.push(l.join("screenguard_adb").join("platform-tools").join("adb.exe"));
+        cands.push(l.join("Android").join("Sdk").join("platform-tools").join("adb.exe"));
+    }
+    // 本机已装工具自带的 adb：ASUS GlideX（ROG 机型预装，实测 1.0.41 可用）、Android SDK、scrcpy 等
+    for p in [
+        r"C:\Program Files\ASUS\GlideX\adb.exe",
+        r"C:\Program Files (x86)\ASUS\GlideX\adb.exe",
+        r"C:\Program Files\Android\platform-tools\adb.exe",
+        r"C:\platform-tools\adb.exe",
+    ] {
+        cands.push(std::path::PathBuf::from(p));
+    }
+    for c in cands.iter() {
+        if c.exists() {
+            return Some(c.clone());
+        }
+    }
+    None
+}
+
+/// 执行 adb 子命令（不弹黑窗）
+fn adb_cmd(exe: &std::path::Path, args: &[&str]) -> Result<String, String> {
+    let out = std::process::Command::new(exe)
+        .args(args)
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .output()
+        .map_err(|e| format!("adb 执行失败：{}", e))?;
+    let s = String::from_utf8_lossy(&out.stdout).to_string();
+    let e = String::from_utf8_lossy(&out.stderr).to_string();
+    if out.status.success() {
+        Ok(s)
+    } else {
+        Err(format!("{}{}", s, e).trim().to_string())
+    }
+}
+
+/// ADB 能力探测：是否找到 adb、已连接哪些设备
+pub fn adb_status() -> super::AdbStatus {
+    match adb_exe() {
+        None => super::AdbStatus {
+            available: false,
+            path: String::new(),
+            devices: Vec::new(),
+            tip: "未找到 adb：方案B 的联网精细控制需要 Android Platform Tools（点「下载 ADB」自动获取）。方案A 本地功能不受影响。".to_string(),
+        },
+        Some(exe) => {
+            let devices: Vec<String> = adb_cmd(&exe, &["devices"])
+                .map(|s| {
+                    s.lines()
+                        .skip(1)
+                        .filter_map(|l| {
+                            let t = l.trim();
+                            if t.is_empty() || t.starts_with('*') {
+                                return None;
+                            }
+                            t.split('\t').next().map(|x| x.trim().to_string())
+                        })
+                        .filter(|x| !x.is_empty() && !x.contains("offline"))
+                        .collect()
+                })
+                .unwrap_or_default();
+            super::AdbStatus {
+                available: true,
+                path: exe.display().to_string(),
+                devices,
+                tip: "adb 就绪".to_string(),
+            }
+        }
+    }
+}
+
+/// 连接显示器的 ADB（addr 形如 192.168.31.216:5555）
+pub fn adb_connect(addr: &str) -> Result<String, String> {
+    let exe = adb_exe().ok_or("未找到 adb，请先点「下载 ADB」")?;
+    adb_cmd(&exe, &["connect", addr])
+}
+
+/// 在指定设备上执行 shell 命令
+pub fn adb_shell(serial: &str, cmd: &str) -> Result<String, String> {
+    let exe = adb_exe().ok_or("未找到 adb，请先点「下载 ADB」")?;
+    adb_cmd(&exe, &["-s", serial, "shell", cmd])
+}
+
+/// 电源键（KEYCODE_POWER = 26）：待机/唤醒
+pub fn adb_power(serial: &str) -> Result<String, String> {
+    adb_shell(serial, "input keyevent 26")
+}
+
+/// 音量（KEYCODE_VOLUME_UP = 24 / VOLUME_DOWN = 25）
+pub fn adb_volume(serial: &str, up: bool) -> Result<String, String> {
+    adb_shell(serial, if up { "input keyevent 24" } else { "input keyevent 25" })
+}
+
+/// 一键下载 Android Platform Tools 到 %LOCALAPPDATA%\screenguard_adb（零依赖：PowerShell 下载 + 解压）
+pub fn adb_download() -> Result<String, String> {
+    let script = r#"$ErrorActionPreference='Stop';
+$dst = Join-Path $env:LOCALAPPDATA 'screenguard_adb';
+New-Item -ItemType Directory -Force -Path $dst | Out-Null;
+$zip = Join-Path $dst 'pt.zip';
+$urls = @('https://dl.google.com/android/repository/platform-tools-latest-windows.zip','https://googledownloads.cn/android/repository/platform-tools-latest-windows.zip');
+$ok = $false;
+foreach ($u in $urls) { try { Invoke-WebRequest -Uri $u -OutFile $zip -TimeoutSec 300 -UseBasicParsing; $ok = $true; break } catch { } }
+if (-not $ok) { Write-Output 'ERR:下载失败（网络不通），请手动下载 platform-tools 解压到该目录'; exit }
+Expand-Archive -Path $zip -DestinationPath $dst -Force;
+Remove-Item $zip -Force;
+Write-Output ('OK:' + (Join-Path $dst 'platform-tools\adb.exe'))"#;
+    let out = ps(script)?;
+    let t = out.trim();
+    if t.starts_with("OK:") {
+        Ok(t[3..].to_string())
     } else if t.starts_with("ERR:") {
         Err(t[4..].to_string())
     } else {

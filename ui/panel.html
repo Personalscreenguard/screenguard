@@ -82,6 +82,22 @@
   <div class="sec-label">显示器</div>
   <div class="scroll" id="scroll" style="flex:0 0 auto"><div class="empty">读取显示器…</div></div>
 
+  <div class="sec-label">屏幕电源 <span class="ver" id="pw-badge"></span></div>
+  <div class="grid" id="power">
+    <div class="cell" id="cell-offall"><span class="ico">🌙</span><span class="lbl">全部待机</span></div>
+    <div class="cell" id="cell-wake"><span class="ico">☀️</span><span class="lbl">唤醒屏幕</span></div>
+    <div class="cell" id="cell-link"><span class="ico">🔗</span><span class="lbl">联动：关</span></div>
+  </div>
+  <div class="hint" id="power-hint" style="padding:0 10px 6px"></div>
+
+  <div class="sec-label">联网增强 <span class="ver" id="adb-badge">可选</span></div>
+  <div class="grid" id="adbgrid">
+    <div class="cell" id="cell-adbscan"><span class="ico">🔍</span><span class="lbl">检测 ADB</span></div>
+    <div class="cell" id="cell-adbdl"><span class="ico">⬇</span><span class="lbl">获取 ADB</span></div>
+    <div class="cell" id="cell-adbconn"><span class="ico">🖥</span><span class="lbl">连接显示器</span></div>
+  </div>
+  <div class="hint" id="adb-hint">联网增强（方案B）：让电脑直接控制显示器本体（电源 / 音量 / 输入源 / 听懂遥控器）。需要显示器开启「ADB 调试」，完全可选——不开启也照样用上面全部本地功能。</div>
+
   <div class="sec-label">快捷控制</div>
   <div class="grid" id="quick">
     <div class="cell" id="cell-srgb" data-act="color-srgb"><span class="ico">🎨</span><span class="lbl">sRGB</span></div>
@@ -134,19 +150,40 @@ async function load(){
       const badge = d.ddc ? '<span class="badge">DDC</span>' : (hasBri ? '<span class="badge">WMI</span>' : '<span class="badge" style="background:rgba(255,160,80,.12);color:#e8a75c;border-color:rgba(255,160,80,.3)">无DDC</span>');
       const briRow = hasBri ? '<div class="srow"><label>亮度</label><input type="range" min="0" max="100" value="'+(d.brightness??50)+'" data-id="'+d.id+'" data-k="brightness"><span class="val">'+(d.brightness??50)+'%</span></div>' : '';
       const volRow = d.ddc ? '<div class="srow"><label>音量</label><input type="range" min="0" max="100" value="'+(d.volume??50)+'" data-id="'+d.id+'" data-k="volume"><span class="val">'+(d.volume??50)+'%</span></div>' : '';
+      // 单屏电源（仅 DDC 可用的屏）：走 DDC VCP 0xD6 单独待机/点亮
+      const powerRow = d.ddc ? '<div class="srow"><label>电源</label><div style="display:flex;gap:6px"><button class="ibtn" data-pw="4" data-id="'+d.id+'">待机</button><button class="ibtn" data-pw="1" data-id="'+d.id+'">点亮</button></div><span class="val" data-pwval="'+d.id+'">—</span></div>' : '';
       let hint = '';
       if (hasBri && !d.ddc) hint = '<div class="hint">内屏：亮度走系统 WMI；喇叭/耳机音量用上方「系统音量」。</div>';
-      else if (!hasBri && !d.ddc) hint = '<div class="hint">此屏不支持 DDC/CI，请用硬件按键调节</div>';
+      else if (!hasBri && !d.ddc) hint = '<div class="hint">此屏不走 DDC/CI，无法单独控制；用上方「全部待机」可让它与其它屏一起待机</div>';
       return '<div class="grp open">'+
         '<div class="grp-h">'+
           '<div><div class="grp-title">'+(d.name||d.id)+'</div><div class="grp-meta">'+(d.resolution||'')+(d.hz?' · '+d.hz+'Hz':'')+(d.main?' · 主屏':'')+(d.color_profile?' · '+d.color_profile:'')+'</div></div>'+
           '<div class="grp-right">'+badge+'</div>'+
         '</div>'+
-        '<div class="grp-body">'+briRow+volRow+hint+'</div>'+
+        '<div class="grp-body">'+briRow+volRow+powerRow+hint+'</div>'+
       '</div>';
     }).join('');
     box.querySelectorAll('input[type=range]').forEach(sl=>{
       sl.addEventListener('input', ev=>{ const v=ev.target.value; sl.parentElement.querySelector('.val').textContent=v+'%'; sendVCP(sl.dataset.k, sl.dataset.id, v); });
+    });
+    // 单屏电源按钮（DDC VCP 0xD6）
+    box.querySelectorAll('button[data-pw]').forEach(b=>{
+      b.onclick = async ()=>{
+        const id = b.dataset.id, mode = Number(b.dataset.pw);
+        const valEl = box.querySelector('[data-pwval="'+id+'"]');
+        if (valEl) valEl.textContent = '…';
+        try {
+          await invoke('set_display_power', { displayId: id, mode: mode });
+          // 点亮后 DDC 通道需 2~5 秒才恢复响应（实测），延迟回读避免读到瞬态
+          const wait = mode === 1 ? 4000 : 1200;
+          setTimeout(async ()=>{
+            try {
+              const m = await invoke('get_display_power', { displayId: id });
+              if (valEl) valEl.textContent = ({1:'开',2:'待机',4:'软关',5:'硬关'}[m] || String(m));
+            } catch(e){ if (valEl) valEl.textContent = '?'; }
+          }, wait);
+        } catch(e){ if (valEl) valEl.textContent = '失败'; }
+      };
     });
   } catch(e){ box.innerHTML='<div class="empty">无法读取显示器：请确认显示器已连接，并检查依赖是否就绪</div>'; }
 }
@@ -274,6 +311,84 @@ async function loadBatteries(){
 invoke('get_version')
   .then(v => { document.getElementById('pver').textContent = 'v' + v; })
   .catch(() => { /* 预览模式静默 */ });
+
+// ============ 屏幕电源（方案A：纯本地，不依赖网络） ============
+// 「全部待机」走 Windows 系统级指令：一次让全部屏待机，含不走 DDC 的屏（本机小米）。
+// 「唤醒」合成输入事件；「联动」轮询在线显示器快照，主控屏离线→其余屏跟着 DDC 待机。
+const pwHintEl = document.getElementById('power-hint');
+function pwHint(t, err){ pwHintEl.textContent = t || ''; pwHintEl.style.color = err ? '#ef6a6a' : ''; }
+pwHint('本地模式可用：系统级待机（含不走 DDC 的屏）');
+
+document.getElementById('cell-offall').onclick = async (ev)=>{
+  flash(ev.currentTarget);
+  pwHint('正在让全部屏幕待机…');
+  try { await invoke('screen_off'); pwHint('已全部待机（动一下鼠标 / 按键盘即可回来）'); }
+  catch(e){ pwHint('待机失败：' + (e && e.message ? e.message : e), true); }
+};
+document.getElementById('cell-wake').onclick = async (ev)=>{
+  flash(ev.currentTarget);
+  try { await invoke('screen_wake'); pwHint('已唤醒屏幕'); }
+  catch(e){ pwHint('唤醒失败：' + (e && e.message ? e.message : e), true); }
+};
+
+// 联动状态机：只对支持 DDC 的屏下发动作（无 DDC 的屏由「全部待机」覆盖）
+const link = { on:false, timer:null, last:null, pend:null, pendCount:0, until:0, ddcIds:[] };
+function paintLink(){
+  const el = document.getElementById('cell-link');
+  el.classList.toggle('active', link.on);
+  el.querySelector('.lbl').textContent = link.on ? '联动：开' : '联动：关';
+}
+async function linkTick(){
+  if (!link.on) return;
+  try {
+    const snap = await invoke('display_snapshot');
+    if (!Array.isArray(snap) || !snap.length) return;
+    if (link.last === null) { link.last = snap.slice(); return; }
+    const gone = link.last.filter(x => !snap.includes(x));
+    const back = snap.filter(x => !link.last.includes(x));
+    if (!gone.length && !back.length) {
+      link.pend = null; link.pendCount = 0;    // 状态稳定，清掉等待确认的中间态
+      return;
+    }
+    // 防抖：同一状态连续 2 次采样才动作（切换输入源/重连瞬间会有抖动）。
+    // 关键：这里**不能**提前更新 link.last——否则下一次采样就看不到变化，
+    // 永远凑不满 2 次确认，联动会彻底不触发（实测踩过）。
+    const sig = snap.join(',');
+    if (link.pend === sig) {
+      link.pendCount++;
+    } else {
+      link.pend = sig;
+      link.pendCount = 1;
+      return;                                  // 第一次见到该状态，先观察
+    }
+    if (link.pendCount !== 2) return;
+    link.last = snap.slice();                  // 连续两次确认后才更新基线
+    link.pend = null; link.pendCount = 0;
+    if (Date.now() < link.until) return;      // 冷却：动作后 15 秒内不重复触发
+    const others = snap.filter(id => link.ddcIds.includes(id));
+    const mode = gone.length ? 4 : 1;         // 有屏离线→其余待机；有屏回来→其余点亮
+    if (!others.length) return;
+    link.until = Date.now() + 15000;
+    pwHint((mode === 4 ? '检测到显示器离线 → 其余屏跟着待机…' : '检测到显示器回来 → 其余屏跟着点亮…'));
+    for (const id of others) { try { await invoke('set_display_power', { displayId: id, mode: mode }); } catch(e){} }
+    pwHint('已联动' + (mode === 4 ? '待机' : '点亮') + ' ' + others.length + ' 台（DDC）');
+  } catch(e){ /* 静默 */ }
+}
+document.getElementById('cell-link').onclick = async (ev)=>{
+  flash(ev.currentTarget);
+  link.on = !link.on;
+  paintLink();
+  if (link.on) {
+    link.last = null; link.pend = null; link.pendCount = 0; link.until = 0;
+    try { const ds = await invoke('get_displays'); link.ddcIds = (ds||[]).filter(d=>d.ddc).map(d=>d.id); } catch(e){ link.ddcIds = []; }
+    link.timer = setInterval(linkTick, 2500);
+    pwHint('联动已开（每 2.5 秒检测）：其它屏离线→本组屏跟着待机／回来→跟着点亮');
+  } else {
+    if (link.timer) clearInterval(link.timer);
+    link.timer = null;
+    pwHint('联动已关');
+  }
+};
 // 按平台调整文案/可用性：
 // Windows 没有内建 P3 屏，「对齐Mac」的等价语义是「把主屏色彩配置对齐到其它屏」；
 // Linux 端这些能力尚未实现，置灰并标注，避免点了只弹错。
@@ -297,6 +412,63 @@ load();
 loadAudio();
 loadBatteries();
 refreshAutostart();
+
+// ============ 联网增强（方案B：ADB 精细控制，完全可选） ============
+// 有 ADB → 电脑能直接管显示器本体（电源 / 音量 / 输入源 / 听得懂遥控器）；
+// 没有 ADB → 上面方案A 的本地能力照常，互不影响。
+const adbHintEl = document.getElementById('adb-hint');
+function adbSay(t, err){ adbHintEl.textContent = t || ''; adbHintEl.style.color = err ? '#ef6a6a' : ''; }
+
+// 检测：adb 是否存在 + 已连接哪些设备
+document.getElementById('cell-adbscan').onclick = async (ev)=>{
+  flash(ev.currentTarget);
+  adbSay('正在检测 ADB 环境…');
+  try {
+    const st = await invoke('adb_status');
+    document.getElementById('adb-badge').textContent = st.available ? '就绪' : '未就绪';
+    const devs = (st.devices || []).filter(Boolean);
+    if (st.available) {
+      adbSay('adb 已就绪：' + st.path + (devs.length ? ('｜已连接：' + devs.join('、')) : '｜尚未连接显示器（点「连接显示器」）'));
+    } else {
+      adbSay('未找到 adb。点「获取 ADB」自动下载，或手动把 platform-tools 放到 %LOCALAPPDATA%\\screenguard_adb\\。方案A 本地功能不受影响。');
+    }
+  } catch(e){ adbSay('检测失败：' + (e && e.message ? e.message : e), true); }
+};
+
+// 获取 ADB：自动下载 Android Platform Tools 并解压
+document.getElementById('cell-adbdl').onclick = async (ev)=>{
+  flash(ev.currentTarget);
+  adbSay('正在下载 Android Platform Tools（约 5MB，慢的话请等一会）…');
+  try {
+    const p = await invoke('adb_download');
+    adbSay('已就绪：' + p);
+    document.getElementById('adb-badge').textContent = '就绪';
+  } catch(e){
+    adbSay('自动下载失败：' + (e && e.message ? e.message : e) + '（可手动下载 platform-tools 解压到 %LOCALAPPDATA%\\screenguard_adb\\；装了 Android 模拟器或投屏工具的话，它们自带的 adb 也会被自动识别）', true);
+  }
+};
+
+// 连接显示器：填显示器在局域网里的地址（在显示器「设置 → 网络 / ADB 调试」里看）
+document.getElementById('cell-adbconn').onclick = async (ev)=>{
+  flash(ev.currentTarget);
+  const last = localStorage.getItem('sg_adb_addr') || '';
+  const ip = window.prompt('输入显示器在局域网中的地址（显示器「设置 → 网络」里可查），例如 192.168.31.50:5555', last);
+  if (!ip || !ip.trim()) return;
+  localStorage.setItem('sg_adb_addr', ip.trim());
+  adbSay('正在连接 ' + ip.trim() + ' …');
+  try {
+    const out = await invoke('adb_connect', { addr: ip.trim() });
+    adbSay('连接结果：' + out);
+  } catch(e){ adbSay('连接失败：' + (e && e.message ? e.message : e), true); }
+};
+
+// 调试/自动化钩子：允许从外部（CDP）驱动联动状态机做验证，也方便排查"为什么没触发/误触发"
+window.__sg = {
+  link: link,
+  linkTick: linkTick,
+  paintLink: paintLink,
+  snapshot: () => invoke('display_snapshot')
+};
 </script>
 </body>
 </html>

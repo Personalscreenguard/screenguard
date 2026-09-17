@@ -21,14 +21,24 @@ pub struct DisplayInfo {
     pub ddc_id: Option<u32>,
 }
 
-/// 通用命令运行器：返回 stdout（成功）或错误信息
+/// 通用命令运行器：返回 stdout（成功）或错误信息。
+///
+/// 注意：不能只看退出码。PowerShell 的 `-Command` 只要脚本里产生过任何 ErrorRecord
+/// （哪怕已被 `-ErrorAction SilentlyContinue` 抑制、stdout 已经输出完整结果）就会返回
+/// 退出码 1。实测 get_displays 的脚本正是如此：stdout 是完整的显示器列表，退出码却是 1，
+/// 于是整份列表被当成失败丢弃 → 界面显示"未检测到显示器"。
+/// 因此以 stdout 为准：有输出就是成功。
 pub fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
     let out = Command::new(program)
         .args(args)
         .output()
         .map_err(|e| format!("无法启动 {}: {}", program, e))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    if !stdout.trim().is_empty() {
+        return Ok(stdout);
+    }
     if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+        Ok(stdout)
     } else {
         Err(String::from_utf8_lossy(&out.stderr)
             .to_string()
@@ -100,6 +110,81 @@ pub struct BatteryInfo {
 pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
     // macOS/Linux 的外设电量走 IOKit/upower，后续版本再做；先明确告知
     Err("电池设备监控仅支持 Windows".to_string())
+}
+
+// ---------- 屏幕电源控制（方案A）：非 Windows 平台存根 ----------
+// macOS/Linux 可分别用 pmset displaysleepnow / xset dpms force off 实现，
+// 属后续版本；当前先明确告知，避免 UI 误以为可用。
+
+#[cfg(not(target_os = "windows"))]
+pub fn screen_off() -> Result<(), String> {
+    Err("屏幕待机控制暂仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn screen_wake() -> Result<(), String> {
+    Err("屏幕唤醒暂仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_display_power(_display_id: &str, _mode: u32) -> Result<(), String> {
+    Err("显示器电源模式控制暂仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn get_display_power(_display_id: &str) -> Result<u32, String> {
+    Err("显示器电源模式控制暂仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn display_snapshot() -> Vec<String> {
+    Vec::new()
+}
+
+// ---------- 方案B：ADB 联网精细控制（可选增强能力） ----------
+
+/// ADB 能力状态：是否找到 adb、已连接哪些设备、给用户的提示
+#[derive(serde::Serialize, Clone)]
+pub struct AdbStatus {
+    pub available: bool,
+    pub path: String,
+    pub devices: Vec<String>,
+    pub tip: String,
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn adb_status() -> AdbStatus {
+    AdbStatus {
+        available: false,
+        path: String::new(),
+        devices: Vec::new(),
+        tip: "ADB 联网控制仅支持 Windows".to_string(),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn adb_connect(_addr: &str) -> Result<String, String> {
+    Err("ADB 联网控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn adb_power(_serial: &str) -> Result<String, String> {
+    Err("ADB 联网控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn adb_volume(_serial: &str, _up: bool) -> Result<String, String> {
+    Err("ADB 联网控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn adb_shell(_serial: &str, _cmd: &str) -> Result<String, String> {
+    Err("ADB 联网控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn adb_download() -> Result<String, String> {
+    Err("ADB 联网控制仅支持 Windows".to_string())
 }
 
 #[cfg(target_os = "linux")]

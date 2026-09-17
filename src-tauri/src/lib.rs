@@ -101,6 +101,76 @@ fn restore_video() -> Result<(), String> {
     platform::restore_video()
 }
 
+// ---------- 屏幕电源控制（方案A：纯本地） ----------
+
+/// 系统级关闭所有屏幕（一次黑全部屏，含不支持 DDC 的显示器）
+#[tauri::command]
+fn screen_off() -> Result<(), String> {
+    platform::screen_off()
+}
+
+/// 唤醒屏幕（合成输入事件，解除待机）
+#[tauri::command]
+fn screen_wake() -> Result<(), String> {
+    platform::screen_wake()
+}
+
+/// 单台显示器电源模式（DDC 0xD6）：1=开 2=待机 4=软关
+#[tauri::command]
+fn set_display_power(display_id: String, mode: u32) -> Result<(), String> {
+    platform::set_display_power(&display_id, mode)
+}
+
+/// 读单台显示器电源模式（1=开 2=待机 4=软关 5=硬关）
+#[tauri::command]
+fn get_display_power(display_id: String) -> Result<u32, String> {
+    platform::get_display_power(&display_id)
+}
+
+/// 显示器在线快照（联动检测轮询用，轻量）
+#[tauri::command]
+fn display_snapshot() -> Vec<String> {
+    platform::display_snapshot()
+}
+
+// ---------- 方案B：ADB 联网精细控制（可选增强） ----------
+
+/// ADB 能力探测（是否找到 adb / 已连接设备）
+#[tauri::command]
+fn adb_status() -> platform::AdbStatus {
+    platform::adb_status()
+}
+
+/// 连接显示器的 ADB（addr 形如 192.168.31.216:5555）
+#[tauri::command]
+fn adb_connect(addr: String) -> Result<String, String> {
+    platform::adb_connect(&addr)
+}
+
+/// 电源键：待机/唤醒显示器（KEYCODE_POWER）
+#[tauri::command]
+fn adb_power(serial: String) -> Result<String, String> {
+    platform::adb_power(&serial)
+}
+
+/// 音量加减
+#[tauri::command]
+fn adb_volume(serial: String, up: bool) -> Result<String, String> {
+    platform::adb_volume(&serial, up)
+}
+
+/// 通用 adb shell（进阶用法）
+#[tauri::command]
+fn adb_shell(serial: String, cmd: String) -> Result<String, String> {
+    platform::adb_shell(&serial, &cmd)
+}
+
+/// 一键下载 Android Platform Tools
+#[tauri::command]
+fn adb_download() -> Result<String, String> {
+    platform::adb_download()
+}
+
 /// 显示并聚焦主窗口（命令、托盘菜单共用）
 fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
@@ -223,6 +293,17 @@ pub fn run() {
             restore_secondary,
             span_video,
             restore_video,
+            screen_off,
+            screen_wake,
+            set_display_power,
+            get_display_power,
+            display_snapshot,
+            adb_status,
+            adb_connect,
+            adb_power,
+            adb_volume,
+            adb_shell,
+            adb_download,
             open_main,
             quit_app,
             hide_panel

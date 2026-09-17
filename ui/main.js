@@ -40,6 +40,22 @@ function sendVCP(kind, id, val) {
   })();
 }
 
+// ===== 屏幕电源（纯本地，不依赖网络）=====
+// 全部待机走 Windows 系统级指令：一次黑掉全部屏，含不走 DDC 的屏。
+const pwNote = document.getElementById('pw-note');
+function pwStat(t, ok = true) { pwNote.textContent = t; pwNote.style.color = ok ? '' : '#ef6a6a'; }
+
+document.getElementById('pw-off').addEventListener('click', async () => {
+  pwStat('正在让全部屏幕待机…');
+  try { await invoke('screen_off'); pwStat('已待机（动一下鼠标或按键盘即可唤醒）'); }
+  catch (e) { pwStat('待机失败：' + (e && e.message ? e.message : e), false); }
+});
+
+document.getElementById('pw-wake').addEventListener('click', async () => {
+  try { await invoke('screen_wake'); pwStat('已唤醒屏幕'); }
+  catch (e) { pwStat('唤醒失败：' + (e && e.message ? e.message : e), false); }
+});
+
 async function refreshDisplays() {
   try {
     setStatus('读取显示器…');
