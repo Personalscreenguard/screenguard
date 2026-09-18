@@ -29,8 +29,16 @@ pub struct DisplayInfo {
 /// 于是整份列表被当成失败丢弃 → 界面显示"未检测到显示器"。
 /// 因此以 stdout 为准：有输出就是成功。
 pub fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(program)
-        .args(args)
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    // CREATE_NO_WINDOW：PowerShell / adb 等子进程不要闪出控制台黑框。
+    // 之前漏了这个标志，每次 DDC 读写、蓝牙查询都会在屏幕上闪一个终端窗口。
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let out = cmd
         .output()
         .map_err(|e| format!("无法启动 {}: {}", program, e))?;
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -139,6 +147,23 @@ pub fn get_display_power(_display_id: &str) -> Result<u32, String> {
 #[cfg(not(target_os = "windows"))]
 pub fn display_snapshot() -> Vec<String> {
     Vec::new()
+}
+
+// ---------- 显示器健康：KVM 切换 / EDID 重新协商异常检测与修复（非 Windows 存根） ----------
+
+#[cfg(not(target_os = "windows"))]
+pub fn health_events(_minutes: u32) -> String {
+    String::new()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn mode_detail() -> String {
+    String::new()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn repair_display(_level: u32) -> Result<String, String> {
+    Err("显示器健康修复暂仅支持 Windows".to_string())
 }
 
 // ---------- 方案B：ADB 联网精细控制（可选增强能力） ----------

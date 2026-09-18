@@ -423,6 +423,103 @@ public class SGCore {
     } finally { Marshal.FreeHGlobal(b); }
   }
 
+  // ===== 显示器健康：KVM 切换 / EDID 重新协商异常的事件读取与修复 =====
+
+  /// 读取最近的显示 / 设备链路异常事件（KVM 切换、显示器突然移除、驱动看门狗超时）。
+  /// 返回每行: E|时间|等级|来源|事件ID|摘要
+  /// 数据源：Kernel-PnP 设备管理（surprise removed = 显示器从系统里消失）、
+  ///         Kernel-PnP 驱动看门狗（长时间阻塞）、System（驱动重置 TDR 4101）。
+  public static string ReadDisplayEvents(int minutes) {
+    var sb = new System.Text.StringBuilder();
+    string[] logs = new string[] {
+      "Microsoft-Windows-Kernel-PnP/Device Management",
+      "Microsoft-Windows-Kernel-PnP/Driver Watchdog",
+      "System"
+    };
+    long windowMs = (long)minutes * 60000L;
+    foreach (string ln in logs) {
+      try {
+        var q = new System.Diagnostics.Eventing.Reader.EventLogQuery(
+          ln, System.Diagnostics.Eventing.Reader.PathType.LogName,
+          "*[System[TimeCreated[timediff(@SystemTime) <= " + windowMs + "]]]");
+        var rd = new System.Diagnostics.Eventing.Reader.EventLogReader(q);
+        int n = 0;
+        for (var e = rd.ReadEvent(); e != null && n < 40; e = rd.ReadEvent()) {
+          string prov = e.ProviderName == null ? "" : e.ProviderName;
+          string msg = "";
+          try { msg = e.FormatDescription(); } catch { }
+          if (msg == null) msg = "";
+          msg = msg.Replace((char)13, (char)32).Replace((char)10, (char)32);
+          if (msg.Length > 120) msg = msg.Substring(0, 120);
+          string low = msg.ToLower();
+          bool keep = false;
+          if (low.IndexOf("display") >= 0 || low.IndexOf("monitor") >= 0) keep = true;
+          if (prov.IndexOf("PnP") >= 0) keep = true;
+          if (e.Id == 4101 || e.Id == 1010 || e.Id == 900 || e.Id == 902 || e.Id == 933 || e.Id == 901) keep = true;
+          if (!keep) continue;
+          int lv = e.Level == null ? 4 : (int)e.Level;
+          string lvl = lv == 1 ? "严重" : (lv == 2 ? "错误" : (lv == 3 ? "警告" : "信息"));
+          string ts = e.TimeCreated == null ? "" : ((DateTime)e.TimeCreated).ToString("MM-dd HH:mm:ss");
+          sb.Append("E|").Append(ts).Append("|").Append(lvl).Append("|").Append(prov)
+            .Append("|").Append(e.Id).Append("|").Append(msg).Append((char)10);
+          n++;
+        }
+        rd.Dispose();
+      } catch { }
+    }
+    return sb.ToString();
+  }
+
+  /// 强制显示链路重新协商：先把刷新率降下来再切回原模式（两次 ChangeDisplaySettingsEx）。
+  /// 用于修复 KVM 切换 / EDID 重新协商后常见的「画面发白发亮（色彩格式被降级成 YCbCr）、
+  /// 清晰度变差、抖动花屏、刷新率异常」。返回 OK:<模式> 或 ERR:<原因>。
+  public static string ForceReNegotiate(string dev) {
+    var orig = AllocDevMode();
+    try {
+      if (!EnumDisplaySettingsW(dev, -1, orig)) return "ERR:读取当前显示模式失败";
+      int w = Marshal.ReadInt32(orig, OFF_PELSWIDTH);
+      int h = Marshal.ReadInt32(orig, OFF_PELSHEIGHT);
+      int hz = Marshal.ReadInt32(orig, OFF_FREQUENCY);
+      if (w <= 0 || h <= 0) return "ERR:当前模式无效";
+      if (hz != 60) {
+        var tmp = AllocDevMode();
+        try {
+          if (EnumDisplaySettingsW(dev, -1, tmp)) {
+            Marshal.WriteInt32(tmp, OFF_FREQUENCY, 60);
+            Marshal.WriteInt32(tmp, OFF_DMFIELDS, (int)DM_DISPLAYFREQUENCY);
+            Marshal.WriteInt16(tmp, OFF_DMSIZE, (short)DEVMODE_SIZE);
+            ChangeDisplaySettingsExW(dev, tmp, IntPtr.Zero, CDS_UPDATEREGISTRY | CDS_GLOBAL, IntPtr.Zero);
+            System.Threading.Thread.Sleep(1200);
+          }
+        } finally { Marshal.FreeHGlobal(tmp); }
+      }
+      Marshal.WriteInt32(orig, OFF_DMFIELDS, (int)(DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY | DM_DISPLAYORIENTATION));
+      Marshal.WriteInt16(orig, OFF_DMSIZE, (short)DEVMODE_SIZE);
+      int r = ChangeDisplaySettingsExW(dev, orig, IntPtr.Zero, CDS_UPDATEREGISTRY | CDS_GLOBAL, IntPtr.Zero);
+      return r == 0 ? ("OK:" + w + "x" + h + "@" + hz) : ("ERR:ChangeDisplaySettingsEx 返回 " + r);
+    } finally { Marshal.FreeHGlobal(orig); }
+  }
+
+  /// 每台在用的屏的当前模式：M|设备名|宽|高|刷新率|方向
+  public static string ModeDetail() {
+    var sb = new System.Text.StringBuilder();
+    for (int i = 1; i <= 12; i++) {
+      string dev = "\\\\.\\DISPLAY" + i;
+      var dm = AllocDevMode();
+      try {
+        if (EnumDisplaySettingsW(dev, -1, dm)) {
+          int w = Marshal.ReadInt32(dm, OFF_PELSWIDTH);
+          int h = Marshal.ReadInt32(dm, OFF_PELSHEIGHT);
+          int hz = Marshal.ReadInt32(dm, OFF_FREQUENCY);
+          int ori = Marshal.ReadInt32(dm, OFF_ORIENTATION);
+          if (w > 0 && h > 0)
+            sb.Append("M|").Append(dev).Append("|").Append(w).Append("|").Append(h).Append("|").Append(hz).Append("|").Append(ori).Append((char)10);
+        }
+      } finally { Marshal.FreeHGlobal(dm); }
+    }
+    return sb.ToString();
+  }
+
   /// 铺满所有屏幕的包围盒（双屏拼接看视频）。记录原窗口位置到 stateFile
   public static string SpanVideo(IntPtr hwnd, string stateFile) {
     if (!IsWindow(hwnd)) return "ERR:播放器窗口不存在";
@@ -855,6 +952,7 @@ public class SGBatt {
       } finally { CloseHandle(b); }
     } finally { Marshal.FreeHGlobal(det); }
   }
+
 }
 "#;
 
@@ -905,8 +1003,8 @@ fn resolve_dev(uid: &str) -> Result<String, String> {
 
 // ---------- 显示器列表 ----------
 pub fn get_displays() -> Vec<DisplayInfo> {
-    // C# 落盘后按路径加载（内联会撞命令行长度上限，见 core_cs_ref 注释）
-    let csp = match core_cs_ref() {
+    // 走编译缓存加载（见 core_asm_ref 注释：不缓存会每次都重编译整份 C#，拖滑块时界面卡死）
+    let csp = match core_asm_ref() {
         Ok(p) => p,
         Err(_) => return Vec::new(),
     };
@@ -1054,9 +1152,150 @@ pub fn get_displays() -> Vec<DisplayInfo> {
     result
 }
 
+// ---------- 原生 DDC/CI 快路径（毫秒级，不启动 PowerShell） ----------
+//
+// 为什么要它：走 PowerShell 时一次 DDC 读写 = 启动进程(~0.4s) + 加载程序集 + I2C 通信，
+// 实测单次 get_displays 要 1.9 秒。拖亮度滑块时每一格都等这么一下，手感就是一顿一顿的。
+// 直接调 dxva2 的 VCP 接口只要十几毫秒。原生失败会自动回退到下面的 PowerShell 路径。
+use std::ffi::c_void;
+
+/// DDC 用到的句柄/指针统一别名
+type DdcPtr = *mut c_void;
+
+#[repr(C)]
+struct DdcRect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[repr(C)]
+struct DdcMonitorInfoExW {
+    cb_size: u32,
+    rc_monitor: DdcRect,
+    rc_work: DdcRect,
+    flags: u32,
+    device: [u16; 32],
+}
+
+#[repr(C)]
+struct DdcPhysicalMonitor {
+    handle: DdcPtr,
+    description: [u16; 128],
+}
+
+type DdcEnumProc = extern "system" fn(DdcPtr, DdcPtr, *mut DdcRect, isize) -> i32;
+
+#[link(name = "user32")]
+extern "system" {
+    fn EnumDisplayMonitors(hdc: DdcPtr, clip: DdcPtr, cb: DdcEnumProc, data: isize) -> i32;
+    fn GetMonitorInfoW(hmonitor: DdcPtr, mi: *mut DdcMonitorInfoExW) -> i32;
+}
+
+#[link(name = "dxva2")]
+extern "system" {
+    fn GetNumberOfPhysicalMonitorsFromHMONITOR(hmonitor: DdcPtr, n: *mut u32) -> i32;
+    fn GetPhysicalMonitorsFromHMONITOR(
+        hmonitor: DdcPtr,
+        n: u32,
+        arr: *mut DdcPhysicalMonitor,
+    ) -> i32;
+    fn SetVCPFeature(hmonitor: DdcPtr, code: u8, value: u32) -> i32;
+    fn GetVCPFeatureAndVCPFeatureReply(
+        hmonitor: DdcPtr,
+        code: u8,
+        vct: *mut i32,
+        cur: *mut u32,
+        max: *mut u32,
+    ) -> i32;
+    fn DestroyPhysicalMonitors(n: u32, arr: *mut DdcPhysicalMonitor) -> i32;
+}
+
+struct DdcFind {
+    want: String,
+    found: DdcPtr,
+}
+
+extern "system" fn ddc_find_cb(h: DdcPtr, _hdc: DdcPtr, _rc: *mut DdcRect, data: isize) -> i32 {
+    if data == 0 {
+        return 0;
+    }
+    let ctx = unsafe { &mut *(data as *mut DdcFind) };
+    let mut mi: DdcMonitorInfoExW = unsafe { std::mem::zeroed() };
+    mi.cb_size = std::mem::size_of::<DdcMonitorInfoExW>() as u32;
+    if unsafe { GetMonitorInfoW(h, &mut mi) } != 0 {
+        let len = mi.device.iter().position(|c| *c == 0).unwrap_or(mi.device.len());
+        let dev = String::from_utf16_lossy(&mi.device[..len]);
+        if dev.eq_ignore_ascii_case(&ctx.want) {
+            ctx.found = h;
+            return 0; // 命中，停止枚举
+        }
+    }
+    1 // 继续找
+}
+
+/// 在指定显示器的物理句柄上执行一次操作（自动获取并释放句柄）
+fn ddc_with<T>(dev: &str, f: impl FnOnce(DdcPtr) -> T) -> Option<T> {
+    let mut ctx = DdcFind {
+        want: dev.to_string(),
+        found: std::ptr::null_mut(),
+    };
+    unsafe {
+        EnumDisplayMonitors(
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            ddc_find_cb,
+            &mut ctx as *mut DdcFind as isize,
+        )
+    };
+    if ctx.found.is_null() {
+        return None;
+    }
+    let mut n: u32 = 0;
+    if unsafe { GetNumberOfPhysicalMonitorsFromHMONITOR(ctx.found, &mut n) } == 0 || n == 0 {
+        return None;
+    }
+    let mut arr: Vec<DdcPhysicalMonitor> = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        arr.push(unsafe { std::mem::zeroed() });
+    }
+    if unsafe { GetPhysicalMonitorsFromHMONITOR(ctx.found, n, arr.as_mut_ptr()) } == 0 {
+        return None;
+    }
+    let out = f(arr[0].handle);
+    unsafe { DestroyPhysicalMonitors(n, arr.as_mut_ptr()) };
+    Some(out)
+}
+
+/// 原生写 VCP（true = 成功）
+fn ddc_set(dev: &str, code: u8, value: u32) -> bool {
+    ddc_with(dev, |h| unsafe { SetVCPFeature(h, code, value) != 0 }).unwrap_or(false)
+}
+
+/// 原生读 VCP 当前值
+fn ddc_get(dev: &str, code: u8) -> Option<u32> {
+    ddc_with(dev, |h| {
+        let (mut vct, mut cur, mut max) = (0i32, 0u32, 0u32);
+        if unsafe { GetVCPFeatureAndVCPFeatureReply(h, code, &mut vct, &mut cur, &mut max) } != 0 {
+            Some(cur)
+        } else {
+            None
+        }
+    })
+    .flatten()
+}
+
 // ---------- DDC：亮度 / 音量（按显示器精确控制） ----------
 fn vcp_op(display_id: &str, code: u8, value: Option<u32>) -> Result<(), String> {
     let dev = resolve_dev(display_id)?;
+    // 快路径：原生写入。拖亮度/音量滑块走的就是这里，省掉每次约 0.5 秒的 PowerShell 启动开销。
+    if let Some(v) = value {
+        if ddc_set(&dev, code, v) {
+            return Ok(());
+        }
+    }
+    // 慢路径：原 PowerShell 实现（原生不可用时兜底，保证兼容性）
     let call = match value {
         Some(v) => format!(
             "[SGCore]::DDCWrite('{dev}',[byte]{code},[uint32]{v})",
@@ -1242,22 +1481,57 @@ fn core_cs_file() -> std::path::PathBuf {
 /// 会撞 Windows 命令行长度上限 —— 实测 app 报「无法启动 powershell: 文件名或扩展名太长
 /// (os error 206)」，导致显示器列表 / DDC / 旋转等所有依赖 SGCore 的命令集体失败。
 /// 改为 Add-Type -Path 后命令行只剩一个短路径，后续再加代码也不会再撞线。
-fn core_cs_ref() -> Result<String, String> {
-    let p = core_cs_file();
+/// C# 桥接的编译产物（程序集）缓存路径
+fn core_dll_file() -> std::path::PathBuf {
+    std::env::temp_dir().join("screenguard_core.dll")
+}
+
+/// 确保 C# 桥接可用，返回可传给 PowerShell 的加载路径。
+///
+/// 落盘原因：整段 C# 内联进 `Add-Type -TypeDefinition '<CORE_CS>'` 会撞 Windows 命令行
+/// 长度上限（app 报「文件名或扩展名太长 (os error 206)」，所有依赖 SGCore 的命令集体失败）。
+/// 编译缓存原因：每次调用都 `Add-Type -Path '<源文件>'` 会**重新编译整份 C#**（实测 1~3 秒），
+/// 拖亮度滑块时每一格都要等一次，界面直接卡死。改成先编译成程序集（仅在源码变化时做一次），
+/// 之后每次只加载 DLL（约 0.2 秒）。
+fn core_asm_ref() -> Result<String, String> {
+    let cs = core_cs_file();
+    let dll = core_dll_file();
+    // 1) 源码落盘（带 UTF-8 BOM：PowerShell 5.1 没 BOM 会按 ANSI 读中文注释 → 编译失败）
     let want = CORE_CS.len() as u64 + 3; // + 3 字节 BOM
-    let ok = matches!(std::fs::metadata(&p), Ok(m) if m.len() == want);
-    if !ok {
+    if !matches!(std::fs::metadata(&cs), Ok(m) if m.len() == want) {
         let mut buf = Vec::with_capacity(CORE_CS.len() + 3);
         buf.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
         buf.extend_from_slice(CORE_CS.as_bytes());
-        std::fs::write(&p, &buf).map_err(|e| format!("写入 C# 桥接文件失败：{}", e))?;
+        std::fs::write(&cs, &buf).map_err(|e| format!("写入 C# 桥接文件失败：{}", e))?;
     }
-    Ok(p.display().to_string().replace('\\', "/"))
+    let cs_p = cs.display().to_string().replace('\\', "/");
+    let dll_p = dll.display().to_string().replace('\\', "/");
+    // 2) 程序集可用？存在、非空、且不旧于源文件
+    let fresh = match (std::fs::metadata(&cs), std::fs::metadata(&dll)) {
+        (Ok(c), Ok(d)) => match (c.modified(), d.modified()) {
+            (Ok(cm), Ok(dm)) => dm >= cm && d.len() > 0,
+            _ => false,
+        },
+        _ => false,
+    };
+    if fresh {
+        return Ok(dll_p);
+    }
+    // 3) 编译（失败就退回源码直载：慢，但至少能用，不会因为编译问题整个功能不可用）
+    let script = format!(
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}' -OutputAssembly '{dll}'",
+        cs = cs_p,
+        dll = dll_p
+    );
+    if ps(&script).is_err() || !dll.exists() {
+        return Ok(cs_p);
+    }
+    Ok(dll_p)
 }
 
 /// 在已加载 CORE_CS 的会话里执行一段桥接调用
 fn ps_core(call: &str) -> Result<String, String> {
-    let cs = core_cs_ref()?;
+    let cs = core_asm_ref()?;
     let script = format!(
         "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}';\n{call}",
         cs = cs,
@@ -1609,6 +1883,11 @@ pub fn set_display_power(display_id: &str, mode: u32) -> Result<(), String> {
 /// 读单台显示器电源模式（1=开 2=待机 4=软关 5=硬关）
 pub fn get_display_power(display_id: &str) -> Result<u32, String> {
     let dev = resolve_dev(display_id)?;
+    // 快路径：原生读 VCP 0xD6（毫秒级）
+    if let Some(v) = ddc_get(&dev, 0xD6) {
+        return Ok(v);
+    }
+    // 慢路径：原 PowerShell 实现兜底
     let out = ps_core(&format!("[SGCore]::DDCPowerRead('{dev}')", dev = dev))?;
     let t = out.trim();
     if t == "ERR" {
@@ -1634,6 +1913,89 @@ pub fn display_snapshot() -> Vec<String> {
     }
     out.sort();
     out
+}
+
+// ================= 显示器健康：KVM 切换 / EDID 重新协商异常检测与修复 =================
+// 背景：本机显示链路是「电脑 --USB-C→DP/HDMI-- KVM --DP/HDMI-- 两块屏」。
+// KVM 在「切换电脑 / 显示器开关 / 电脑重启」时会重新协商 EDID，协商失败表现为
+// ①黑屏不恢复 ②抖动花屏 ③清晰度变差、画面发白发亮（色彩格式被降级成 YCbCr）。
+// 这些是「显示配置状态错了」而不是硬件坏 —— 重置显示配置即可恢复（所以更新显卡驱动
+// 有时也能好）。本模块只做两件事：把异常事件读出来（供日志与提醒），以及一键重新协商。
+
+/// 读取最近的显示链路异常事件。每行：E|时间|等级|来源|事件ID|摘要
+pub fn health_events(minutes: u32) -> String {
+    let csp = match core_asm_ref() {
+        Ok(p) => p,
+        Err(_) => return String::new(),
+    };
+    let script = format!(
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}';\n[SGCore]::ReadDisplayEvents({m})",
+        cs = csp,
+        m = minutes
+    );
+    ps(&script).unwrap_or_default()
+}
+
+/// 每台在用屏幕的当前模式。每行：M|设备名|宽|高|刷新率|方向
+pub fn mode_detail() -> String {
+    let csp = match core_asm_ref() {
+        Ok(p) => p,
+        Err(_) => return String::new(),
+    };
+    let script = format!(
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}';\n[SGCore]::ModeDetail()",
+        cs = csp
+    );
+    ps(&script).unwrap_or_default()
+}
+
+/// 一键修复显示异常（分级，从轻到重）：
+///   level 1 —— 对每台屏强制重新协商（先降刷新率再切回原模式，不改变任何用户设置）；
+///   level 2 —— 额外做一次系统级关屏+唤醒，强制整条链路重新握手，然后再协商一轮。
+/// 返回逐台结果，每行：<设备名>|<结果>
+pub fn repair_display(level: u32) -> Result<String, String> {
+    let csp = core_asm_ref()?;
+    let renegotiate = format!(
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}';\n$ds = @();\nforeach ($m in ([SGCore]::ModeDetail().Split([char]10))) {{ $p = $m.Split([char]124); if ($p[0] -eq 'M') {{ $ds += $p[1] }} }};\nforeach ($d in $ds) {{ Write-Output ('R|' + $d + '|' + [SGCore]::ForceReNegotiate($d)) }}",
+        cs = csp
+    );
+
+    let mut out: Vec<String> = Vec::new();
+    let first = ps(&renegotiate).unwrap_or_default();
+    let mut count = 0;
+    for line in first.lines() {
+        let p: Vec<&str> = line.split('|').collect();
+        if p.len() >= 3 && p[0] == "R" {
+            out.push(format!("{}|{}", p[1], p[2..].join("|")));
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return Err("未枚举到可用显示器，修复未执行".to_string());
+    }
+
+    if level >= 2 {
+        // 更强：系统级关屏再唤醒（强制整条链路重新握手），然后重跑一轮协商
+        let _ = screen_off();
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        let _ = screen_wake();
+        std::thread::sleep(std::time::Duration::from_millis(1800));
+        let second = ps(&renegotiate).unwrap_or_default();
+        let mut n2 = 0;
+        for line in second.lines() {
+            let p: Vec<&str> = line.split('|').collect();
+            if p.len() >= 3 && p[0] == "R" {
+                out.push(format!("重协商-2 {}|{}", p[1], p[2..].join("|")));
+                n2 += 1;
+            }
+        }
+        out.push(format!(
+            "深度修复|已强制链路重握手（关屏+唤醒），二次协商 {}/{} 台成功",
+            n2, count
+        ));
+    }
+
+    Ok(out.join("\n"))
 }
 
 // ================= 方案B：ADB 联网精细控制（可选增强） =================

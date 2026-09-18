@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>屏幕守护 · 提醒</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { background:transparent; overflow:hidden; }
+  body { font-family:-apple-system,"PingFang SC","Segoe UI",Roboto,sans-serif; color:#eef1f6; font-size:12.5px; user-select:none; -webkit-font-smoothing:antialiased; }
+  .n { background:linear-gradient(180deg,#242a38 0%,#1a1e2b 100%); border:1px solid rgba(255,255,255,.12); border-radius:14px; padding:11px 13px; height:100vh; display:flex; gap:10px; align-items:flex-start; box-shadow:0 8px 24px rgba(0,0,0,.35); }
+  .ico { font-size:17px; line-height:1.1; }
+  .body { flex:1; min-width:0; }
+  .t { font-weight:700; font-size:13px; margin-bottom:3px; }
+  .m { color:#a8b0bf; line-height:1.5; word-break:break-word; }
+  .x { cursor:pointer; color:#a8b0bf; font-size:12px; padding:0 2px; }
+  .x:hover { color:#fff; }
+</style>
+</head>
+<body>
+<div class="n">
+  <div class="ico" id="ico">💡</div>
+  <div class="body">
+    <div class="t" id="t">屏幕守护</div>
+    <div class="m" id="m"></div>
+  </div>
+  <div class="x" id="x" title="关闭">✕</div>
+</div>
+<script>
+function invoke(cmd, args={}){ if(window.__TAURI__&&window.__TAURI__.core) return window.__TAURI__.core.invoke(cmd,args); return Promise.reject(new Error('NO_TAURI')); }
+function paint(p){
+  p = p || {};
+  document.getElementById('ico').textContent = p.icon || '💡';
+  document.getElementById('t').textContent = p.title || '屏幕守护';
+  document.getElementById('m').textContent = p.body || '';
+}
+function close(){ invoke('close_notify').catch(()=>{}); }
+document.getElementById('x').onclick = close;
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') close(); });
+
+// 必须等 window.__TAURI__ 注入完成再调用（窗口刚创建时它还没就绪）
+function ready(cb){
+  if (window.__TAURI__ && window.__TAURI__.core) return cb();
+  setTimeout(function(){ ready(cb); }, 60);
+}
+
+// 内容同步：只在「窗口可见」时主动拉取。
+// （只靠 Rust emit 不可靠：窗口首次创建时页面还没加载完，事件收不到；
+//   而同一窗口被复用第二次显示时，也没有重新执行的入口。）
+function pull(){ invoke('get_notify_payload').then(paint).catch(function(){}); }
+
+let timer = null;
+function armClose(){
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(close, 12000);   // 每次显示都重新计时，保证会自动消失
+}
+function tick(){
+  if (document.visibilityState === 'visible') { pull(); armClose(); }
+}
+ready(function(){
+  pull();
+  armClose();
+  setInterval(tick, 800);            // 兜底轮询：窗口被再次显示时刷新内容并重新计时
+});
+document.addEventListener('visibilitychange', function(){
+  if (document.visibilityState === 'visible') { pull(); armClose(); }
+});
+</script>
+</body>
+</html>

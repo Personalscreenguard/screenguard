@@ -17,14 +17,15 @@
   body { font-family:-apple-system,"PingFang SC","Segoe UI",Roboto,sans-serif; color:var(--text); font-size:12.5px; -webkit-font-smoothing:antialiased; user-select:none; overflow:hidden; }
   .card {
     background: linear-gradient(180deg, #242a38 0%, #1a1e2b 100%);
-    border:1px solid var(--border); border-radius:16px; height:100vh; display:flex; flex-direction:column; overflow:hidden;
+    border:1px solid var(--border); border-radius:16px; height:100vh; display:flex; flex-direction:column; overflow-y:auto;
   }
-  .head { display:flex; justify-content:space-between; align-items:center; padding:10px 13px; border-bottom:1px solid var(--border); background:rgba(0,0,0,0.14); }
+  .card::-webkit-scrollbar{width:6px} .card::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:6px}
+  .head { display:flex; justify-content:space-between; align-items:center; padding:10px 13px; border-bottom:1px solid var(--border); background:rgba(0,0,0,0.14); position:sticky; top:0; z-index:10; }
   .head .t { font-weight:700; font-size:13.5px; } .head .t span { color:var(--accent2); }
   .btns { display:flex; gap:6px; }
   .ibtn { background:var(--bg2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:4px 10px; cursor:pointer; font-size:11.5px; transition:.15s; }
   .ibtn:hover { background:var(--bg3); }
-  .scroll { flex:1; overflow-y:auto; padding:6px 8px 8px; } .scroll::-webkit-scrollbar{width:6px} .scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:6px}
+  .scroll { flex:0 0 auto; overflow:visible; padding:6px 8px 8px; }
 
   .sec-label { padding:8px 10px 4px; font-size:10.5px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; }
   .grp { border:1px solid var(--border); border-radius:12px; margin:4px 0; background:rgba(255,255,255,0.03); overflow:hidden; }
@@ -89,6 +90,23 @@
     <div class="cell" id="cell-link"><span class="ico">🔗</span><span class="lbl">联动：关</span></div>
   </div>
   <div class="hint" id="power-hint" style="padding:0 10px 6px"></div>
+
+  <div class="sec-label">显示器健康 <span class="ver" id="health-badge"></span></div>
+  <div class="grid" id="healthgrid">
+    <div class="cell" id="cell-hrepair"><span class="ico">🩺</span><span class="lbl">一键修复</span></div>
+    <div class="cell" id="cell-hdeep"><span class="ico">🛠️</span><span class="lbl">深度修复</span></div>
+    <div class="cell" id="cell-hscan"><span class="ico">📋</span><span class="lbl">检查记录</span></div>
+  </div>
+  <div class="hint" id="health-hint" style="padding:0 10px 2px">正在读取链路记录…</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 10px 0">
+    <span style="color:#a8b0bf;font-size:11.5px">自动修复 <span style="opacity:.7">（掉线自动重新协商）</span></span>
+    <input type="checkbox" id="h-auto" style="width:15px;height:15px;cursor:pointer">
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 10px 6px">
+    <span style="color:#a8b0bf;font-size:11.5px">掉线时弹提醒 <span style="opacity:.7">（右下角气泡）</span></span>
+    <input type="checkbox" id="h-notify" style="width:15px;height:15px;cursor:pointer">
+  </div>
+  <div id="health-events" style="padding:0 10px 6px"></div>
 
   <div class="sec-label">联网增强 <span class="ver" id="adb-badge">可选</span></div>
   <div class="grid" id="adbgrid">
@@ -382,7 +400,7 @@ document.getElementById('cell-link').onclick = async (ev)=>{
     link.last = null; link.pend = null; link.pendCount = 0; link.until = 0;
     try { const ds = await invoke('get_displays'); link.ddcIds = (ds||[]).filter(d=>d.ddc).map(d=>d.id); } catch(e){ link.ddcIds = []; }
     link.timer = setInterval(linkTick, 2500);
-    pwHint('联动已开（每 2.5 秒检测）：其它屏离线→本组屏跟着待机／回来→跟着点亮');
+    pwHint('联动已开（每 2.5 秒检测）：屏离线→其余屏跟着待机／回来→跟着点亮。⚠️ 只有真正从系统里消失的屏（拔线／断电）才检测得到；智能显示器用遥控关机一般不改变接口信号，检测不到');
   } else {
     if (link.timer) clearInterval(link.timer);
     link.timer = null;
@@ -462,12 +480,105 @@ document.getElementById('cell-adbconn').onclick = async (ev)=>{
   } catch(e){ adbSay('连接失败：' + (e && e.message ? e.message : e), true); }
 };
 
+// ============ 显示器健康（KVM 切换 / EDID 重新协商异常的记录与修复） ============
+// 背景：本机链路是「电脑 --USB-C→DP/HDMI-- KVM --DP/HDMI-- 两块屏」，KVM 切换、
+// 显示器开关、电脑重启时会重新协商 EDID，协商失败表现为黑屏不恢复 / 抖动花屏 /
+// 清晰度变差、画面发白发亮（色彩格式被降级）。这些是显示配置状态错了，重置即可恢复。
+const hHintEl = document.getElementById('health-hint');
+function hSay(t, err){ hHintEl.textContent = t || ''; hHintEl.style.color = err ? '#ef6a6a' : ''; }
+const hEvtBox = document.getElementById('health-events');
+let hEvts = [];
+
+function hPaintEvents(){
+  const n = hEvts.length;
+  const badge = document.getElementById('health-badge');
+  const disc = hEvts.filter(x => x.id === '1010').length;   // 1010 = 设备被突然移除
+  const tdr = hEvts.filter(x => x.id === '4101').length;    // 4101 = 显示驱动重置
+  badge.textContent = n ? (n + ' 条') : '正常';
+  if (!n) {
+    hEvtBox.innerHTML = '<div class="hint" style="padding:0">近 24 小时未检测到显示器链路异常 👍</div>';
+  } else {
+    hEvtBox.innerHTML = hEvts.slice(0, 8).map(e=>{
+      const color = (e.lvl === '错误' || e.lvl === '严重') ? '#ef6a6a' : (e.lvl === '警告' ? '#e8a75c' : '#a8b0bf');
+      const m = (e.msg || '').replace(/Display|display/g, '屏');
+      return '<div class="hint" style="padding:2px 0;color:'+color+'">'+e.t+' · '+e.lvl+' · #'+e.id+' · '+m.slice(0,68)+'</div>';
+    }).join('') + (n > 8 ? '<div class="hint" style="padding:2px 0">…共 '+n+' 条</div>' : '');
+  }
+  let s = '近 24 小时 ' + n + ' 条链路事件';
+  if (disc) s += '，其中 ' + disc + ' 次显示器突然离线';
+  if (tdr) s += '，' + tdr + ' 次显示驱动重置';
+  if (disc || tdr) s += '　→ 建议试「一键修复」';
+  hSay(n ? s : '近 24 小时链路正常，没有异常记录 👍');
+}
+
+async function hLoadEvents(){
+  try {
+    const raw = await invoke('health_events', { minutes: 1440 });
+    hEvts = [];
+    if (raw) {
+      for (const line of raw.split('\n')) {
+        const p = line.split('|');
+        if (p[0] === 'E' && p.length >= 6) hEvts.push({ t: p[1], lvl: p[2], prov: p[3], id: p[4], msg: p.slice(5).join('|') });
+      }
+    }
+    hPaintEvents();
+  } catch(e){ hSay('读取链路记录失败：' + (e && e.message ? e.message : e), true); }
+}
+
+async function hRepair(level){
+  hSay(level >= 2 ? '深度修复中：强制重新协商 + 链路重握手（屏幕会黑一下再回来，约 5 秒）…'
+                  : '修复中：重新协商显示配置（屏幕可能短暂闪一下）…');
+  try {
+    const r = await invoke('repair_display', { level: level });
+    const brief = String(r || '').split('\n').map(x => x.replace(/\|/g, ' → ')).join('；');
+    hSay('修复完成：' + brief);
+    setTimeout(hLoadEvents, 1500);
+  } catch(e){ hSay('修复失败：' + (e && e.message ? e.message : e), true); }
+}
+
+document.getElementById('cell-hrepair').onclick = (ev)=>{ flash(ev.currentTarget); hRepair(1); };
+document.getElementById('cell-hdeep').onclick   = (ev)=>{ flash(ev.currentTarget); hRepair(2); };
+document.getElementById('cell-hscan').onclick   = async (ev)=>{ flash(ev.currentTarget); hSay('正在读取链路记录…'); await hLoadEvents(); };
+
+setTimeout(hLoadEvents, 1200);
+setInterval(hLoadEvents, 60000);   // 每分钟刷新一次链路记录
+
+// 自动修复 / 掉线提醒 两个开关（存在 %APPDATA%\Screenguard\health.json）
+async function hLoadCfg(){
+  try {
+    const c = await invoke('health_get_config');
+    document.getElementById('h-auto').checked = !!c.auto_repair;
+    document.getElementById('h-notify').checked = !!c.notify;
+  } catch(e){ /* 预览模式静默 */ }
+}
+async function hSaveCfg(){
+  try {
+    await invoke('health_set_config', {
+      autoRepair: document.getElementById('h-auto').checked,
+      notify: document.getElementById('h-notify').checked
+    });
+  } catch(e){ hSay('保存设置失败：' + (e && e.message ? e.message : e), true); }
+}
+document.getElementById('h-auto').onchange = (ev)=>{
+  hSaveCfg();
+  hSay(ev.target.checked
+    ? '自动修复已开：检测到显示器掉线且 6 秒后仍没恢复，会自动重新协商显示配置'
+    : '自动修复已关');
+};
+document.getElementById('h-notify').onchange = (ev)=>{
+  hSaveCfg();
+  hSay(ev.target.checked ? '掉线提醒已开：出现链路掉线会在右下角弹提示' : '掉线提醒已关');
+};
+hLoadCfg();
+
 // 调试/自动化钩子：允许从外部（CDP）驱动联动状态机做验证，也方便排查"为什么没触发/误触发"
 window.__sg = {
   link: link,
   linkTick: linkTick,
   paintLink: paintLink,
-  snapshot: () => invoke('display_snapshot')
+  snapshot: () => invoke('display_snapshot'),
+  healthEvents: hLoadEvents,
+  repair: hRepair
 };
 </script>
 </body>
