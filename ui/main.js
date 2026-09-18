@@ -213,13 +213,17 @@ async function loadBatteries() {
       const pct = b.percent >= 0 ? b.percent : null;
       const barCls = pct == null ? '' : (b.charging ? ' charging' : (pct <= 20 ? ' low' : ''));
       const barWidth = pct == null ? 0 : pct;
+      // 健康度 / 容量（能读到才显示，不给假数字）
+      const healthTxt = (b.health >= 0) ? `健康度 ${b.health}%` : '';
+      const capTxt = (b.full_mwh > 0) ? `满充 ${b.full_mwh} mWh` : '';
+      const meta2 = [b.conn || '其它', healthTxt, capTxt].filter(Boolean).join(' · ');
       const row = document.createElement('div');
       row.className = 'batt-row';
       row.innerHTML = `
         <div class="batt-icon">${battIcon(b.conn)}</div>
         <div class="batt-main">
           <div class="batt-name">${b.name || '电池设备'}</div>
-          <div class="batt-meta">${b.conn || '其它'}</div>
+          <div class="batt-meta">${meta2}</div>
         </div>
         <div class="batt-right">
           <div class="batt-bar"><i class="${barCls}" style="width:${barWidth}%"></i></div>
@@ -274,7 +278,112 @@ document.getElementById('match-mac').onclick = () => {
   const label = document.getElementById('match-mac').textContent;
   run('match_mac', {}, `已${label}`);
 };
-document.getElementById('match-ppi').onclick = () => run('match_ppi', {}, '已匹配 PPI（窗口跨屏不再变小）');
+
+// 亮度同步：把所有能读到亮度的屏统一到平均值（读不到 DDC 的屏由「总亮度」覆盖）
+document.getElementById('bri-sync').onclick = async () => {
+  try {
+    setStatus('正在同步各屏亮度…');
+    const ds = await invoke('get_displays');
+    const withBri = (ds || []).filter(d => d.brightness != null);
+    if (!withBri.length) {
+      setStatus('两块屏都读不到独立亮度（DDC 不通）→ 请用「系统控制 → 总亮度」统一调节', false);
+      return;
+    }
+    const avg = Math.round(withBri.reduce((s, d) => s + d.brightness, 0) / withBri.length);
+    for (const d of withBri) { try { await invoke('set_brightness', { displayId: d.id, value: avg }); } catch(e){} }
+    setStatus(`已把 ${withBri.length} 台屏亮度统一为 ${avg}%`);
+  } catch (e) { setStatus('亮度同步失败：' + errText(e), false); }
+};
+
+// HDR 同步：读状态 → 有开就全关，全关就全开
+document.getElementById('hdr-sync').onclick = async () => {
+  try {
+    setStatus('正在读取 HDR 状态…');
+    const raw = String(await invoke('hdr_states') || '');
+    let anyOn = false, sup = 0;
+    for (const line of raw.split('\n')) {
+      const p = line.split('|');
+      if (p[0] === 'H' && p.length >= 4) { if (p[2] === '1') sup++; if (p[3] === '1') anyOn = true; }
+    }
+    if (!sup) { setStatus('本机没有支持 HDR 的显示器', false); return; }
+    const want = !anyOn;
+    const r = await invoke('hdr_set', { on: want });
+    setStatus(`HDR ${want ? '已开启' : '已关闭'}：${r}`);
+  } catch (e) { setStatus('HDR 同步失败：' + errText(e), false); }
+};
+
+// 总亮度（gamma，对所有屏生效）
+const bri = { latest: null, busy: false };
+function sendGamma(v) {
+  bri.latest = v;
+  if (bri.busy) return;
+  bri.busy = true;
+  (async () => {
+    while (bri.latest !== null) {
+      const v2 = bri.latest; bri.latest = null;
+      try { await invoke('gamma_set', { pct: Number(v2) }); } catch (e) {}
+    }
+    bri.busy = false;
+  })();
+}
+document.getElementById('all-bri').addEventListener('input', (ev) => {
+  document.getElementById('all-bri-val').textContent = ev.target.value + '%';
+  setStatus('总亮度 → ' + ev.target.value + '%');
+  sendGamma(ev.target.value);
+});
+document.getElementById('bri-reset').onclick = async () => {
+  document.getElementById('all-bri').value = 100;
+  document.getElementById('all-bri-val').textContent = '100%';
+  try { await invoke('gamma_set', { pct: 100 }); setStatus('总亮度已复位到 100%（原始曲线）'); }
+  catch (e) { setStatus('复位失败：' + errText(e), false); }
+};
+(async () => {
+  try {
+    const g = String(await invoke('gamma_get') || '');
+    let pct = 100;
+    for (const line of g.split('\n')) {
+      const p = line.split('|');
+      if (p[0] === 'G' && p.length >= 3) { const v = Number(p[2]); if (v >= 40 && v !== 100) pct = v; }
+    }
+    document.getElementById('all-bri').value = pct;
+    document.getElementById('all-bri-val').textContent = pct + '%';
+  } catch (e) {}
+})();
+
+// 全局快捷键显示
+(async () => {
+  const el = document.getElementById('hk-note');
+  try {
+    const hk = await invoke('hotkey_start');
+    el.innerHTML = `全局快捷键：<span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">${hk}</span> 切换「全部屏幕待机 / 唤醒」`;
+  } catch (e) { el.textContent = '全局快捷键：' + errText(e); }
+})();
+
+// 铺满任意前台窗口
+document.getElementById('span-fg').onclick = async () => {
+  try {
+    setStatus('正在把当前窗口铺满两块屏…');
+    const title = await invoke('span_foreground');
+    setStatus(`已铺满：「${title}」（点「还原」回到原位置）`);
+  } catch (e) { setStatus('铺满失败：' + errText(e), false); }
+};
+document.getElementById('restore-fg').onclick = async () => {
+  try { await invoke('restore_foreground'); setStatus('已还原上一个被铺满的窗口'); }
+  catch (e) { setStatus('还原失败：' + errText(e), false); }
+};
+document.getElementById('match-ppi').onclick = async () => {
+  try {
+    setStatus('正在对齐两块屏缩放…');
+    const msg = await invoke('match_dpi_apply');
+    setStatus(String(msg));
+  } catch (e) { setStatus('对齐失败：' + errText(e), false); }
+};
+document.getElementById('dpi-restore').onclick = async () => {
+  try {
+    const msg = await invoke('match_dpi_restore');
+    setStatus(String(msg));
+  } catch (e) { setStatus('还原失败：' + errText(e), false); }
+};
 document.getElementById('rotate-secondary').onclick = () => run('rotate_secondary', {}, '已切换副屏横竖屏');
 document.getElementById('restore-secondary').onclick = () => run('restore_secondary', {}, '已恢复副屏为竖屏');
 document.getElementById('span-video').onclick = () => run('span_video', {}, '正在铺满双屏…');

@@ -112,12 +112,71 @@ pub struct BatteryInfo {
     pub on_ac: bool,
     /// 连接类型：内置 / 蓝牙 / USB/无线 / USB / 其它
     pub conn: String,
+    /// 健康度（满充容量/设计容量 ×100）；-1 = 该设备不提供
+    pub health: i32,
+    /// 当前容量（mWh；相对模式的 HID 外设为 0）
+    pub cap_mwh: u32,
+    /// 满充容量（mWh；相对模式的 HID 外设为 0）
+    pub full_mwh: u32,
 }
 
 #[cfg(not(target_os = "windows"))]
 pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
     // macOS/Linux 的外设电量走 IOKit/upower，后续版本再做；先明确告知
     Err("电池设备监控仅支持 Windows".to_string())
+}
+
+// ---------- 软件层总亮度 / HDR / 前台窗口铺满 / 全局快捷键（非 Windows 存根） ----------
+
+#[cfg(not(target_os = "windows"))]
+pub fn gamma_get() -> String {
+    String::new()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn gamma_set(_pct: u32) -> Result<String, String> {
+    Err("总亮度控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn hdr_states() -> String {
+    String::new()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn hdr_set(_on: bool) -> Result<String, String> {
+    Err("HDR 同步仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn span_foreground() -> Result<String, String> {
+    Err("窗口铺满仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn restore_foreground() -> Result<(), String> {
+    Err("窗口铺满仅支持 Windows".to_string())
+}
+
+/// 全局快捷键：仅 Windows 用原生 RegisterHotKey 注册
+#[cfg(not(target_os = "windows"))]
+pub fn hotkey_start() -> Result<String, String> {
+    Err("全局快捷键仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn hotkey_label() -> String {
+    String::new()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn match_dpi_apply() -> Result<String, String> {
+    Err("跨屏缩放对齐仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn match_dpi_restore() -> Result<String, String> {
+    Err("跨屏缩放对齐仅支持 Windows".to_string())
 }
 
 // ---------- 屏幕电源控制（方案A）：非 Windows 平台存根 ----------

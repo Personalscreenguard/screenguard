@@ -176,6 +176,33 @@ public class SGCore {
   [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref SGDC_SRC_NAME pkt);
   [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref SGDC_DST_NAME pkt);
 
+  // ---- 软件层总亮度（gamma ramp）：不依赖 DDC/CI，对任何屏都生效 ----
+  [DllImport("gdi32.dll")] static extern bool SetDeviceGammaRamp(IntPtr hdc, ushort[] ramp);
+  [DllImport("gdi32.dll")] static extern bool GetDeviceGammaRamp(IntPtr hdc, ushort[] ramp);
+  // ---- 前台窗口铺满 / 恢复（不限于播放器）----
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern IntPtr GetShellWindow();
+  [DllImport("user32.dll")] static extern IntPtr GetDesktopWindow();
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextW(IntPtr h, StringBuilder s, int max);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+  // ---- HDR（advanced color）状态读写 ----
+  [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref SGDC_ACI pkt);
+  [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref SGDC_ACS pkt);
+  [DllImport("user32.dll")] static extern int DisplayConfigSetDeviceInfo(ref SGDC_ACS pkt);
+
+  /// DISPLAYCONFIG_DEVICE_INFO_HEADER（20 字节；LUID 拆两个 32 位，避免 .NET 对齐补白）
+  [StructLayout(LayoutKind.Sequential)]
+  struct SGDC_HDR2 { public uint type; public uint size; public uint adapterLow; public int adapterHigh; public uint id; }
+  /// DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO（32 字节）。value 位 0=支持, 位 1=已启用
+  [StructLayout(LayoutKind.Sequential)]
+  struct SGDC_ACI { public SGDC_HDR2 header; public uint value; public uint colorEncoding; public uint bits; }
+  /// DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE（24 字节）
+  [StructLayout(LayoutKind.Sequential)]
+  struct SGDC_ACS { public SGDC_HDR2 header; public uint enable; }
+
   const int GWL_STYLE = -16;
   const uint WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_POPUP = 0x80000000;
   const uint SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
@@ -273,6 +300,238 @@ public class SGCore {
       }
       return sb.ToString();
     } finally { Marshal.FreeHGlobal(pa); Marshal.FreeHGlobal(ma); }
+  }
+
+  // ===== 软件层总亮度（gamma ramp）：不依赖 DDC/CI，对任何显示器都生效 =====
+  // 设计要点：三通道写同一条曲线 → 只改明暗、不动色相（颜色安全）；
+  // 范围锁 40~160，避免把屏幕调到看不见；gamma ramp 不写注册表、重启即失效（天然可回滚）。
+
+  /// 生成亮度曲线：out = v^(100/pct)，端点 0/1 保持不变（不削顶、不发灰）
+  static ushort[] BuildRamp(int pct) {
+    if (pct < 40) pct = 40;
+    if (pct > 160) pct = 160;
+    double inv = 100.0 / pct;
+    var ramp = new ushort[768];
+    for (int i = 0; i < 256; i++) {
+      double v = i / 255.0;
+      double o = Math.Pow(v, inv);
+      int w = (int)Math.Round(o * 65535.0);
+      if (w < 0) w = 0;
+      if (w > 65535) w = 65535;
+      ushort u = (ushort)w;
+      ramp[i] = u; ramp[i + 256] = u; ramp[i + 512] = u;
+    }
+    return ramp;
+  }
+
+  /// 把总亮度应用到所有在用屏幕。返回逐屏结果：OK|<dev> / FAIL|<dev>
+  public static string GammaSetAll(int pct) {
+    if (pct < 40) pct = 40;
+    if (pct > 160) pct = 160;
+    ushort[] ramp = BuildRamp(pct);
+    var sb = new StringBuilder();
+    for (int i = 1; i <= 12; i++) {
+      string dev = "\\\\.\\DISPLAY" + i;
+      var dm = AllocDevMode();
+      try {
+        if (!EnumDisplaySettingsW(dev, -1, dm)) continue;
+        if (Marshal.ReadInt32(dm, OFF_PELSWIDTH) <= 0) continue;
+        IntPtr dc = CreateDCW(null, dev, null, IntPtr.Zero);
+        if (dc == IntPtr.Zero) continue;
+        try {
+          bool ok = SetDeviceGammaRamp(dc, ramp);
+          sb.Append(ok ? "OK|" : "FAIL|").Append(dev).Append((char)10);
+        } finally { DeleteDC(dc); }
+      } finally { Marshal.FreeHGlobal(dm); }
+    }
+    return sb.ToString();
+  }
+
+  /// 读回当前总亮度（按中灰点反解 gamma 指数）。行: G|<dev>|<pct>
+  public static string GammaGetAll() {
+    var sb = new StringBuilder();
+    for (int i = 1; i <= 12; i++) {
+      string dev = "\\\\.\\DISPLAY" + i;
+      var dm = AllocDevMode();
+      try {
+        if (!EnumDisplaySettingsW(dev, -1, dm)) continue;
+        if (Marshal.ReadInt32(dm, OFF_PELSWIDTH) <= 0) continue;
+        IntPtr dc = CreateDCW(null, dev, null, IntPtr.Zero);
+        if (dc == IntPtr.Zero) continue;
+        try {
+          var ramp = new ushort[768];
+          int pct = 100;
+          if (GetDeviceGammaRamp(dc, ramp)) {
+            double mid = ramp[128] / 65535.0;          // 128/255 = 0.50196
+            if (mid > 0.03 && mid < 0.97) {
+              double f = Math.Log(0.50196) / Math.Log(mid);
+              if (f > 0.3 && f < 3.5) pct = (int)Math.Round(f * 100.0);
+            }
+          }
+          sb.Append("G|").Append(dev).Append("|").Append(pct).Append((char)10);
+        } finally { DeleteDC(dc); }
+      } finally { Marshal.FreeHGlobal(dm); }
+    }
+    return sb.ToString();
+  }
+
+  // ===== HDR（advanced color）状态读写 =====
+  /// 每台屏的 HDR 状态：H|<dev>|<是否支持>|<是否已启用>
+  public static string HDRStates() {
+    var sb = new StringBuilder();
+    uint nPaths, nModes;
+    if (GetDisplayConfigBufferSizes(2, out nPaths, out nModes) != 0 || nPaths == 0) return "";
+    IntPtr pa = Marshal.AllocHGlobal((int)(nPaths * 72));
+    IntPtr ma = Marshal.AllocHGlobal((int)(nModes * 64));
+    try {
+      uint p = nPaths, m = nModes;
+      if (QueryDisplayConfigRaw(2, ref p, pa, ref m, ma, IntPtr.Zero) != 0) return "";
+      var seen = new System.Collections.Generic.HashSet<string>();
+      for (int i = 0; i < p; i++) {
+        int off = i * 72;
+        var src = new SGDC_SRC_NAME();
+        src.header.type = 1; src.header.size = (uint)Marshal.SizeOf(typeof(SGDC_SRC_NAME));
+        src.header.adapterId.LowPart = (uint)Marshal.ReadInt32(pa, off);
+        src.header.adapterId.HighPart = Marshal.ReadInt32(pa, off + 4);
+        src.header.id = (uint)Marshal.ReadInt32(pa, off + 8);
+        if (DisplayConfigGetDeviceInfo(ref src) != 0) continue;
+        string dev = src.viewGdiDeviceName;
+        if (string.IsNullOrEmpty(dev) || !seen.Add(dev.ToUpperInvariant())) continue;
+        var aci = new SGDC_ACI();
+        aci.header.type = 9;                          // GET_ADVANCED_COLOR_INFO
+        aci.header.size = (uint)Marshal.SizeOf(typeof(SGDC_ACI));
+        aci.header.adapterLow = (uint)Marshal.ReadInt32(pa, off + 20);
+        aci.header.adapterHigh = Marshal.ReadInt32(pa, off + 24);
+        aci.header.id = (uint)Marshal.ReadInt32(pa, off + 28);
+        if (DisplayConfigGetDeviceInfo(ref aci) != 0) continue;
+        int sup = (int)(aci.value & 1);
+        int en = (int)((aci.value >> 1) & 1);
+        sb.Append("H|").Append(dev).Append("|").Append(sup).Append("|").Append(en).Append((char)10);
+      }
+      return sb.ToString();
+    } finally { Marshal.FreeHGlobal(pa); Marshal.FreeHGlobal(ma); }
+  }
+
+  /// 把所有支持 HDR 的屏统一设为开(on=1)或关(on=0)。返回逐屏结果 R|dev|OK或ERR
+  public static string HDRSetAll(int on) {
+    var sb = new StringBuilder();
+    uint nPaths, nModes;
+    if (GetDisplayConfigBufferSizes(2, out nPaths, out nModes) != 0 || nPaths == 0) return "";
+    IntPtr pa = Marshal.AllocHGlobal((int)(nPaths * 72));
+    IntPtr ma = Marshal.AllocHGlobal((int)(nModes * 64));
+    try {
+      uint p = nPaths, m = nModes;
+      if (QueryDisplayConfigRaw(2, ref p, pa, ref m, ma, IntPtr.Zero) != 0) return "";
+      var seen = new System.Collections.Generic.HashSet<string>();
+      for (int i = 0; i < p; i++) {
+        int off = i * 72;
+        var src = new SGDC_SRC_NAME();
+        src.header.type = 1; src.header.size = (uint)Marshal.SizeOf(typeof(SGDC_SRC_NAME));
+        src.header.adapterId.LowPart = (uint)Marshal.ReadInt32(pa, off);
+        src.header.adapterId.HighPart = Marshal.ReadInt32(pa, off + 4);
+        src.header.id = (uint)Marshal.ReadInt32(pa, off + 8);
+        if (DisplayConfigGetDeviceInfo(ref src) != 0) continue;
+        string dev = src.viewGdiDeviceName;
+        if (string.IsNullOrEmpty(dev) || !seen.Add(dev.ToUpperInvariant())) continue;
+
+        var aci = new SGDC_ACI();
+        aci.header.type = 9; aci.header.size = (uint)Marshal.SizeOf(typeof(SGDC_ACI));
+        aci.header.adapterLow = (uint)Marshal.ReadInt32(pa, off + 20);
+        aci.header.adapterHigh = Marshal.ReadInt32(pa, off + 24);
+        aci.header.id = (uint)Marshal.ReadInt32(pa, off + 28);
+        if (DisplayConfigGetDeviceInfo(ref aci) != 0) continue;
+        if ((aci.value & 1) == 0) {                   // 不支持 HDR 的屏跳过（不乱设）
+          sb.Append("R|").Append(dev).Append("|SKIP(该屏不支持HDR)").Append((char)10);
+          continue;
+        }
+        var acs = new SGDC_ACS();
+        acs.header.type = 10;                         // SET_ADVANCED_COLOR_STATE
+        acs.header.size = (uint)Marshal.SizeOf(typeof(SGDC_ACS));
+        acs.header.adapterLow = (uint)Marshal.ReadInt32(pa, off + 20);
+        acs.header.adapterHigh = Marshal.ReadInt32(pa, off + 24);
+        acs.header.id = (uint)Marshal.ReadInt32(pa, off + 28);
+        acs.enable = (uint)(on != 0 ? 1 : 0);
+        int r = DisplayConfigSetDeviceInfo(ref acs);
+        sb.Append("R|").Append(dev).Append("|").Append(r == 0 ? "OK" : ("ERR:" + r)).Append((char)10);
+      }
+      return sb.ToString();
+    } finally { Marshal.FreeHGlobal(pa); Marshal.FreeHGlobal(ma); }
+  }
+
+  // ===== 双屏铺满（任意前台窗口，不限于播放器）=====
+  /// 从极简 JSON 里取一个整数键（避免引入 JSON 依赖）
+  static long JsInt(string js, string key) {
+    try {
+      int k = js.IndexOf("\"" + key + "\"");
+      if (k < 0) return 0;
+      int c = js.IndexOf(":", k);
+      if (c < 0) return 0;
+      int s = c + 1;
+      while (s < js.Length && (js[s] == 32 || js[s] == 9)) s++;
+      int e = s;
+      while (e < js.Length && (char.IsDigit(js[e]) || js[e] == 45)) e++;
+      long v;
+      return long.TryParse(js.Substring(s, e - s), out v) ? v : 0;
+    } catch { return 0; }
+  }
+
+  /// 把当前前台窗口铺满所有屏幕的包围盒（抖音/浏览器全屏视频、播放器都适用）。
+  /// 记录窗口句柄 + 原始位置/样式到 stateFile，供 RestoreForeground 还原。
+  /// 返回 OK|<窗口标题> 或 ERR:<原因>
+  public static string SpanForeground(string stateFile) {
+    IntPtr h = GetForegroundWindow();
+    if (h == IntPtr.Zero) return "ERR:没有前台窗口";
+    if (h == GetShellWindow() || h == GetDesktopWindow()) return "ERR:当前前台是桌面/任务栏，请先切换到要铺满的窗口";
+    var ti = new StringBuilder(300);
+    GetWindowTextW(h, ti, 300);
+    string title = ti.ToString();
+    // 最大化/最小化先还原，否则 SetWindowPos 改不动尺寸
+    if (IsIconic(h) || IsZoomed(h)) ShowWindow(h, 9);  // SW_RESTORE
+    System.Threading.Thread.Sleep(260);
+    SGRECT wr;
+    if (!GetWindowRect(h, out wr)) return "ERR:读取窗口位置失败";
+    if (wr.Right - wr.Left <= 0 || wr.Bottom - wr.Top <= 0) return "ERR:窗口尺寸无效（可能已被最小化）";
+    long oldStyle = GetWindowLongPtr(h, GWL_STYLE).ToInt64();
+    int vx0 = GetSystemMetrics(76), vy0 = GetSystemMetrics(77);
+    int vw0 = GetSystemMetrics(78), vh0 = GetSystemMetrics(79);
+    // 防呆：已经处于铺满状态、且备份记录属于同一个窗口时，不要再覆盖备份
+    // （否则连点两次「铺满」会把备份写成铺满后的矩形，「还原」就再也回不去了）
+    bool alreadySpanned = Math.Abs(wr.Left - vx0) < 4 && Math.Abs(wr.Top - vy0) < 4
+      && Math.Abs((wr.Right - wr.Left) - vw0) < 8 && Math.Abs((wr.Bottom - wr.Top) - vh0) < 8;
+    bool sameWin = false;
+    try {
+      if (System.IO.File.Exists(stateFile)) {
+        sameWin = JsInt(System.IO.File.ReadAllText(stateFile), "hwnd") == h.ToInt64();
+      }
+    } catch { }
+    if (!(alreadySpanned && sameWin)) {
+      string json = "{\"hwnd\":" + h.ToInt64() + ",\"x\":" + wr.Left + ",\"y\":" + wr.Top
+        + ",\"w\":" + (wr.Right - wr.Left) + ",\"h\":" + (wr.Bottom - wr.Top)
+        + ",\"style\":" + oldStyle + "}";
+      try { System.IO.File.WriteAllText(stateFile, json); } catch { }
+    }
+    long s = oldStyle;
+    s &= ~((long)WS_CAPTION | (long)WS_THICKFRAME);
+    s |= (long)WS_POPUP;
+    SetWindowLongPtr(h, GWL_STYLE, new IntPtr(s));
+    int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77);
+    int vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
+    SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    return "OK|" + (string.IsNullOrEmpty(title) ? "（无标题窗口）" : title);
+  }
+
+  /// 还原上一次被铺满的窗口（按记录里的句柄找，不依赖当前前台）
+  public static string RestoreForeground(string stateFile) {
+    string js;
+    try { js = System.IO.File.ReadAllText(stateFile); } catch { return "ERR:没有可恢复的记录（先点一次铺满）"; }
+    IntPtr h = new IntPtr(JsInt(js, "hwnd"));
+    if (h == IntPtr.Zero || !IsWindow(h)) return "ERR:原窗口已关闭";
+    int x = (int)JsInt(js, "x"), y = (int)JsInt(js, "y");
+    int w = (int)JsInt(js, "w"), hh = (int)JsInt(js, "h");
+    long st = JsInt(js, "style");
+    if (st != 0) SetWindowLongPtr(h, GWL_STYLE, new IntPtr(st));
+    SetWindowPos(h, IntPtr.Zero, x, y, w, hh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    return "OK";
   }
 
   /// 对指定显示设备执行 DDC/CI（VCP 读或写），返回是否命中；retries 为最大重试次数
@@ -899,7 +1158,7 @@ public class SGBatt {
 
           // 4b) QUERY_INFORMATION(level=0)：BATTERY_INFORMATION 36 字节（含 CycleCount），
           //     FullChargedCapacity 在偏移 16（绝对模式=mWh，相对模式=100）
-          uint full = 0;
+          uint full = 0, designed = 0;
           IntPtr qi = Marshal.AllocHGlobal(12);   // {tag, level, atRate}
           IntPtr info = Marshal.AllocHGlobal(48);
           try {
@@ -908,6 +1167,7 @@ public class SGBatt {
             Marshal.WriteInt32(qi, 8, 0);
             if (DeviceIoControl(b, IOCTL_INFO, qi, 12, info, 48, out got, IntPtr.Zero) && got >= 20) {
               full = (uint)Marshal.ReadInt32(info, 16); // FullChargedCapacity
+              if (got >= 16) designed = (uint)Marshal.ReadInt32(info, 12); // DesignedCapacity（健康度分母）
             }
             // 名称兜底：外设（USB/无线/蓝牙）注册表名是泛型时，读电池栈 BatteryDeviceName
             if (genericName && conn != "内置") {
@@ -946,8 +1206,16 @@ public class SGBatt {
           uint stateBits = 0;
           if ((powerState & ST_CHARGING) != 0) stateBits |= 1;
           if ((powerState & ST_ON_LINE) != 0) stateBits |= 2;
+          // 健康度：满充容量 / 设计容量（仅当两者合理时给出，否则 -1 不给误导数字）
+          int health = -1;
+          if (designed > 0 && full > 0 && full <= designed + designed / 20) {
+            health = (int)Math.Round(full * 100.0 / designed);
+            if (health > 100) health = 100;
+            if (health < 1) health = -1;
+          }
           sb.Append("B|").Append(Esc(name)).Append("|").Append(percent).Append("|")
-            .Append(stateBits).Append("|").Append(conn).Append((char)10);
+            .Append(stateBits).Append("|").Append(conn).Append("|").Append(health)
+            .Append("|").Append(cap).Append("|").Append(full).Append((char)10);
         } finally { Marshal.FreeHGlobal(tagBuf); Marshal.FreeHGlobal(waitIn); }
       } finally { CloseHandle(b); }
     } finally { Marshal.FreeHGlobal(det); }
@@ -1403,7 +1671,8 @@ pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
     let mut list = Vec::new();
     for line in out.lines() {
         let t = line.trim_end();
-        // B|<名称>|<百分比或-1>|<状态位1=充电,2=接电>|<连接类型>
+        // B|<名称>|<百分比或-1>|<状态位1=充电,2=接电>|<连接类型>|<健康度>|<当前容量mWh>|<满充容量mWh>
+        // 备注：打开设备失败时只输出前 5 段（后三项缺省）
         let rest = match t.strip_prefix("B|") {
             Some(r) => r,
             None => continue,
@@ -1414,12 +1683,18 @@ pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
         }
         let percent: i32 = p[1].trim().parse().unwrap_or(-1);
         let state: u32 = p[2].trim().parse().unwrap_or(0);
+        let health: i32 = if p.len() > 4 { p[4].trim().parse().unwrap_or(-1) } else { -1 };
+        let cap_mwh: u32 = if p.len() > 5 { p[5].trim().parse().unwrap_or(0) } else { 0 };
+        let full_mwh: u32 = if p.len() > 6 { p[6].trim().parse().unwrap_or(0) } else { 0 };
         list.push(BatteryInfo {
             name: p[0].to_string(),
             percent,
             charging: state & 1 != 0,
             on_ac: state & 2 != 0,
             conn: p[3].to_string(),
+            health,
+            cap_mwh,
+            full_mwh,
         });
     }
     Ok(list)
@@ -1435,38 +1710,71 @@ const COLOR_DIR: &str = "screenguard_icc";
 /// 系统色彩目录：Windows 只认这里的配置文件
 const SYSTEM_COLOR_DIR: &str = r"C:\Windows\System32\spool\drivers\color";
 
+/// 色彩空间别名表：用户目录 / 系统色彩目录里只要放着名字匹配的 .icm/.icc 就能用。
+/// 这样"支持多少种色彩空间"不再被硬编码列表限制 —— 放进对应配置文件即可生效。
+/// 键为规范化后的空间名（小写、去掉 - . 空格），值为候选文件名片段（同样规范化）。
+const SPACE_ALIASES: &[(&str, &[&str])] = &[
+    ("srgb", &["srgbcolorspaceprofile", "srgb"]),
+    ("p3", &["displayp3", "displayp3", "p3"]),
+    ("dcip3", &["dcip3", "p3d65", "dci"]),
+    ("adobergb", &["adobergb1998", "adobergb", "adobergb1998"]),
+    ("rec709", &["rec709", "bt709", "itu709"]),
+    ("rec2020", &["rec2020", "bt2020", "itu2020"]),
+    ("prophoto", &["prophoto"]),
+    ("gray", &["gray", "grey", "grayscale"]),
+];
+
+fn flatten_key(s: &str) -> String {
+    s.to_lowercase()
+        .replace("-", "")
+        .replace(".", "")
+        .replace(" ", "")
+        .replace("_", "")
+}
+
 /// 定位目标 ICC 文件。
-/// sRGB 用系统内置；Display P3 / Adobe RGB 系统不带，需用户自备放到
-/// %LOCALAPPDATA%\screenguard_icc\，由 apply_color_space 自动安装进系统色彩目录。
+/// 顺序：系统内置 sRGB → 用户目录 %LOCALAPPDATA%\screenguard_icc\ → 系统色彩目录，
+/// 按别名表模糊匹配文件名。找不到时给出可操作的指引（放哪个目录、从哪拷）。
 fn icc_path(space: &str) -> Result<String, String> {
-    match space.to_lowercase().as_str() {
-        "srgb" => {
-            let p = format!(r"{}\sRGB Color Space Profile.icm", SYSTEM_COLOR_DIR);
-            if std::path::Path::new(&p).exists() {
-                Ok(p)
-            } else {
-                Err("未找到系统内置 sRGB 配置（sRGB Color Space Profile.icm）".to_string())
-            }
+    let key = flatten_key(space);
+    if key == "srgb" {
+        let p = format!(r"{}\sRGB Color Space Profile.icm", SYSTEM_COLOR_DIR);
+        if std::path::Path::new(&p).exists() {
+            return Ok(p);
         }
-        "p3" | "adobergb" => {
-            let dir = format!("{}\\{}", std::env::var("LOCALAPPDATA").unwrap_or_default(), COLOR_DIR);
-            let file = if space.eq_ignore_ascii_case("p3") {
-                "DisplayP3.icc"
-            } else {
-                "AdobeRGB1998.icc"
-            };
-            let path = format!("{}\\{}", dir, file);
-            if std::path::Path::new(&path).exists() {
-                Ok(path)
-            } else {
-                Err(format!(
-                    "缺少色彩配置文件 {}：请先把它放到 {}（Windows 不自带 Display P3 / Adobe RGB；macOS 上可从 /System/Library/ColorSync/Profiles/ 复制）",
-                    file, dir
-                ))
-            }
-        }
-        _ => Err("未知色彩空间".to_string()),
     }
+    let wants: Vec<String> = SPACE_ALIASES
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, a)| a.iter().map(|s| flatten_key(s)).collect())
+        .unwrap_or_else(|| vec![key.clone()]);
+    let user_dir = format!(
+        "{}\\{}",
+        std::env::var("LOCALAPPDATA").unwrap_or_default(),
+        COLOR_DIR
+    );
+    for dir in [user_dir.clone(), SYSTEM_COLOR_DIR.to_string()] {
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let low = name.to_lowercase();
+            let ext = low.rsplit('.').next().unwrap_or("").to_string();
+            if ext != "icm" && ext != "icc" {
+                continue;
+            }
+            let flat = flatten_key(&low);
+            if wants.iter().any(|w| !w.is_empty() && flat.contains(w.as_str())) {
+                return Ok(e.path().to_string_lossy().to_string());
+            }
+        }
+    }
+    Err(format!(
+        "缺少「{}」色彩配置文件：把对应的 .icc/.icm 放到 {} 后重试（Windows 只自带 sRGB；P3/AdobeRGB/Rec.2020 等可从 macOS 的 /System/Library/ColorSync/Profiles/ 拷贝，或从显示器厂商官网下载）",
+        space, user_dir
+    ))
 }
 
 /// C# 桥接源码的落盘路径（%TEMP%\screenguard_core.cs）
@@ -1704,6 +2012,115 @@ pub fn match_ppi() -> Result<(), String> {
             if s == 0 { "系统默认".to_string() } else { s.to_string() }
         ))
     }
+}
+
+// ---------- 跨屏 DPI 对齐：真正落地（写 HKCU 逐屏缩放档）+ 可回滚 ----------
+// 为什么旧版"看起来没实现"：Windows 改每屏缩放只有注册表一条路，且必须注销/重登才生效，
+// 没有任何运行时 API 能立刻改 —— 所以旧版只做了诊断。现在改为「先备份、再统一、可还原」。
+
+fn dpi_backup_path() -> String {
+    format!(
+        "{}\\Screenguard\\dpi_backup.txt",
+        std::env::var("APPDATA").unwrap_or_default()
+    )
+}
+
+/// 读出逐屏缩放档：返回 (注册表键名, DpiValue) 列表
+fn dpi_rows() -> Result<Vec<(String, u32)>, String> {
+    let script = "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\n\
+                  $vals = Get-ChildItem 'HKCU:\\Control Panel\\Desktop\\PerMonitorSettings' -ErrorAction SilentlyContinue;\n\
+                  foreach ($v in $vals) { $p = Get-ItemProperty $v.PSPath -ErrorAction SilentlyContinue; Write-Output ('S|' + $v.PSChildName + '|' + $p.DpiValue) }";
+    let raw = ps(script).unwrap_or_default();
+    let mut rows = Vec::new();
+    for line in raw.lines() {
+        let p: Vec<&str> = line.split('|').collect();
+        if p.len() >= 3 && p[0] == "S" && !p[1].trim().is_empty() {
+            rows.push((p[1].trim().to_string(), p[2].trim().parse::<u32>().unwrap_or(0)));
+        }
+    }
+    if rows.is_empty() {
+        return Err("读不到逐屏缩放设置（PerMonitorSettings 为空）".to_string());
+    }
+    Ok(rows)
+}
+
+fn dpi_write(key: &str, value: u32) -> Result<(), String> {
+    // 键名含 ^ 与十六进制，一律走单引号字符串；不做任何转义处理以免破坏键名
+    let s = format!(
+        "$p = 'HKCU:\\Control Panel\\Desktop\\PerMonitorSettings\\{}'; if (-not (Test-Path $p)) {{ New-Item -Path $p -Force | Out-Null }}; Set-ItemProperty -Path $p -Name DpiValue -Value {} -Type DWord; Write-Output OK",
+        key, value
+    );
+    let out = ps(&s)?;
+    if out.contains("OK") {
+        Ok(())
+    } else {
+        Err(format!("写入缩放档 {} 失败", key))
+    }
+}
+
+/// 把副屏（以及其它屏）的缩放档统一成主屏的值；原值备份，可一键还原。
+pub fn match_dpi_apply() -> Result<String, String> {
+    let displays = get_displays();
+    if displays.len() < 2 {
+        return Err("需要主屏 + 副屏各一块才能使用此功能".to_string());
+    }
+    let main = displays.iter().find(|d| d.main).ok_or("未找到主屏")?;
+    let mkey = short_id(&main.id).to_lowercase();
+    let rows = dpi_rows()?;
+    let target = rows
+        .iter()
+        .find(|(k, _)| !mkey.is_empty() && k.to_lowercase().starts_with(&mkey))
+        .map(|(_, v)| *v)
+        .ok_or_else(|| {
+            "没找到主屏对应的缩放档（两块屏可能被系统记在同一个键上）。请到「设置 → 屏幕 → 缩放」手动把两块屏设成同一百分比".to_string()
+        })?;
+    if target == 0 {
+        return Err("主屏缩放当前是「跟随系统」，无法作为对齐目标：请先在系统设置里给主屏选一个具体百分比".to_string());
+    }
+    // 备份（每行 键名|原值）
+    let mut buf = String::new();
+    for (k, v) in &rows {
+        buf.push_str(&format!("{}|{}\n", k, v));
+    }
+    let bp = dpi_backup_path();
+    if let Some(dir) = std::path::Path::new(&bp).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    std::fs::write(&bp, &buf).map_err(|e| format!("备份缩放设置失败：{}", e))?;
+    let mut changed = 0;
+    for (k, v) in &rows {
+        if *v == target {
+            continue;
+        }
+        if dpi_write(k, target).is_ok() {
+            changed += 1;
+        }
+    }
+    Ok(format!(
+        "已把 {} 个缩放档统一为 {}（原值已备份到 {}）。Windows 需注销或重新登录后生效；不满意可点「还原缩放」回到原样",
+        changed,
+        target,
+        bp
+    ))
+}
+
+/// 还原到 match_dpi_apply 之前备份的缩放档
+pub fn match_dpi_restore() -> Result<String, String> {
+    let bp = dpi_backup_path();
+    let txt = std::fs::read_to_string(&bp)
+        .map_err(|_| "没有可还原的缩放备份（还没用「窗口跨屏等大」对齐过）".to_string())?;
+    let mut n = 0;
+    for line in txt.lines() {
+        let p: Vec<&str> = line.split('|').collect();
+        if p.len() < 2 || p[0].trim().is_empty() {
+            continue;
+        }
+        let v: u32 = p[1].trim().parse().unwrap_or(0);
+        if dpi_write(p[0].trim(), v).is_ok() {
+            n += 1;
+        }
+    }
+    Ok(format!("已把 {} 个缩放档还原为备份值（注销或重新登录后生效）", n))
 }
 
 // ---------- 副屏旋转 ----------
@@ -2130,4 +2547,197 @@ Write-Output ('OK:' + (Join-Path $dst 'platform-tools\adb.exe'))"#;
     } else {
         Err(t.to_string())
     }
+}
+
+// ================= 软件层总亮度（gamma ramp，对所有屏生效） =================
+// 为什么用 gamma 而不是 DDC：本机小米显示器经 KVM 的 DP 链路不转发 DDC/CI
+// （Mac 直连可读），DDC 读不到亮度/音量；gamma ramp 由 GDI 直接作用于显卡输出，
+// 不依赖链路协议，因此对两块屏（含小米）都生效。
+// 安全：三通道同曲线（不改色相）、范围锁 40~160、不写注册表（重启即失效）。
+
+/// 各屏当前总亮度：行 G|<dev>|<pct>
+pub fn gamma_get() -> String {
+    ps_core("[SGCore]::GammaGetAll()").unwrap_or_default()
+}
+
+/// 设置所有屏的总亮度（40~160，100 = 原始）
+pub fn gamma_set(pct: u32) -> Result<String, String> {
+    let p = pct.clamp(40, 160);
+    let out = ps_core(&format!("[SGCore]::GammaSetAll({})", p))?;
+    let ok = out.lines().filter(|l| l.starts_with("OK|")).count();
+    let fail = out.lines().filter(|l| l.starts_with("FAIL|")).count();
+    if ok == 0 && fail == 0 {
+        return Err("没有找到可调亮度的在用显示器".to_string());
+    }
+    Ok(format!("{} 台已应用{}", ok, if fail > 0 { format!("，{} 台失败", fail) } else { String::new() }))
+}
+
+// ================= HDR 同步 =================
+
+/// 各屏 HDR 状态：行 H|<dev>|<支持>|<已启用>
+pub fn hdr_states() -> String {
+    ps_core("[SGCore]::HDRStates()").unwrap_or_default()
+}
+
+/// 把所有支持 HDR 的屏统一设为开/关
+pub fn hdr_set(on: bool) -> Result<String, String> {
+    let out = ps_core(&format!("[SGCore]::HDRSetAll({})", if on { 1 } else { 0 }))?;
+    let ok = out.lines().filter(|l| l.contains("|OK")).count();
+    let skip = out.lines().filter(|l| l.contains("SKIP")).count();
+    let err: Vec<&str> = out.lines().filter(|l| l.contains("|ERR")).collect();
+    if ok == 0 && skip > 0 && err.is_empty() {
+        return Err("本机没有支持 HDR 的显示器".to_string());
+    }
+    let mut msg = format!("{} 台已切换", ok);
+    if skip > 0 {
+        msg.push_str(&format!("，{} 台不支持 HDR 已跳过", skip));
+    }
+    if !err.is_empty() {
+        msg.push_str(&format!("，{} 台失败", err.len()));
+    }
+    Ok(msg)
+}
+
+// ================= 双屏铺满（任意前台窗口） =================
+
+/// 铺满状态文件（与播放器铺满分开，互不干扰）
+fn span_fg_file() -> String {
+    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".to_string());
+    format!(r"{}\screenguard_span_fg.json", base)
+}
+
+/// 把当前前台窗口铺满所有屏（浏览器里的抖音全屏、播放器、任意窗口都可以）
+pub fn span_foreground() -> Result<String, String> {
+    let out = ps_core(&format!("[SGCore]::SpanForeground('{}')", span_fg_file()))?;
+    let t = out.trim();
+    if let Some(rest) = t.strip_prefix("OK|") {
+        return Ok(rest.to_string());
+    }
+    Err(t.strip_prefix("ERR:").unwrap_or(t).to_string())
+}
+
+/// 还原上一次被铺满的窗口
+pub fn restore_foreground() -> Result<(), String> {
+    let out = ps_core(&format!("[SGCore]::RestoreForeground('{}')", span_fg_file()))?;
+    let t = out.trim();
+    if t == "OK" {
+        Ok(())
+    } else {
+        Err(t.strip_prefix("ERR:").unwrap_or(t).to_string())
+    }
+}
+
+// ================= 全局快捷键（原生 RegisterHotKey，零额外依赖） =================
+// 用户要求：不能用小米遥控器，就固定一个电脑快捷键，并在软件界面里显示出来。
+// 固定键位：Ctrl+Alt+L —— 切换「全部屏幕待机 / 唤醒」。
+// 实现：独立线程注册（NULL hwnd → 消息投递到线程队列）+ GetMessage 消息循环。
+// 判断当前该关还是该开：记录「屏幕待机」时刻，配合 GetLastInputInfo——
+// 若此后没有任何输入（鼠标/键盘），说明屏还是关着的 → 本次按就是唤醒；
+// 若已有输入（用户自己动鼠标唤醒了）→ 本次按就是再关掉。
+
+const WM_HOTKEY: u32 = 0x0312;
+const MOD_ALT: u32 = 0x0001;
+const MOD_CONTROL: u32 = 0x0002;
+const MOD_NOREPEAT: u32 = 0x4000;
+const VK_L: u32 = 0x4C;
+
+#[repr(C)]
+struct SgMsg {
+    hwnd: *mut std::ffi::c_void,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+    time: u32,
+    pt_x: i32,
+    pt_y: i32,
+    l_private: u32,
+}
+
+#[repr(C)]
+struct SgLastInput {
+    cb_size: u32,
+    dw_time: u32,
+}
+
+#[link(name = "user32")]
+extern "system" {
+    fn RegisterHotKey(hwnd: *mut std::ffi::c_void, id: i32, modifiers: u32, vk: u32) -> i32;
+    fn GetMessageW(msg: *mut SgMsg, hwnd: *mut std::ffi::c_void, min: u32, max: u32) -> i32;
+    fn GetLastInputInfo(pli: *mut SgLastInput) -> i32;
+}
+
+fn hotkey_status() -> &'static Mutex<(bool, String)> {
+    static S: OnceLock<Mutex<(bool, String)>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new((false, String::new())))
+}
+
+/// 屏幕待机时刻（GetTickCount 毫秒）；0 = 当前认为屏是亮的
+fn asleep_tick() -> &'static Mutex<u32> {
+    static S: OnceLock<Mutex<u32>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(0))
+}
+
+fn last_input_tick() -> u32 {
+    unsafe {
+        let mut li = SgLastInput { cb_size: std::mem::size_of::<SgLastInput>() as u32, dw_time: 0 };
+        if GetLastInputInfo(&mut li) != 0 {
+            li.dw_time
+        } else {
+            0
+        }
+    }
+}
+
+/// 热键动作：切换全部屏幕待机 / 唤醒
+fn hotkey_toggle() {
+    let off_at = *asleep_tick().lock().unwrap();
+    let li = last_input_tick();
+    // off_at != 0 且此后没有新输入 → 屏仍处于我们关掉的状态 → 唤醒
+    let should_wake = off_at != 0 && (li == 0 || li <= off_at);
+    if should_wake {
+        let _ = screen_wake();
+        *asleep_tick().lock().unwrap() = 0;
+    } else {
+        let _ = screen_off();
+        *asleep_tick().lock().unwrap() = last_input_tick().max(1);
+    }
+}
+
+/// 注册全局快捷键（幂等：已注册则直接返回成功）。成功返回 "Ctrl+Alt+L"
+pub fn hotkey_start() -> Result<String, String> {
+    {
+        let g = hotkey_status().lock().unwrap();
+        if g.0 {
+            return Ok("Ctrl+Alt+L".to_string());
+        }
+    }
+    std::thread::spawn(|| unsafe {
+        let id = 0x5347; // SG
+        if RegisterHotKey(std::ptr::null_mut(), id, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_L) == 0 {
+            return; // 注册失败：状态保持 (false, "")，由调用方读到失败
+        }
+        {
+            let mut g = hotkey_status().lock().unwrap();
+            g.0 = true;
+            g.1 = "Ctrl+Alt+L".to_string();
+        }
+        let mut m: SgMsg = std::mem::zeroed();
+        while GetMessageW(&mut m, std::ptr::null_mut(), 0, 0) > 0 {
+            if m.message == WM_HOTKEY && m.wparam == id as usize {
+                hotkey_toggle();
+            }
+        }
+    });
+    std::thread::sleep(std::time::Duration::from_millis(160));
+    let g = hotkey_status().lock().unwrap();
+    if g.0 {
+        Ok(g.1.clone())
+    } else {
+        Err("快捷键 Ctrl+Alt+L 注册失败（可能已被其它程序占用）".to_string())
+    }
+}
+
+/// 当前生效的全局快捷键（空串 = 未注册）
+pub fn hotkey_label() -> String {
+    hotkey_status().lock().map(|g| g.1.clone()).unwrap_or_default()
 }

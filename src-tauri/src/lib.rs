@@ -216,6 +216,83 @@ async fn repair_display(level: Option<u32>) -> Result<String, String> {
         .map_err(|e| format!("后台任务失败：{}", e))?
 }
 
+// ---------- 软件层总亮度 / HDR 同步 / 窗口铺满 / 全局快捷键 ----------
+
+/// 各屏当前总亮度（gamma 反解）：行 G|dev|pct
+#[tauri::command]
+async fn gamma_get() -> String {
+    tauri::async_runtime::spawn_blocking(platform::gamma_get)
+        .await
+        .unwrap_or_default()
+}
+
+/// 设置所有屏的总亮度（40~160，100 = 原始；三通道同曲线，不改色相）
+#[tauri::command]
+async fn gamma_set(pct: u32) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || platform::gamma_set(pct))
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 各屏 HDR 状态：行 H|dev|支持|已启用
+#[tauri::command]
+async fn hdr_states() -> String {
+    tauri::async_runtime::spawn_blocking(platform::hdr_states)
+        .await
+        .unwrap_or_default()
+}
+
+/// 把所有支持 HDR 的屏统一开/关
+#[tauri::command]
+async fn hdr_set(on: bool) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || platform::hdr_set(on))
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 双屏铺满：把当前前台窗口铺满所有屏（不限播放器）
+#[tauri::command]
+async fn span_foreground() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(platform::span_foreground)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 还原上一次被铺满的窗口
+#[tauri::command]
+async fn restore_foreground() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(platform::restore_foreground)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 注册全局快捷键（Ctrl+Alt+L：全部屏幕待机/唤醒 切换）
+#[tauri::command]
+fn hotkey_start() -> Result<String, String> {
+    platform::hotkey_start()
+}
+
+/// 当前生效的全局快捷键（空 = 未注册）
+#[tauri::command]
+fn hotkey_label() -> String {
+    platform::hotkey_label()
+}
+
+/// 跨屏缩放对齐：真正写入逐屏缩放档（先备份）
+#[tauri::command]
+async fn match_dpi_apply() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(platform::match_dpi_apply)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+#[tauri::command]
+async fn match_dpi_restore() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(platform::match_dpi_restore)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
 // ---------- 方案B：ADB 联网精细控制（可选增强） ----------
 
 /// ADB 能力探测（是否找到 adb / 已连接设备）
@@ -540,8 +617,9 @@ pub fn run() {
                     } else {
                         if let Ok(Some(mon)) = pw.primary_monitor() {
                             let scale = mon.scale_factor();
-                            let x = (mon.size().width as f64 - 360.0 * scale - 24.0 * scale) as i32;
-                            let y = (28.0 * scale) as i32;
+                            let x = (mon.size().width as f64 - 372.0 * scale) as i32;
+                            // 贴屏幕最顶端（此前留了 28px 偏移，视觉上没靠顶）
+                            let y = 0i32;
                             let _ = pw.set_position(tauri::PhysicalPosition::new(x, y));
                         }
                         let _ = pw.show();
@@ -574,6 +652,11 @@ pub fn run() {
 
             // 显示器健康后台监控（掉线提醒 + 可选自动修复）
             spawn_health_watch(app.handle().clone());
+
+            // 全局快捷键：Ctrl+Alt+L 切换「全部屏幕待机 / 唤醒」（失败只记日志，不影响启动）
+            if let Err(e) = platform::hotkey_start() {
+                eprintln!("[screenguard] 全局快捷键未注册：{}", e);
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -617,6 +700,16 @@ pub fn run() {
             get_notify_payload,
             close_notify,
             notify_test,
+            gamma_get,
+            gamma_set,
+            hdr_states,
+            hdr_set,
+            span_foreground,
+            restore_foreground,
+            hotkey_start,
+            hotkey_label,
+            match_dpi_apply,
+            match_dpi_restore,
             adb_status,
             adb_connect,
             adb_power,

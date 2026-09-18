@@ -48,12 +48,13 @@
         <button class="ghost" id="pw-wake">唤醒屏幕</button>
       </div>
       <div class="hint" id="pw-note">一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。单独控制某台屏、或启用「按遥控器联动」，请打开控制面板。</div>
+      <div class="hint" id="hk-note" style="margin-top:6px">全局快捷键：读取中…</div>
     </section>
 
-    <!-- ===== 系统音量 ===== -->
+    <!-- ===== 系统控制（音量 + 总亮度）===== -->
     <section class="card" id="audio-card" style="display:none">
       <div class="card-head">
-        <h2>🔊 系统音量</h2>
+        <h2>🎚️ 系统控制</h2>
         <span class="hint" id="audio-dev">读取中…</span>
       </div>
       <div class="slider-row">
@@ -61,10 +62,16 @@
         <input type="range" min="0" max="100" value="0" id="sys-vol" disabled>
         <span class="val" id="sys-vol-val">-</span>
       </div>
+      <div class="slider-row">
+        <label>总亮度</label>
+        <input type="range" min="40" max="160" value="100" id="all-bri">
+        <span class="val" id="all-bri-val">100%</span>
+      </div>
       <div class="btn-row">
         <button class="ghost" id="mute-btn">🔇 静音</button>
+        <button class="ghost" id="bri-reset">☀️ 亮度复位</button>
       </div>
-      <div class="hint" id="audio-hint">控制当前默认输出设备（与托盘音量同源：笔记本喇叭 / 耳机 / HDMI 音频都走这里）</div>
+      <div class="hint" id="audio-hint">音量控制当前默认输出设备（与托盘音量同源）。总亮度作用于<b>所有屏幕</b>（含不走 DDC/CI 的显示器）：三通道同曲线，只改明暗、不动色相，范围 40~160，重启后自动恢复。</div>
     </section>
 
     <!-- ===== 电池设备 ===== -->
@@ -76,7 +83,7 @@
       <div class="displays" id="batteries">
         <div class="empty">正在读取带电池的设备…</div>
       </div>
-      <div class="hint">覆盖笔记本内电池、USB / 2.4G 无线键鼠、蓝牙耳机等所有带电池的连接设备，显示电量与充电状态</div>
+      <div class="hint">覆盖笔记本内电池、USB / 2.4G 无线键鼠、蓝牙耳机等所有带电池的设备，显示电量、充电状态、<b>健康度</b>（满充容量 ÷ 设计容量）与<b>耗电曲线</b>。注意：若开着电池保养模式（限充 80%），健康度会显示约 80%，属正常，不是损耗；部分外设（如 ROG OMNI 接收器）走厂商私有协议，Windows 标准接口读不到电量，只有厂商软件（Armoury Crate）能看到。</div>
     </section>
 
     <!-- ===== 色彩 & 校准 ===== -->
@@ -88,16 +95,25 @@
       <div class="color-row">
         <label>目标色彩空间</label>
         <select id="color-space">
-          <option value="sRGB">sRGB（网络/通用）</option>
-          <option value="p3">Display P3（苹果）</option>
-          <option value="adobeRGB">Adobe RGB（印刷/摄影）</option>
+          <option value="sRGB">sRGB（网络/通用，系统自带）</option>
+          <option value="p3">Display P3（苹果设备）</option>
+          <option value="adobergb">Adobe RGB（印刷/摄影）</option>
+          <option value="dcip3">DCI-P3（影院/视频）</option>
+          <option value="rec709">Rec.709 / BT.709（高清视频）</option>
+          <option value="rec2020">Rec.2020 / BT.2020（HDR/超高清）</option>
+          <option value="prophoto">ProPhoto RGB（后期广色域）</option>
+          <option value="gray">灰度 / 单色（gray）</option>
         </select>
       </div>
       <div class="btn-row">
         <button class="primary" id="apply-color">应用到所有屏幕</button>
         <button class="ghost" id="match-mac">对齐 Mac 内建屏</button>
       </div>
-      <div class="calib-note" id="color-note">深度校准需硬件校色仪（DisplayCAL）｜软件可统一色彩空间 + 白点</div>
+      <div class="btn-row">
+        <button class="ghost" id="bri-sync">☀️ 亮度同步（各屏亮度取齐）</button>
+        <button class="ghost" id="hdr-sync">🌈 HDR 同步（全部开或全关）</button>
+      </div>
+      <div class="calib-note" id="color-note">支持 8 种目标色彩空间（sRGB / P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto / 灰度）｜Windows 只自带 sRGB，其它需把 .icc 放进 %LOCALAPPDATA%\screenguard_icc\（软按文件名自动识别，不限这三种）｜深度校准仍需硬件校色仪（DisplayCAL）</div>
     </section>
 
     <!-- ===== 窗口 ===== -->
@@ -107,23 +123,30 @@
       </div>
       <div class="btn-row">
         <button class="primary" id="match-ppi">窗口拖到另一屏不变小</button>
+        <button class="ghost" id="dpi-restore">↩ 还原缩放</button>
+      </div>
+      <div class="btn-row">
         <button class="ghost" id="rotate-secondary">副屏横竖屏切换</button>
         <button class="ghost" id="restore-secondary">恢复副屏竖屏</button>
       </div>
-      <div class="hint">匹配各屏幕取显示密度，让窗口跨屏保持物理大小</div>
+      <div class="hint">把副屏的缩放档改成与主屏一致（<b>原值自动备份</b>，可一键还原）。为什么以前"看着没实现"：Windows 改每屏缩放只有注册表一条路、且<b>必须注销或重新登录才生效</b>，没有运行时 API 能立刻变 —— 这是系统限制。点完按钮重启登录即可看到效果。</div>
     </section>
 
     <!-- ===== 视频跨屏 ===== -->
     <section class="card">
       <div class="card-head">
         <h2>🎬 双屏铺满</h2>
-        <span class="hint">看电影横跨两块屏</span>
+        <span class="hint">任意窗口横跨两块屏</span>
       </div>
       <div class="btn-row">
-        <button class="primary" id="span-video">双屏铺满</button>
-        <button class="ghost" id="restore-video">恢复</button>
+        <button class="primary" id="span-fg">铺满当前窗口</button>
+        <button class="ghost" id="restore-fg">还原</button>
       </div>
-      <div class="hint">用无边框窗口横跨所有屏播放（Windows 支持 PotPlayer / VLC，需先打开播放器）</div>
+      <div class="btn-row">
+        <button class="ghost" id="span-video">铺满播放器</button>
+        <button class="ghost" id="restore-video">还原播放器</button>
+      </div>
+      <div class="hint">「铺满当前窗口」对<b>任何</b>前台窗口生效 —— 浏览器里的抖音/视频全屏、PotPlayer、VLC 都行：先切到那个窗口，再点这个按钮。原位置会被记住，点「还原」回到原样。</div>
     </section>
 
   </main>
