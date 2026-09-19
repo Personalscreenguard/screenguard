@@ -123,7 +123,8 @@
         <button class="ghost" id="bri-sync">☀️ 亮度同步（各屏取齐）</button>
         <button class="ghost" id="hdr-sync">🌈 HDR：读取中…</button>
       </div>
-      <div class="calib-note" id="color-note">支持 8 种目标色彩空间（sRGB / P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto / 灰度）｜Windows 只自带 sRGB，其它需把 .icc 放进 %LOCALAPPDATA%\screenguard_icc\（软按文件名自动识别，不限这三种）｜深度校准仍需硬件校色仪（DisplayCAL）</div>
+      <div class="calib-note" id="color-note">支持 8 种目标色彩空间（sRGB / P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto / 灰度）｜Windows 只自带 sRGB，其它需把 .icc 放进 %LOCALAPPDATA%\screenguard_icc\（按文件名自动识别）｜深度校准仍需硬件校色仪（DisplayCAL）</div>
+      <div class="hint" id="hdr-note">⚠️ <b>HDR 按钮是「读取并显示当前状态」</b>（开 / 关 / 混合）。本机实测：切换指令能发出，但系统拒绝 Apply（错误 87），HDR 被厂商服务 <b>AsHDRControl</b> 接管 —— 所以点它<b>不会真的改变</b> HDR，要改请用「设置 → 系统 → 显示 → HDR」或华硕工具。「色彩空间」若和目标本来就一致（例如两块屏都是 sRGB），也不会有视觉变化，这是正常的。</div>
     </section>
 
     <!-- ===== 窗口 ===== -->

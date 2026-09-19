@@ -2936,10 +2936,17 @@ pub fn hdr_set(on: bool) -> Result<String, String> {
     if ok == 0 && skip > 0 && err.is_empty() {
         return Err("本机没有支持 HDR 的显示器".to_string());
     }
-    let mut msg = format!("{} 台已切换", ok);
-    if out.contains("apply=ERR") {
-        msg.push_str("（注意：Apply 步骤失败 → HDR 可能并未真正生效）");
-    }
+    // 如实汇报：本机实测「设置指令发出去了，但 Apply 被系统拒绝（错误 87）」，
+    // 所以**不要**先报「已切换」再说注意 —— 那就是误导。有错就先说没生效。
+    let apply_err = out.contains("apply=ERR");
+    let mut msg = if apply_err {
+        format!(
+            "⚠️ HDR 未真正生效：切换指令已发给 {} 台屏，但系统拒绝 Apply（错误 87 = 参数无效）。本机 HDR 由厂商服务（AsHDRControl）接管，公开 API 改不动 —— 请用「设置 → 系统 → 显示 → HDR」或华硕工具切换；本程序只能读取并显示当前状态",
+            ok
+        )
+    } else {
+        format!("{} 台 HDR 已切换生效", ok)
+    };
     if skip > 0 {
         msg.push_str(&format!("，{} 台不支持 HDR 已跳过", skip));
     }
