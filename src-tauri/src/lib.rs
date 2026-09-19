@@ -731,9 +731,19 @@ pub fn run() {
                     } else {
                         if let Ok(Some(mon)) = pw.primary_monitor() {
                             let scale = mon.scale_factor();
-                            let x = (mon.size().width as f64 - 372.0 * scale) as i32;
-                            // 贴屏幕最顶端（此前留了 28px 偏移，视觉上没靠顶）
-                            let y = 0i32;
+                            let pos = mon.position();
+                            let size = mon.size();
+                            // 关键：必须加上显示器自己的原点（position）。旧代码只用 size()，
+                            // 多屏布局下主屏原点不是 (0,0) 时，右边缘就会溢到隔壁屏上（用户实测）。
+                            // 上/右各留 10px 间隙，贴着主屏右上角内侧，但不贴死、不越界。
+                            // 用窗口真实宽度（而不是硬编码），保证右边一定不越界。
+                            let ow = pw
+                                .outer_size()
+                                .map(|s| s.width as i32)
+                                .unwrap_or((382.0 * scale) as i32);
+                            let gap = (10.0 * scale) as i32;
+                            let x = pos.x + size.width as i32 - ow - gap;
+                            let y = pos.y + gap;
                             let _ = pw.set_position(tauri::PhysicalPosition::new(x, y));
                         }
                         let _ = pw.show();
