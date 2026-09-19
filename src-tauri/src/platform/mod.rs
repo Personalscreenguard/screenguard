@@ -179,6 +179,76 @@ pub fn match_dpi_restore() -> Result<String, String> {
     Err("跨屏缩放对齐仅支持 Windows".to_string())
 }
 
+/// 音频输出端点（Windows：CoreAudio 枚举；其它平台空）
+#[derive(Serialize, Clone, Debug)]
+pub struct AudioEndpoint {
+    pub id: String,
+    pub name: String,
+    pub volume: u32,
+    pub mute: bool,
+    pub adjustable: bool,
+    pub form_factor: u32,
+    /// 是否是当前用户选定要控制的那一个
+    pub selected: bool,
+    /// 是否是 Windows 当前的默认输出设备（用户没明确选时优先控制它）
+    pub is_default: bool,
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn list_windows() -> Result<String, String> {
+    Err("窗口列表仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn span_window(_hwnd: i64) -> Result<String, String> {
+    Err("窗口铺满仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn audio_endpoints() -> Result<Vec<AudioEndpoint>, String> {
+    Err("音频端点枚举仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_audio_device(_id: &str) -> Result<(), String> {
+    Err("音频端点选择仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_system_volume_sel(_v: u32) -> Result<(), String> {
+    Err("系统音量控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_system_mute_sel(_on: bool) -> Result<(), String> {
+    Err("系统静音控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn hdr_set_dev(_dev: &str, _on: bool) -> Result<String, String> {
+    Err("HDR 控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn capture_baseline() -> Result<String, String> {
+    Ok("非 Windows 平台不采集基线".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn restore_defaults() -> Result<String, String> {
+    Err("一键恢复默认仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn set_revert_on_exit(_on: bool) -> Result<(), String> {
+    Err("退出还原仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn app_state_json() -> String {
+    String::from("{}")
+}
+
 // ---------- 屏幕电源控制（方案A）：非 Windows 平台存根 ----------
 // macOS/Linux 可分别用 pmset displaysleepnow / xset dpms force off 实现，
 // 属后续版本；当前先明确告知，避免 UI 误以为可用。

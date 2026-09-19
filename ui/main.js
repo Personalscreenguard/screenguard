@@ -161,26 +161,37 @@ async function loadAudio() {
   const sl = document.getElementById('sys-vol');
   const val = document.getElementById('sys-vol-val');
   const muteBtn = document.getElementById('mute-btn');
+  const sel = document.getElementById('audio-dev-sel');
   try {
-    const a = await invoke('get_system_audio');
     card.style.display = '';
-    devEl.textContent = a.name || '默认输出设备';
-    sl.disabled = false;
-    sl.value = a.volume;
-    val.textContent = a.volume + '%';
-    sysVol.muted = a.mute;
-    muteBtn.textContent = a.mute ? '🔕 取消静音' : '🔇 静音';
-    if (!a.adjustable) {
-      sl.disabled = true;
-      hint.textContent = '此输出端点为固定音量（Windows 滑块也无效，常见于部分 HDMI/DP 显示器音频）。若在用显示器喇叭，请用显示器条目里的 DDC 音量滑块；或改用其它输出设备。';
-      muteBtn.disabled = true;
-    } else {
-      muteBtn.disabled = false;
+    // v0.3.3：音量作用于「用户选定的输出端点」。默认输出若正好是固定音量的
+    // HDMI/DP 显示器音频（Windows 自己的滑块也调不动），就自动落在一个可调的
+    // 端点上，并把设备列出来让用户自己换 —— 不再出现「滑块动不了」的死路。
+    const eps = await invoke('audio_endpoints');
+    let st = {};
+    try { st = JSON.parse(await invoke('app_state_json') || '{}'); } catch (e) {}
+    const wanted = eps.find(e => e.id === st.audio_dev);
+    const cur = wanted || eps.find(e => e.is_default) || eps.find(e => e.adjustable) || eps[0];
+    if (sel) {
+      sel.innerHTML = eps.map(e =>
+        `<option value="${e.id}"${(cur && e.id === cur.id) ? ' selected' : ''}>${e.name}　${e.adjustable ? ('音量 ' + e.volume + '%') : '（固定音量·不可调）'}</option>`
+      ).join('');
     }
+    if (!cur) { devEl.textContent = '没有可用的输出设备'; sl.disabled = true; return; }
+    devEl.textContent = cur.name || '输出设备';
+    sl.value = cur.volume;
+    val.textContent = cur.volume + '%';
+    sysVol.muted = cur.mute;
+    muteBtn.textContent = cur.mute ? '🔕 取消静音' : '🔇 静音';
+    sl.disabled = !cur.adjustable;
+    muteBtn.disabled = !cur.adjustable;
+    hint.textContent = cur.adjustable
+      ? `控制的是上面选中的输出设备（与系统托盘音量同源）。总亮度作用于所有屏幕，不依赖 DDC。`
+      : '这个输出端点（常见于 HDMI/DP 显示器音频）是固定音量，Windows 自己的滑块也调不动 → 请在上面「输出设备」里换一个（扬声器/耳机），换了之后滑块立刻可用。';
   } catch (e) {
     card.style.display = '';
     devEl.textContent = '不可用';
-    hint.textContent = '读取系统音量失败：' + errText(e);
+    hint.textContent = '读取输出设备失败：' + errText(e);
   }
 }
 
@@ -337,7 +348,7 @@ document.getElementById('bri-reset').onclick = async () => {
   try { await invoke('gamma_set', { pct: 100 }); setStatus('总亮度已复位到 100%（原始曲线）'); }
   catch (e) { setStatus('复位失败：' + errText(e), false); }
 };
-(async () => {
+async function loadGamma() {
   try {
     const g = String(await invoke('gamma_get') || '');
     let pct = 100;
@@ -348,14 +359,15 @@ document.getElementById('bri-reset').onclick = async () => {
     document.getElementById('all-bri').value = pct;
     document.getElementById('all-bri-val').textContent = pct + '%';
   } catch (e) {}
-})();
+}
+loadGamma();
 
 // 全局快捷键显示
 (async () => {
   const el = document.getElementById('hk-note');
   try {
     const hk = await invoke('hotkey_start');
-    el.innerHTML = `全局快捷键：<span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">${hk}</span> 切换「全部屏幕待机 / 唤醒」`;
+    el.innerHTML = `全局快捷键：<span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">${hk}</span> 切换「全部屏幕待机 / 唤醒」 ｜ <span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">Ctrl+Alt+R</span> 还原被铺满的窗口（铺满后界面被盖住也能用）`;
   } catch (e) { el.textContent = '全局快捷键：' + errText(e); }
 })();
 
@@ -386,8 +398,74 @@ document.getElementById('dpi-restore').onclick = async () => {
 };
 document.getElementById('rotate-secondary').onclick = () => run('rotate_secondary', {}, '已切换副屏横竖屏');
 document.getElementById('restore-secondary').onclick = () => run('restore_secondary', {}, '已恢复副屏为竖屏');
-document.getElementById('span-video').onclick = () => run('span_video', {}, '正在铺满双屏…');
-document.getElementById('restore-video').onclick = () => run('restore_video', {}, '已恢复播放器窗口');
+// ===== v0.3.3：窗口选择器 / 恢复默认 / 输出设备选择 =====
+async function loadSpanTargets() {
+  const sel = document.getElementById('span-target');
+  if (!sel) return;
+  try {
+    setStatus('正在读取窗口列表…');
+    const raw = String(await invoke('list_windows') || '');
+    const rows = [];
+    for (const line of raw.split('\n')) {
+      const p = line.split('|');
+      if (p[0] === 'W' && p.length >= 4) rows.push({ hwnd: p[1], size: p[2], title: p.slice(3).join('|') });
+    }
+    sel.innerHTML = rows.length
+      ? rows.map(r => `<option value="${r.hwnd}">${r.title}　(${r.size})</option>`).join('')
+      : '<option value="">（没有可铺满的窗口）</option>';
+    setStatus(`找到 ${rows.length} 个可铺满的窗口，选中后点「铺满选中窗口」`);
+  } catch (e) {
+    sel.innerHTML = '<option value="">（读取失败）</option>';
+    setStatus('读取窗口列表失败：' + errText(e), false);
+  }
+}
+document.getElementById('span-refresh').onclick = () => loadSpanTargets();
+document.getElementById('span-pick').onclick = async () => {
+  const sel = document.getElementById('span-target');
+  const hwnd = sel && sel.value ? Number(sel.value) : 0;
+  if (!hwnd) { setStatus('请先点「刷新窗口列表」并选一个窗口', false); return; }
+  try {
+    setStatus('正在铺满…');
+    const title = await invoke('span_window', { hwnd });
+    setStatus(`已铺满：「${title}」。还原：点「↩ 还原」或按 Ctrl+Alt+R`);
+  } catch (e) { setStatus('铺满失败：' + errText(e), false); }
+};
+document.getElementById('restore-defaults').onclick = async () => {
+  try {
+    setStatus('正在恢复到默认状态…');
+    const msg = await invoke('restore_defaults');
+    setStatus(String(msg));
+    await loadAudio(); await loadGamma();
+  } catch (e) { setStatus('恢复默认失败：' + errText(e), false); }
+};
+(async () => {
+  try {
+    const st = JSON.parse(await invoke('app_state_json') || '{}');
+    const cb = document.getElementById('revert-exit');
+    if (cb) cb.checked = st.revert_on_exit !== false;
+  } catch (e) {}
+})();
+(async () => {
+  const cb = document.getElementById('revert-exit');
+  if (!cb) return;
+  cb.onchange = async () => {
+    try {
+      await invoke('set_revert_on_exit', { on: cb.checked });
+      setStatus(cb.checked ? '已开启：退出软件时自动还原' : '已关闭：退出软件时保留当前设置');
+    } catch (e) { setStatus('设置失败：' + errText(e), false); }
+  };
+})();
+(async () => {
+  const sel = document.getElementById('audio-dev-sel');
+  if (!sel) return;
+  sel.onchange = async () => {
+    try {
+      await invoke('set_audio_device', { id: sel.value });
+      await loadAudio();
+      setStatus('已切换控制「' + (sel.options[sel.selectedIndex] || {}).text + '」');
+    } catch (e) { setStatus('切换输出设备失败：' + errText(e), false); }
+  };
+})();
 document.getElementById('refresh-btn').onclick = () => refreshDisplays();
 document.getElementById('battery-refresh-btn').onclick = () => loadBatteries();
 

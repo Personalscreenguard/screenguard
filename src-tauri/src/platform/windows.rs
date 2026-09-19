@@ -2,7 +2,7 @@
 //! 延续项目「零额外 Rust 依赖」的风格。每个命令独立 powershell 进程，
 //! C# 代码用单引号包裹传入 Add-Type（C# 内不含单引号字符）。
 
-use super::{run_cmd, DisplayInfo, SystemAudio, BatteryInfo};
+use super::{run_cmd, AudioEndpoint, BatteryInfo, DisplayInfo, SystemAudio};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -192,6 +192,12 @@ public class SGCore {
   [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref SGDC_ACI pkt);
   [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref SGDC_ACS pkt);
   [DllImport("user32.dll")] static extern int DisplayConfigSetDeviceInfo(ref SGDC_ACS pkt);
+  [DllImport("user32.dll", EntryPoint = "SetDisplayConfig")] static extern int SetDisplayConfigApply(uint np, IntPtr p, uint nm, IntPtr m, uint flags);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumWinProc cb, IntPtr p);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+  public delegate bool EnumWinProc(IntPtr h, IntPtr p);
 
   /// DISPLAYCONFIG_DEVICE_INFO_HEADER（20 字节；LUID 拆两个 32 位，避免 .NET 对齐补白）
   [StructLayout(LayoutKind.Sequential)]
@@ -452,7 +458,12 @@ public class SGCore {
         acs.header.id = (uint)Marshal.ReadInt32(pa, off + 28);
         acs.enable = (uint)(on != 0 ? 1 : 0);
         int r = DisplayConfigSetDeviceInfo(ref acs);
-        sb.Append("R|").Append(dev).Append("|").Append(r == 0 ? "OK" : ("ERR:" + r)).Append((char)10);
+        // 关键：SET_ADVANCED_COLOR_STATE 只是把新状态写进数据库，必须再 Apply 一次
+        // （SetDisplayConfig(QDC_DATABASE_CURRENT)）系统才真正切 HDR ——
+        // 少了这一步会「API 返回 0 成功、读回来还是老状态」（实测踩过）。
+        int ap = SetDisplayConfigApply(0, IntPtr.Zero, 0, IntPtr.Zero, 4);
+        sb.Append("R|").Append(dev).Append("|").Append(r == 0 ? "OK" : ("ERR:set " + r))
+          .Append("|apply=").Append(ap == 0 ? "OK" : ("ERR:" + ap)).Append((char)10);
       }
       return sb.ToString();
     } finally { Marshal.FreeHGlobal(pa); Marshal.FreeHGlobal(ma); }
@@ -475,16 +486,89 @@ public class SGCore {
     } catch { return 0; }
   }
 
+  /// 只设置「指定某一台屏」的 HDR（用于基线还原：各屏原本状态可能不同）
+  /// 返回 OK / ERR:... 。与 HDRSetAll 同源：SET 之后必须再 Apply 一次才真正生效。
+  public static string HDRSetDev(string dev, int on) {
+    if (string.IsNullOrEmpty(dev)) return "ERR:设备名为空";
+    uint nPaths, nModes;
+    if (GetDisplayConfigBufferSizes(2, out nPaths, out nModes) != 0 || nPaths == 0) return "ERR:读取显示配置失败";
+    IntPtr pa = Marshal.AllocHGlobal((int)(nPaths * 72));
+    IntPtr ma = Marshal.AllocHGlobal((int)(nModes * 64));
+    try {
+      uint p = nPaths, m = nModes;
+      if (QueryDisplayConfigRaw(2, ref p, pa, ref m, ma, IntPtr.Zero) != 0) return "ERR:QueryDisplayConfig 失败";
+      for (int i = 0; i < p; i++) {
+        int off = i * 72;
+        var src = new SGDC_SRC_NAME();
+        src.header.type = 1; src.header.size = (uint)Marshal.SizeOf(typeof(SGDC_SRC_NAME));
+        src.header.adapterId.LowPart = (uint)Marshal.ReadInt32(pa, off);
+        src.header.adapterId.HighPart = Marshal.ReadInt32(pa, off + 4);
+        src.header.id = (uint)Marshal.ReadInt32(pa, off + 8);
+        if (DisplayConfigGetDeviceInfo(ref src) != 0) continue;
+        if (!string.Equals(src.viewGdiDeviceName, dev, StringComparison.OrdinalIgnoreCase)) continue;
+        var aci = new SGDC_ACI();
+        aci.header.type = 9; aci.header.size = (uint)Marshal.SizeOf(typeof(SGDC_ACI));
+        aci.header.adapterLow = (uint)Marshal.ReadInt32(pa, off + 20);
+        aci.header.adapterHigh = Marshal.ReadInt32(pa, off + 24);
+        aci.header.id = (uint)Marshal.ReadInt32(pa, off + 28);
+        if (DisplayConfigGetDeviceInfo(ref aci) != 0) return "ERR:读取 HDR 状态失败";
+        if ((aci.value & 1) == 0) return "SKIP:该屏不支持 HDR";
+        if (((aci.value >> 1) & 1) == (uint)(on != 0 ? 1 : 0)) return "OK:已是目标状态";
+        var acs = new SGDC_ACS();
+        acs.header.type = 10; acs.header.size = (uint)Marshal.SizeOf(typeof(SGDC_ACS));
+        acs.header.adapterLow = (uint)Marshal.ReadInt32(pa, off + 20);
+        acs.header.adapterHigh = Marshal.ReadInt32(pa, off + 24);
+        acs.header.id = (uint)Marshal.ReadInt32(pa, off + 28);
+        acs.enable = (uint)(on != 0 ? 1 : 0);
+        int r = DisplayConfigSetDeviceInfo(ref acs);
+        int ap = SetDisplayConfigApply(0, IntPtr.Zero, 0, IntPtr.Zero, 4);
+        if (r != 0) return "ERR:set " + r;
+        if (ap != 0) return "ERR:apply " + ap;
+        return "OK";
+      }
+      return "ERR:没找到该显示设备";
+    } finally { Marshal.FreeHGlobal(pa); Marshal.FreeHGlobal(ma); }
+  }
+
+  /// 把某个 ICC 配置文件关联到指定显示设备（基线还原用），内部回读校验
+  public static string IccSetPath(string dev, string profile) {
+    if (string.IsNullOrEmpty(dev) || string.IsNullOrEmpty(profile)) return "ERR:参数为空";
+    if (!System.IO.File.Exists(profile)) return "ERR:配置文件不存在";
+    IntPtr hdc = CreateDCW(null, dev, null, IntPtr.Zero);
+    if (hdc == IntPtr.Zero) return "ERR:CreateDC 失败";
+    try {
+      SetICMProfileW(hdc, profile);   // 失败也会返回 TRUE，所以下面必须回读
+    } finally { DeleteDC(hdc); }
+    var sb = new StringBuilder(600);
+    IntPtr h2 = CreateDCW(null, dev, null, IntPtr.Zero);
+    if (h2 == IntPtr.Zero) return "ERR:回读 CreateDC 失败";
+    try {
+      uint sz = 600;
+      if (GetICMProfileW(h2, ref sz, sb)) {
+        string got = sb.ToString();
+        return string.Equals(got, profile, StringComparison.OrdinalIgnoreCase) ? "OK" : ("ERR:回读不符（可能需要管理员权限）");
+      }
+      return "ERR:回读失败";
+    } finally { DeleteDC(h2); }
+  }
+
   /// 把当前前台窗口铺满所有屏幕的包围盒（抖音/浏览器全屏视频、播放器都适用）。
   /// 记录窗口句柄 + 原始位置/样式到 stateFile，供 RestoreForeground 还原。
   /// 返回 OK|<窗口标题> 或 ERR:<原因>
-  public static string SpanForeground(string stateFile) {
+  public static string SpanForeground(string stateFile, int myPid) {
     IntPtr h = GetForegroundWindow();
     if (h == IntPtr.Zero) return "ERR:没有前台窗口";
     if (h == GetShellWindow() || h == GetDesktopWindow()) return "ERR:当前前台是桌面/任务栏，请先切换到要铺满的窗口";
     var ti = new StringBuilder(300);
     GetWindowTextW(h, ti, 300);
     string title = ti.ToString();
+    // 安全闸门：绝不铺满本程序自己的窗口 —— 一旦把自己铺满、而窗口底部被裁掉，
+    // 用户就找不到「还原」入口了（实测踩过）。此时改提示用「选择窗口」。
+    uint fgPid;
+    GetWindowThreadProcessId(h, out fgPid);
+    if ((int)fgPid == myPid) {
+      return "ERR:当前前台是本程序自己的窗口，不能铺满它（否则你可能找不到「还原」）。请先在右下角「选择窗口」里挑一个别的窗口";
+    }
     // 最大化/最小化先还原，否则 SetWindowPos 改不动尺寸
     if (IsIconic(h) || IsZoomed(h)) ShowWindow(h, 9);  // SW_RESTORE
     System.Threading.Thread.Sleep(260);
@@ -532,6 +616,54 @@ public class SGCore {
     if (st != 0) SetWindowLongPtr(h, GWL_STYLE, new IntPtr(st));
     SetWindowPos(h, IntPtr.Zero, x, y, w, hh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
     return "OK";
+  }
+
+  static string EscW(string s) {
+    if (s == null) return "";
+    return s.Replace("|", "/").Replace((char)13, (char)32).Replace((char)10, (char)32);
+  }
+
+  /// 列出「可以被铺满的窗口」：可见、有标题、尺寸正常、非本程序、非桌面/任务栏。
+  /// 每行 W|hwnd|宽x高|标题。给用户一个可选项，避免只能对"当前前台"下手。
+  /// myPid 必须由 Rust 侧传入（应用自己的 PID）—— 因为这段 C# 跑在 powershell.exe 里，
+  /// GetCurrentProcessId() 拿到的是 PowerShell 的 PID，拿它排除「自己」是错的（实测踩过）。
+  public static string ListWindows(int myPid) {
+    var sb = new StringBuilder();
+    IntPtr shell = GetShellWindow();
+    IntPtr desk = GetDesktopWindow();
+    try {
+      EnumWindows(delegate(IntPtr h, IntPtr p) {
+        if (!IsWindowVisible(h)) return true;
+        if (h == shell || h == desk) return true;
+        var t = new StringBuilder(300);
+        GetWindowTextW(h, t, 300);
+        string title = t.ToString();
+        if (title.Length == 0) return true;
+        uint pid;
+        GetWindowThreadProcessId(h, out pid);
+        if ((int)pid == myPid) return true;        // 不列自己的窗口（铺满自己会找不到还原入口）
+        long ex = GetWindowLongPtr(h, -20).ToInt64();   // GWL_EXSTYLE
+        if ((ex & 0x00000080L) != 0) return true;  // WS_EX_TOOLWINDOW：工具窗/浮动提示，跳过
+        SGRECT r;
+        if (!GetWindowRect(h, out r)) return true;
+        int w = r.Right - r.Left, hh = r.Bottom - r.Top;
+        if (w < 120 || hh < 90) return true;       // 过滤托盘小窗、0 尺寸窗
+        sb.Append("W|").Append(h.ToInt64()).Append("|").Append(w).Append("x").Append(hh)
+          .Append("|").Append(EscW(title)).Append((char)10);
+        return true;
+      }, IntPtr.Zero);
+    } catch { }
+    return sb.ToString();
+  }
+
+  /// 铺满指定的窗口（按 hwnd）。先把它置前，再复用前台窗口那套逻辑，保证行为完全一致。
+  public static string SpanWindow(long hwnd, string stateFile, int myPid) {
+    IntPtr h = new IntPtr(hwnd);
+    if (!IsWindow(h)) return "ERR:该窗口已关闭";
+    if (IsIconic(h)) ShowWindow(h, 9);
+    SetForegroundWindow(h);
+    System.Threading.Thread.Sleep(200);
+    return SpanForeground(stateFile, myPid);
   }
 
   /// 对指定显示设备执行 DDC/CI（VCP 读或写），返回是否命中；retries 为最大重试次数
@@ -1030,6 +1162,105 @@ public class SGAudio {
     try {
       SGIMMDev dev = DefaultDev();
       if (dev == null) return "ERR:没有默认输出设备";
+      SGEndVol vol = VolOf(dev);
+      if (vol == null) return "ERR:端点激活失败";
+      return vol.SetMute(on != 0 ? 1 : 0, IntPtr.Zero) == 0 ? "OK" : "ERR:静音设置失败";
+    } catch (Exception e) { return "ERR:" + Esc(e.Message); }
+  }
+
+  /// 列出所有「活动的输出端点」，每行：A|端点id|名称|音量|静音|可调|形态
+  /// 为什么需要：部分 HDMI/DP 显示器音频端点是**固定音量**，Windows 自己的音量条
+  /// 也调不动。此时不该让滑块假装能用，而应让用户从列表里挑一个真正能调的设备。
+  public static string AudioList() {
+    var sb = new StringBuilder();
+    try {
+      var en = (SGIMMEnum)(object)new SGMMEnumerator();
+      SGIMMColl coll;
+      if (en.EnumAudioEndpoints(0, 1, out coll) != 0 || coll == null) return "ERR:枚举输出端点失败";
+      int cnt;
+      if (coll.GetCount(out cnt) != 0) return "ERR:读取端点数量失败";
+      for (int i = 0; i < cnt; i++) {
+        SGIMMDev dev;
+        if (coll.Item(i, out dev) != 0 || dev == null) continue;
+        string id = "";
+        try { dev.GetId(out id); } catch { }
+        string name = "";
+        string ff = "0";
+        try {
+          SGPropStore store;
+          if (dev.OpenPropertyStore(0, out store) == 0 && store != null) {
+            SGPV v;
+            SGPKEY kn = new SGPKEY(); kn.fmtid = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"); kn.pid = 14;
+            if (store.GetValue(ref kn, out v) == 0 && v.vt == 31 && v.p != IntPtr.Zero) {
+              string s = Marshal.PtrToStringUni(v.p);
+              if (s != null) name = s;
+            }
+            SGPKEY kf = new SGPKEY(); kf.fmtid = new Guid("1da5d803-d492-4edd-8c23-e0c0ffee7f0e"); kf.pid = 0;
+            if (store.GetValue(ref kf, out v) == 0 && (v.vt == 19 || v.vt == 3)) ff = v.i32.ToString();
+          }
+        } catch { }
+        SGEndVol vol = VolOf(dev);
+        if (vol == null) continue;
+        float lvl = 0; uint mask = 0; int mute = 0;
+        try { vol.GetMasterVolumeLevelScalar(out lvl); } catch { }
+        try { vol.QueryHardwareSupport(out mask); } catch { }
+        try { vol.GetMute(out mute); } catch { }
+        sb.Append("A|").Append(Esc(id)).Append("|").Append(Esc(name)).Append("|")
+          .Append(Math.Round(lvl * 100)).Append("|").Append(mute != 0 ? 1 : 0).Append("|")
+          .Append((mask & 1) != 0 ? 1 : 0).Append("|").Append(ff).Append("|")
+          .Append(IsDefaultId(id) ? 1 : 0).Append((char)10);
+      }
+      return sb.ToString();
+    } catch (Exception e) { return "ERR:" + Esc(e.Message); }
+  }
+
+  /// 该端点是否就是 Windows 当前的默认输出设备
+  static bool IsDefaultId(string id) {
+    try {
+      SGIMMDev d = DefaultDev();
+      if (d == null) return false;
+      string did = "";
+      d.GetId(out did);
+      return did == id;
+    } catch { return false; }
+  }
+
+  static SGIMMDev DevById(string id) {
+    if (id == null || id.Length == 0) return DefaultDev();
+    try {
+      var en = (SGIMMEnum)(object)new SGMMEnumerator();
+      SGIMMColl coll;
+      if (en.EnumAudioEndpoints(0, 1, out coll) != 0 || coll == null) return DefaultDev();
+      int cnt; coll.GetCount(out cnt);
+      for (int i = 0; i < cnt; i++) {
+        SGIMMDev d;
+        if (coll.Item(i, out d) != 0 || d == null) continue;
+        string did = "";
+        try { d.GetId(out did); } catch { }
+        if (did == id) return d;
+      }
+    } catch { }
+    return DefaultDev();
+  }
+
+  /// 设定指定输出端点的音量（id 为空则用系统默认端点）
+  public static string AudioSetDev(string id, uint v) {
+    try {
+      SGIMMDev dev = DevById(id);
+      if (dev == null) return "ERR:没有可用的输出设备";
+      SGEndVol vol = VolOf(dev);
+      if (vol == null) return "ERR:端点激活失败";
+      if (v > 100) v = 100;
+      int r = vol.SetMasterVolumeLevelScalar(v / 100f, IntPtr.Zero);
+      return r == 0 ? "OK" : ("ERR:设置失败 hr=" + r + "（该端点是固定音量，换一个输出设备）");
+    } catch (Exception e) { return "ERR:" + Esc(e.Message); }
+  }
+
+  /// 指定输出端点静音开关
+  public static string AudioMuteDev(string id, uint on) {
+    try {
+      SGIMMDev dev = DevById(id);
+      if (dev == null) return "ERR:没有可用的输出设备";
       SGEndVol vol = VolOf(dev);
       if (vol == null) return "ERR:端点激活失败";
       return vol.SetMute(on != 0 ? 1 : 0, IntPtr.Zero) == 0 ? "OK" : "ERR:静音设置失败";
@@ -2589,11 +2820,20 @@ pub fn hdr_set(on: bool) -> Result<String, String> {
         return Err("本机没有支持 HDR 的显示器".to_string());
     }
     let mut msg = format!("{} 台已切换", ok);
+    if out.contains("apply=ERR") {
+        msg.push_str("（注意：Apply 步骤失败 → HDR 可能并未真正生效）");
+    }
     if skip > 0 {
         msg.push_str(&format!("，{} 台不支持 HDR 已跳过", skip));
     }
     if !err.is_empty() {
         msg.push_str(&format!("，{} 台失败", err.len()));
+    }
+    // 把逐台明细一并回传：API 返回成功 != 屏幕真的切换了（这台机上实测过），
+    // 与其给一个漂亮但可能不实的结论，不如让用户看到原始结果。
+    let detail: String = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !detail.is_empty() {
+        msg.push_str(&format!("｜明细：{}", detail));
     }
     Ok(msg)
 }
@@ -2608,7 +2848,11 @@ fn span_fg_file() -> String {
 
 /// 把当前前台窗口铺满所有屏（浏览器里的抖音全屏、播放器、任意窗口都可以）
 pub fn span_foreground() -> Result<String, String> {
-    let out = ps_core(&format!("[SGCore]::SpanForeground('{}')", span_fg_file()))?;
+    let out = ps_core(&format!(
+        "[SGCore]::SpanForeground('{}', {})",
+        span_fg_file(),
+        std::process::id()
+    ))?;
     let t = out.trim();
     if let Some(rest) = t.strip_prefix("OK|") {
         return Ok(rest.to_string());
@@ -2712,10 +2956,13 @@ pub fn hotkey_start() -> Result<String, String> {
         }
     }
     std::thread::spawn(|| unsafe {
-        let id = 0x5347; // SG
+        let id = 0x5347; // SG：Ctrl+Alt+L 全部屏幕待机 / 唤醒
+        let id2 = 0x5348; // SG2：Ctrl+Alt+R 还原被铺满的窗口（不依赖界面，防止铺满后点不到按钮）
         if RegisterHotKey(std::ptr::null_mut(), id, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_L) == 0 {
             return; // 注册失败：状态保持 (false, "")，由调用方读到失败
         }
+        // 第二个键失败不影响第一个键（例如被别的软件占用）
+        RegisterHotKey(std::ptr::null_mut(), id2, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x52);
         {
             let mut g = hotkey_status().lock().unwrap();
             g.0 = true;
@@ -2723,8 +2970,14 @@ pub fn hotkey_start() -> Result<String, String> {
         }
         let mut m: SgMsg = std::mem::zeroed();
         while GetMessageW(&mut m, std::ptr::null_mut(), 0, 0) > 0 {
-            if m.message == WM_HOTKEY && m.wparam == id as usize {
-                hotkey_toggle();
+            if m.message == WM_HOTKEY {
+                if m.wparam == id as usize {
+                    hotkey_toggle();
+                } else if m.wparam == id2 as usize {
+                    // 铺满之后的窗口可能盖住界面上的「还原」按钮，
+                    // 所以必须有一个不依赖界面的还原入口
+                    let _ = restore_foreground();
+                }
             }
         }
     });
@@ -2740,4 +2993,312 @@ pub fn hotkey_start() -> Result<String, String> {
 /// 当前生效的全局快捷键（空串 = 未注册）
 pub fn hotkey_label() -> String {
     hotkey_status().lock().map(|g| g.1.clone()).unwrap_or_default()
+}
+
+// ================= v0.3.3：窗口选择 / 音频端点 / 状态快照与一键恢复默认 =================
+// 这部分的由来（用户逐条要求）：
+//  ① 「铺满」要能**让用户选哪个窗口**，铺满后要**方便还原**（铺满自己会找不到按钮）；
+//  ② 凡是**软件层面**的改动（总亮度 gamma、HDR、色彩、窗口铺满、音量）都要能
+//     **一键回到默认/原始状态**，避免用户乱调之后不知道该恢复成什么值；
+//  ③ **退出软件时自动还原**成原样。
+// 做法：应用启动时采集一次「基线快照」存 %APPDATA%\Screenguard\state.json
+// （gamma 视作 100=原始曲线；HDR/ICC/音量记录当时真实值），
+// 之后「恢复默认」「退出还原」都回到这份基线。硬件层面（显示器自己的亮度/音量、KVM）不动。
+
+fn app_state_file() -> String {
+    format!(
+        "{}\\Screenguard\\state.json",
+        std::env::var("APPDATA").unwrap_or_default()
+    )
+}
+
+fn def_true() -> bool {
+    true
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+pub struct AppState {
+    /// 用户选定的输出端点 id（空 = 跟随系统默认）
+    #[serde(default)]
+    pub audio_dev: String,
+    /// 退出软件时自动还原所有软件层面改动
+    #[serde(default = "def_true")]
+    pub revert_on_exit: bool,
+    #[serde(default)]
+    pub baseline_taken: bool,
+    /// "设备名|0或1"
+    #[serde(default)]
+    pub base_hdr: Vec<String>,
+    /// "设备名|ICC 路径"
+    #[serde(default)]
+    pub base_icc: Vec<String>,
+    #[serde(default)]
+    pub base_vol_id: String,
+    #[serde(default)]
+    pub base_vol: u32,
+    #[serde(default)]
+    pub base_mute: bool,
+}
+
+pub fn app_state() -> AppState {
+    std::fs::read_to_string(app_state_file())
+        .ok()
+        .and_then(|s| serde_json::from_str::<AppState>(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_app_state(st: &AppState) -> Result<(), String> {
+    let p = app_state_file();
+    if let Some(d) = std::path::Path::new(&p).parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let js = serde_json::to_string_pretty(st).map_err(|e| e.to_string())?;
+    std::fs::write(&p, js).map_err(|e| format!("写入状态文件失败：{}", e))
+}
+
+pub fn set_revert_on_exit(on: bool) -> Result<(), String> {
+    let mut st = app_state();
+    st.revert_on_exit = on;
+    save_app_state(&st)
+}
+
+pub fn app_state_json() -> String {
+    let st = app_state();
+    serde_json::json!({
+        "revert_on_exit": st.revert_on_exit,
+        "audio_dev": st.audio_dev,
+        "baseline_taken": st.baseline_taken,
+        "base_hdr": st.base_hdr,
+        "base_vol": st.base_vol,
+        "base_vol_id": st.base_vol_id,
+    })
+    .to_string()
+}
+
+/// 采集基线（启动时调用一次）。已有基线不覆盖 —— 否则第二次启动会把
+/// 「上次改过的状态」当成本次原始值，越还原越偏。
+pub fn capture_baseline() -> Result<String, String> {
+    let mut st = app_state();
+    if st.baseline_taken {
+        return Ok("基线已存在".to_string());
+    }
+    st.base_hdr = hdr_states()
+        .lines()
+        .filter(|l| l.starts_with("H|"))
+        .filter_map(|l| {
+            let p: Vec<&str> = l.split('|').collect();
+            if p.len() >= 4 {
+                Some(format!("{}|{}", p[1], p[3]))
+            } else {
+                None
+            }
+        })
+        .collect();
+    st.base_icc = Vec::new();
+    for d in get_displays() {
+        if let Ok(dev) = resolve_dev(&d.id) {
+            if let Some(path) = icc_get(&dev) {
+                st.base_icc.push(format!("{}|{}", dev, path));
+            }
+        }
+    }
+    st.base_vol_id = st.audio_dev.clone();
+    if let Ok(eps) = audio_endpoints() {
+        let pick = eps
+            .iter()
+            .find(|e| !st.audio_dev.is_empty() && e.id == st.audio_dev)
+            .or_else(|| eps.iter().find(|e| e.adjustable))
+            .or_else(|| eps.first());
+        if let Some(e) = pick {
+            st.base_vol_id = e.id.clone();
+            st.base_vol = e.volume;
+            st.base_mute = e.mute;
+        }
+    }
+    st.baseline_taken = true;
+    save_app_state(&st)?;
+    Ok(format!(
+        "基线已采集：HDR {} 项 / ICC {} 项 / 音量 {}%",
+        st.base_hdr.len(),
+        st.base_icc.len(),
+        st.base_vol
+    ))
+}
+
+/// 一键恢复默认 = 回到基线快照（软件层面的改动全部撤销）
+pub fn restore_defaults() -> Result<String, String> {
+    let st = app_state();
+    let mut done: Vec<String> = Vec::new();
+    let mut warn: Vec<String> = Vec::new();
+
+    if gamma_set(100).is_ok() {
+        done.push("总亮度 → 100%（原始曲线）".to_string());
+    }
+    if restore_foreground().is_ok() {
+        done.push("已还原被铺满的窗口".to_string());
+    }
+    let _ = screen_wake();
+
+    for ent in st.base_hdr.clone() {
+        let p: Vec<&str> = ent.splitn(2, '|').collect();
+        if p.len() < 2 {
+            continue;
+        }
+        let want = p[1].trim() == "1";
+        match hdr_set_dev(p[0], want) {
+            Ok(_) => done.push(format!("HDR {} → {}", p[0], if want { "开" } else { "关" })),
+            Err(e) => warn.push(format!("HDR {}: {}", p[0], e)),
+        }
+    }
+    for ent in st.base_icc.clone() {
+        let p: Vec<&str> = ent.splitn(2, '|').collect();
+        if p.len() < 2 {
+            continue;
+        }
+        match ps_core(&format!(
+            "[SGCore]::IccSetPath('{}', '{}')",
+            p[0], p[1]
+        )) {
+            Ok(o) if o.trim().starts_with("OK") => {
+                done.push(format!("色彩配置 {} 已还原", p[0]));
+            }
+            Ok(o) => warn.push(format!("色彩 {}: {}", p[0], o.trim())),
+            Err(e) => warn.push(format!("色彩 {}: {}", p[0], e)),
+        }
+    }
+    if st.base_vol > 0 || !st.base_vol_id.is_empty() {
+        if audio_set_on(&st.base_vol_id, st.base_vol).is_ok() {
+            done.push(format!("音量 → {}%", st.base_vol));
+        }
+    }
+
+    let mut msg = format!("已恢复默认：{}", done.join("；"));
+    if !warn.is_empty() {
+        msg.push_str(&format!("。未完成：{}", warn.join("；")));
+    }
+    Ok(msg)
+}
+
+// ---------- 窗口列表 / 指定窗口铺满 ----------
+
+/// 可被铺满的窗口列表（"hwnd|宽x高|标题"）
+pub fn list_windows() -> Result<String, String> {
+    let out = ps_core(&format!("[SGCore]::ListWindows({})", std::process::id()))?;
+    let t = out.trim();
+    if t.starts_with("ERR:") {
+        Err(t[4..].to_string())
+    } else {
+        Ok(t.to_string())
+    }
+}
+
+/// 铺满指定窗口（hwnd）
+pub fn span_window(hwnd: i64) -> Result<String, String> {
+    let out = ps_core(&format!(
+        "[SGCore]::SpanWindow([int64]{}, '{}', {})",
+        hwnd,
+        span_fg_file(),
+        std::process::id()
+    ))?;
+    let t = out.trim();
+    if let Some(rest) = t.strip_prefix("OK|") {
+        Ok(rest.to_string())
+    } else if let Some(rest) = t.strip_prefix("ERR:") {
+        Err(rest.to_string())
+    } else {
+        Err(t.to_string())
+    }
+}
+
+// ---------- 音频输出端点 ----------
+
+/// 列出所有活动的输出端点（Windows：CoreAudio）
+pub fn audio_endpoints() -> Result<Vec<AudioEndpoint>, String> {
+    let out = ps_core("[SGAudio]::AudioList()")?;
+    let sel = app_state().audio_dev;
+    let mut list = Vec::new();
+    for line in out.lines() {
+        let t = line.trim_end();
+        let rest = match t.strip_prefix("A|") {
+            Some(r) => r,
+            None => continue,
+        };
+        let p: Vec<&str> = rest.split('|').collect();
+        if p.len() < 6 {
+            continue;
+        }
+        let id = p[0].trim().to_string();
+        list.push(AudioEndpoint {
+            selected: !sel.is_empty() && sel == id,
+            id,
+            name: p[1].trim().to_string(),
+            volume: p[2].trim().parse().unwrap_or(0),
+            mute: p[3].trim() == "1",
+            adjustable: p[4].trim() == "1",
+            form_factor: p[5].trim().parse().unwrap_or(0),
+            is_default: p.len() > 6 && p[6].trim() == "1",
+        });
+    }
+    if list.is_empty() {
+        return Err(out.trim().to_string());
+    }
+    Ok(list)
+}
+
+fn audio_set_on(id: &str, v: u32) -> Result<(), String> {
+    let out = ps_core(&format!(
+        "[SGAudio]::AudioSetDev('{}', [uint32]{})",
+        id.replace('\'', ""),
+        v.min(100)
+    ))?;
+    let t = out.trim();
+    if t == "OK" {
+        Ok(())
+    } else {
+        Err(t.trim_start_matches("ERR:").to_string())
+    }
+}
+
+/// 选定要控制的输出端点（空串 = 跟随系统默认）
+pub fn set_audio_device(id: &str) -> Result<(), String> {
+    let mut st = app_state();
+    st.audio_dev = id.to_string();
+    save_app_state(&st)
+}
+
+/// 设置音量：优先作用于「用户选定的端点」，没选就作用于系统默认端点
+pub fn set_system_volume_sel(v: u32) -> Result<(), String> {
+    let id = app_state().audio_dev;
+    audio_set_on(&id, v)
+}
+
+/// 静音：同样遵循用户选定的端点
+pub fn set_system_mute_sel(on: bool) -> Result<(), String> {
+    let id = app_state().audio_dev;
+    let out = ps_core(&format!(
+        "[SGAudio]::AudioMuteDev('{}', [uint32]{})",
+        id.replace('\'', ""),
+        if on { 1 } else { 0 }
+    ))?;
+    let t = out.trim();
+    if t == "OK" {
+        Ok(())
+    } else {
+        Err(t.trim_start_matches("ERR:").to_string())
+    }
+}
+
+/// 单台屏 HDR 开关（基线还原用）
+pub fn hdr_set_dev(dev: &str, on: bool) -> Result<String, String> {
+    let out = ps_core(&format!(
+        "[SGCore]::HDRSetDev('{}', {})",
+        dev.replace('\'', ""),
+        if on { 1 } else { 0 }
+    ))?;
+    let t = out.trim();
+    if t.starts_with("OK") || t.starts_with("SKIP") {
+        Ok(t.to_string())
+    } else {
+        Err(t.trim_start_matches("ERR:").to_string())
+    }
 }

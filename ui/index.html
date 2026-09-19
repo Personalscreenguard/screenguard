@@ -57,6 +57,10 @@
         <h2>🎚️ 系统控制</h2>
         <span class="hint" id="audio-dev">读取中…</span>
       </div>
+      <div class="color-row">
+        <label>输出设备</label>
+        <select id="audio-dev-sel"><option value="">读取中…</option></select>
+      </div>
       <div class="slider-row">
         <label>音量</label>
         <input type="range" min="0" max="100" value="0" id="sys-vol" disabled>
@@ -138,15 +142,36 @@
         <h2>🎬 双屏铺满</h2>
         <span class="hint">任意窗口横跨两块屏</span>
       </div>
-      <div class="btn-row">
-        <button class="primary" id="span-fg">铺满当前窗口</button>
-        <button class="ghost" id="restore-fg">还原</button>
+      <div class="color-row">
+        <label>目标窗口</label>
+        <select id="span-target"><option value="">（先点下面的「刷新窗口列表」）</option></select>
       </div>
       <div class="btn-row">
-        <button class="ghost" id="span-video">铺满播放器</button>
-        <button class="ghost" id="restore-video">还原播放器</button>
+        <button class="ghost" id="span-refresh">↻ 刷新窗口列表</button>
+        <button class="primary" id="span-pick">铺满选中窗口</button>
       </div>
-      <div class="hint">「铺满当前窗口」对<b>任何</b>前台窗口生效 —— 浏览器里的抖音/视频全屏、PotPlayer、VLC 都行：先切到那个窗口，再点这个按钮。原位置会被记住，点「还原」回到原样。</div>
+      <div class="btn-row">
+        <button class="ghost" id="span-fg">铺满当前前台窗口</button>
+        <button class="ghost" id="restore-fg">↩ 还原</button>
+      </div>
+      <div class="hint">推荐：点「刷新窗口列表」→ 在「目标窗口」里选中 → 点「铺满选中窗口」。<b>任何窗口都能铺满</b>（浏览器里的抖音全屏、PotPlayer、VLC…）。铺满后若界面被盖住，按 <b>Ctrl+Alt+R</b> 或右键托盘「还原铺满的窗口」即可还原 —— 不会再有「点不到按钮」的情况。</div>
+    </section>
+
+    <!-- ===== 一键恢复默认（安全阀） ===== -->
+    <section class="card">
+      <div class="card-head">
+        <h2>🛟 一键恢复默认</h2>
+        <span class="hint">把「软件层面」的改动全部还原</span>
+      </div>
+      <div class="btn-row">
+        <button class="primary" id="restore-defaults">恢复到默认状态</button>
+      </div>
+      <div class="btn-row" style="align-items:center">
+        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--dim);cursor:pointer">
+          <input type="checkbox" id="revert-exit">退出软件时自动还原（推荐）
+        </label>
+      </div>
+      <div class="hint" id="restore-note">覆盖范围：总亮度（回到原始曲线）、HDR、色彩配置、被铺满的窗口、屏幕电源、音量 —— 全部回到<b>软件启动时</b>的状态（启动时会自动存一份「基线」，所以乱调之后总能一键回到好的状态）。<b>硬件层面的设置不受影响</b>（显示器自己的亮度/音量、KVM 都不动）。</div>
     </section>
 
   </main>

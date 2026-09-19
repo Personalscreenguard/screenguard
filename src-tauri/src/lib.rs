@@ -75,7 +75,7 @@ async fn get_system_audio() -> Result<platform::SystemAudio, String> {
 /// 设置系统默认输出设备音量 0-100（托盘滑块同源；笔记本喇叭/耳机/HDMI 音频都走这里）
 #[tauri::command]
 async fn set_system_volume(value: u32) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || platform::set_system_volume(value))
+    tauri::async_runtime::spawn_blocking(move || platform::set_system_volume_sel(value))
         .await
         .map_err(|e| format!("后台任务失败：{}", e))?
 }
@@ -83,7 +83,7 @@ async fn set_system_volume(value: u32) -> Result<(), String> {
 /// 系统静音开关
 #[tauri::command]
 async fn set_system_mute(on: bool) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || platform::set_system_mute(on))
+    tauri::async_runtime::spawn_blocking(move || platform::set_system_mute_sel(on))
         .await
         .map_err(|e| format!("后台任务失败：{}", e))?
 }
@@ -293,6 +293,60 @@ async fn match_dpi_restore() -> Result<String, String> {
         .map_err(|e| format!("后台任务失败：{}", e))?
 }
 
+// ---------- v0.3.3：窗口选择 / 音频端点选择 / 一键恢复默认 ----------
+
+/// 可以被铺满的窗口列表："hwnd|宽x高|标题"（不含本程序自己的窗口）
+#[tauri::command]
+async fn list_windows() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(platform::list_windows)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 铺满指定窗口（按 hwnd，用户从列表里挑）
+#[tauri::command]
+async fn span_window(hwnd: i64) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || platform::span_window(hwnd))
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 所有活动的音频输出端点（含是否可调音量），供「系统控制」里选设备
+#[tauri::command]
+async fn audio_endpoints() -> Result<Vec<platform::AudioEndpoint>, String> {
+    tauri::async_runtime::spawn_blocking(platform::audio_endpoints)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 选定要控制的输出端点（空串 = 跟随系统默认）
+#[tauri::command]
+async fn set_audio_device(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || platform::set_audio_device(&id))
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 一键恢复默认：把所有「软件层面」的改动还原成基线快照
+#[tauri::command]
+async fn restore_defaults() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(platform::restore_defaults)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 应用状态（是否退出还原 / 选定的音频端点 / 基线摘要）
+#[tauri::command]
+fn app_state_json() -> String {
+    platform::app_state_json()
+}
+
+/// 设置「退出软件时自动还原」
+#[tauri::command]
+fn set_revert_on_exit(on: bool) -> Result<(), String> {
+    platform::set_revert_on_exit(on)
+}
+
 // ---------- 方案B：ADB 联网精细控制（可选增强） ----------
 
 /// ADB 能力探测（是否找到 adb / 已连接设备）
@@ -368,7 +422,22 @@ fn open_main(app: tauri::AppHandle) -> Result<(), String> {
 /// 菜单栏面板：退出（窗口操作，留在主线程）
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
+    revert_before_exit();
     app.exit(0);
+}
+
+/// 退出前把「软件层面」的改动还原成基线（用户要求：退出软件后自动恢复原样）。
+/// 可在状态文件里用 revert_on_exit=false 关掉。
+fn revert_before_exit() {
+    let js: serde_json::Value =
+        serde_json::from_str(&platform::app_state_json()).unwrap_or(serde_json::Value::Null);
+    let on = js
+        .get("revert_on_exit")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if on {
+        let _ = platform::restore_defaults();
+    }
 }
 
 /// 菜单栏面板：隐藏浮窗（不退出应用；面板的 ✕ 按钮与 Esc 键调用）
@@ -606,8 +675,11 @@ pub fn run() {
 
             // 右键菜单
             let open_main = MenuItem::with_id(app, "open_main", "打开主窗口", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_main, &quit])?;
+            // 「不依赖界面」的还原入口：铺满之后窗口可能盖住界面上的按钮（实测踩过）
+            let unspan = MenuItem::with_id(app, "unspan", "还原铺满的窗口", true, None::<&str>)?;
+            let defaults = MenuItem::with_id(app, "defaults", "恢复默认状态", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "退出（自动还原）", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open_main, &unspan, &defaults, &quit])?;
 
             // 显示/隐藏面板浮窗（右上角、菜单栏下方）
             let toggle_panel = |app_handle: &tauri::AppHandle| {
@@ -635,7 +707,17 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app_handle, event| match event.id.as_ref() {
                     "open_main" => show_main_window(app_handle),
-                    "quit" => app_handle.exit(0),
+                    "unspan" => {
+                        let _ = platform::restore_foreground();
+                    }
+                    "defaults" => {
+                        let _ = platform::restore_defaults();
+                    }
+                    "quit" => {
+                        // 退出前把软件层面的改动还原（用户要求：退出后恢复原样）
+                        revert_before_exit();
+                        app_handle.exit(0)
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(move |tray, event| {
@@ -652,6 +734,13 @@ pub fn run() {
 
             // 显示器健康后台监控（掉线提醒 + 可选自动修复）
             spawn_health_watch(app.handle().clone());
+
+            // v0.3.3：启动后采集一次「基线快照」（供「一键恢复默认」和「退出自动还原」）
+            // 延后几秒，等显示/音频栈就绪再读，避免采到空值
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(7));
+                let _ = platform::capture_baseline();
+            });
 
             // 全局快捷键：Ctrl+Alt+L 切换「全部屏幕待机 / 唤醒」（失败只记日志，不影响启动）
             if let Err(e) = platform::hotkey_start() {
@@ -710,6 +799,13 @@ pub fn run() {
             hotkey_label,
             match_dpi_apply,
             match_dpi_restore,
+            list_windows,
+            span_window,
+            audio_endpoints,
+            set_audio_device,
+            restore_defaults,
+            app_state_json,
+            set_revert_on_exit,
             adb_status,
             adb_connect,
             adb_power,

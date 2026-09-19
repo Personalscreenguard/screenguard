@@ -93,6 +93,7 @@
     <div class="grp open" id="audio-grp" style="display:none">
       <div class="grp-body">
         <div class="srow"><label>音量</label><input type="range" min="0" max="100" value="0" id="sys-vol" disabled><span class="val" id="sys-vol-val">-</span></div>
+        <div class="srow" style="grid-template-columns:46px 1fr"><label>设备</label><select id="audio-dev-sel" style="width:100%;min-width:0"><option value="">读取中…</option></select></div>
         <div class="srow"><label>总亮度</label><input type="range" min="40" max="160" value="100" id="all-bri"><span class="val" id="all-bri-val">100%</span></div>
         <div class="hint" id="audio-dev">读取中…</div>
         <div class="hint">总亮度作用于<b>所有屏幕</b>（含不走 DDC/CI 的屏）：三通道同一条曲线，只改明暗、不动色相；范围 40~160，重启后自动恢复原始。</div>
@@ -153,7 +154,9 @@
     <div class="cell" id="cell-align" data-act="align-mac"><span class="ico">🖥️</span><span class="lbl">对齐主屏</span></div>
     <div class="cell" id="cell-ppi" data-act="ppi"><span class="ico">🪟</span><span class="lbl">窗口不变小</span></div>
     <div class="cell" id="cell-rotate" data-act="rotate"><span class="ico">🔄</span><span class="lbl">横竖屏</span></div>
-    <div class="cell span2" id="cell-span"><span class="ico">🎬</span><span class="lbl" id="span-lbl">铺满双屏（当前窗口）</span><button class="ibtn" id="span-restore">还原</button></div>
+    <div class="cell" id="cell-span"><span class="ico">🎬</span><span class="lbl">铺满窗口</span></div>
+    <div class="cell" id="cell-unspan"><span class="ico">↩️</span><span class="lbl">还原窗口</span></div>
+    <div class="cell" id="cell-defaults"><span class="ico">🛟</span><span class="lbl">恢复默认</span></div>
   </div>
 
   <div class="foot">
@@ -315,13 +318,20 @@ document.getElementById('cell-span').onclick = async (ev)=>{
     pwHint('已铺满：「' + title + '」（点右边「还原」回到原位置）');
   } catch(e){ quickFail(c); pwHint('铺满失败：' + (e && e.message ? e.message : e), true); }
 };
-document.getElementById('span-restore').onclick = async (ev)=>{
-  ev.stopPropagation();
-  try { await invoke('restore_foreground'); pwHint('已还原上一个被铺满的窗口'); }
-  catch(e){ pwHint('还原失败：' + (e && e.message ? e.message : e), true); }
+document.getElementById('cell-unspan').onclick = async (ev)=>{
+  const c = ev.currentTarget; flash(c);
+  try { await invoke('restore_foreground'); pwHint('已还原被铺满的窗口（快捷键 Ctrl+Alt+R 同样有效）'); }
+  catch(e){ quickFail(c); pwHint('还原失败：' + (e && e.message ? e.message : e), true); }
+};
+document.getElementById('cell-defaults').onclick = async (ev)=>{
+  const c = ev.currentTarget; flash(c);
+  pwHint('正在恢复默认状态…');
+  try { const r = await invoke('restore_defaults'); pwHint(String(r)); await loadAudio(); }
+  catch(e){ quickFail(c); pwHint('恢复默认失败：' + (e && e.message ? e.message : e), true); }
 };
 
 // ============ 系统控制：总亮度（gamma，对所有屏生效） ============
+// 全局快捷键：Ctrl+Alt+L 全部屏幕待机/唤醒；Ctrl+Alt+R 还原被铺满的窗口（不依赖界面）
 const briState = { latest: null, busy: false };
 function sendGamma(v){
   briState.latest = v;
@@ -369,7 +379,7 @@ document.getElementById('mute-btn2').onclick = async ()=>{
   const el = document.getElementById('hotkey-line');
   try {
     const hk = await invoke('hotkey_start');
-    el.innerHTML = '全局快捷键：<span class="hk">' + hk + '</span> 切换「全部屏幕待机 / 唤醒」——不用遥控器，任何时候都能按';
+    el.innerHTML = '快捷键：<span class="hk">' + hk + '</span> 屏幕待机/唤醒　<span class="hk">Ctrl+Alt+R</span> 还原被铺满的窗口（铺满后界面被盖住也能按）';
   } catch(e){
     el.textContent = '全局快捷键：' + (e && e.message ? e.message : '注册失败');
     el.style.color = '#e8a75c';
@@ -429,20 +439,42 @@ async function loadAudio(){
   try {
     const p = await invoke('get_platform');
     if (p !== 'windows') return;
-    const a = await invoke('get_system_audio');
     document.getElementById('audio-sec').style.display = '';
     document.getElementById('audio-grp').style.display = '';
     const sl = document.getElementById('sys-vol');
-    sl.disabled = !a.adjustable;
-    sl.value = a.volume;
-    document.getElementById('sys-vol-val').textContent = a.volume + '%';
-    let txt = a.name || '默认输出设备';
-    if (!a.adjustable) txt += '｜固定音量端点：显示器喇叭请用对应屏的 DDC 音量滑块';
+    // v0.3.3：音量作用于「用户选定的输出端点」。默认输出若是固定音量的 HDMI/DP
+    // 显示器音频（Windows 滑块也调不动），自动落到一个可调端点上并列出设备供切换。
+    const eps = await invoke('audio_endpoints');
+    let st = {};
+    try { st = JSON.parse(await invoke('app_state_json') || '{}'); } catch (e) {}
+    const cur = eps.find(e => e.id === st.audio_dev) || eps.find(e => e.is_default) || eps.find(e => e.adjustable) || eps[0];
+    const sel = document.getElementById('audio-dev-sel');
+    if (sel && !sel.dataset.bound) {
+      sel.dataset.bound = '1';
+      sel.addEventListener('change', async () => {
+        try { await invoke('set_audio_device', { id: sel.value }); await loadAudio(); }
+        catch (e) { }
+      });
+    }
+    if (sel && cur) {
+      sel.innerHTML = eps.map(e =>
+        '<option value="' + e.id + '"' + (e.id === cur.id ? ' selected' : '') + '>' +
+        e.name + (e.adjustable ? ('　' + e.volume + '%') : '（固定音量）') + '</option>').join('');
+    }
+    if (!cur) { document.getElementById('audio-dev').textContent = '没有可用的输出设备'; return; }
+    sl.disabled = !cur.adjustable;
+    sl.value = cur.volume;
+    document.getElementById('sys-vol-val').textContent = cur.volume + '%';
+    let txt = cur.name || '输出设备';
+    if (!cur.adjustable) txt += '｜此端点固定音量（Windows 也调不动）→ 在上面的「设备」里换一个';
     document.getElementById('audio-dev').textContent = txt;
-    sl.addEventListener('input', ev=>{
-      document.getElementById('sys-vol-val').textContent = ev.target.value + '%';
-      sendSysVol(ev.target.value);
-    });
+    if (!sl.dataset.bound) {
+      sl.dataset.bound = '1';
+      sl.addEventListener('input', ev=>{
+        document.getElementById('sys-vol-val').textContent = ev.target.value + '%';
+        sendSysVol(ev.target.value);
+      });
+    }
   } catch(e){ /* 预览模式静默 */ }
 }
 
