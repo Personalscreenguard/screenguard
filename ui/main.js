@@ -554,6 +554,7 @@ async function loadMitvVolume() {
   const sl = document.getElementById('mitv-vol');
   if (!sl) return;
   let deb = null;
+  let poll = null;
   sl.addEventListener('input', (ev) => {
     const v = Number(ev.target.value);
     document.getElementById('mitv-vol-val').textContent = v + '%';
@@ -561,14 +562,24 @@ async function loadMitvVolume() {
     // 这样「拖回 20%」会立刻反向，不会先把旧目标走完再降（用户实测的痛点）。
     invoke('mitv_volume_set', { target: v }).catch(() => {});
     if (deb) clearTimeout(deb);
-    // 停下来后按真实值回正显示（步进是显示器固件限制，1% 一步，追赶需要一点时间）
-    deb = setTimeout(async () => {
-      try {
-        const now = await invoke('mitv_volume_get');
-        sl.value = now;
-        document.getElementById('mitv-vol-val').textContent = now + '%';
-      } catch (e) {}
-    }, 1000);
+    // 每隔 600ms 就把**显示值**校准成显示器真实音量，直到追上目标为止。
+    // 之前只在 1 秒后读一次，而步进是 1% 一步（220ms/步），大跨度要好几秒才走完，
+    // 所以界面看起来「很久没反应」（用户实测）—— 现在全程跟着走，实时能看见数字在涨。
+    if (!poll) {
+      poll = setInterval(async () => {
+        try {
+          const now = await invoke('mitv_volume_get');
+          sl.value = now;
+          document.getElementById('mitv-vol-val').textContent = now + '%';
+          if (Number(now) === Number(sl.dataset.want || now)) {
+            clearInterval(poll); poll = null;
+          }
+        } catch (e) { clearInterval(poll); poll = null; }
+      }, 600);
+    }
+    sl.dataset.want = String(v);
+    if (deb) clearTimeout(deb);
+    deb = setTimeout(() => { if (poll) { clearInterval(poll); poll = null; } }, 8000);
   });
   loadMitvVolume();
 })();

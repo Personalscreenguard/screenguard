@@ -2528,6 +2528,33 @@ pub fn restore_video() -> Result<(), String> {
 /// 系统级关闭所有显示器：一次让全部屏进入待机。
 /// 这是唯一能影响到无 DDC 显示器（本机小米）的软件手段。
 pub fn screen_off() -> Result<(), String> {
+    let r = screen_off_inner();
+    if r.is_ok() {
+        // 记录「是**我们主动**关的屏」并同时记下此刻的输入时刻。
+        // 必须这么做：待机会让系统产生「显示器掉线」事件，自动修复线程看到就会去修，
+        // 而深度修复里含有 screen_off() —— 结果就是「鼠标一唤醒、屏又立刻黑下去」（用户实测）。
+        *asleep_tick().lock().unwrap() = last_input_tick().max(1);
+    }
+    r
+}
+
+/// 是否处于「我们主动让屏幕待机」的状态。
+/// 用户一有输入（鼠标/键盘）就自动判定为已唤醒并清除标记 —— 这样唤醒后不会再被关回去。
+pub fn standby_state() -> bool {
+    let off_at = *asleep_tick().lock().unwrap();
+    if off_at == 0 {
+        return false;
+    }
+    let li = last_input_tick();
+    if li != 0 && li > off_at {
+        // 用户已经动过键鼠 → 视为已唤醒，清掉标记
+        *asleep_tick().lock().unwrap() = 0;
+        return false;
+    }
+    true
+}
+
+fn screen_off_inner() -> Result<(), String> {
     let out = ps_core("[SGCore]::ScreenOff()")?;
     if out.trim() == "OK" {
         Ok(())
@@ -2538,6 +2565,13 @@ pub fn screen_off() -> Result<(), String> {
 
 /// 唤醒屏幕：合成一次 Shift 按键（真实输入事件，可解除系统级显示器待机）
 pub fn screen_wake() -> Result<(), String> {
+    let r = screen_wake_inner();
+    // 唤醒（不论是我们发的还是用户动键鼠）→ 清掉「待机中」标记，自动修复恢复工作
+    *asleep_tick().lock().unwrap() = 0;
+    r
+}
+
+fn screen_wake_inner() -> Result<(), String> {
     let out = ps_core("[SGCore]::ScreenWake()")?;
     if out.trim() == "OK" {
         Ok(())
@@ -3061,6 +3095,12 @@ pub struct AppState {
     pub base_vol: u32,
     #[serde(default)]
     pub base_mute: bool,
+    /// 各屏当前旋转角度（"设备|角度"），供「恢复默认」把副屏方向切回原样
+    #[serde(default)]
+    pub base_rot: Vec<String>,
+    /// 小米屏基线音量（0 = 未记录/不可用）
+    #[serde(default)]
+    pub base_mitv: u32,
     /// 小米显示器 MiTV Assistant 的地址（空 = 用默认）
     #[serde(default)]
     pub mitv_ip: String,
@@ -3129,6 +3169,20 @@ pub fn capture_baseline() -> Result<String, String> {
         }
     }
     st.base_vol_id = st.audio_dev.clone();
+    // 各屏旋转角度 + 小米屏音量：这两项也是「软件改动」，一并记入基线，
+    // 这样「一键恢复默认」才能真的把所有软件层改动都还原（用户要求）。
+    st.base_rot = Vec::new();
+    {
+        // 注意：Windows 侧 mode_detail() 直接返回 String（不是 Result）
+        let raw = mode_detail();
+        for line in raw.lines() {
+            let p: Vec<&str> = line.split('|').collect();
+            if p.len() >= 6 && p[0] == "M" {
+                st.base_rot.push(format!("{}|{}", p[1], p[5].trim()));
+            }
+        }
+    }
+    st.base_mitv = mitv_volume_get().unwrap_or(0);
     if let Ok(eps) = audio_endpoints() {
         let pick = eps
             .iter()
@@ -3164,6 +3218,40 @@ pub fn restore_defaults() -> Result<String, String> {
         done.push("已还原被铺满的窗口".to_string());
     }
     let _ = screen_wake();
+
+    // ---- 以下都是「软件层做过的改动」，一律回到基线（用户要求：一键恢复默认要全都能还原）----
+
+    // ① 跨屏缩放对齐（写进 HKCU PerMonitorSettings 的那个）
+    match match_dpi_restore() {
+        Ok(o) => done.push(format!("缩放对齐已还原（{}）", o.chars().take(28).collect::<String>())),
+        Err(e) => warn.push(format!("缩放对齐: {}", e)),
+    }
+    // ② 各屏旋转角度（副屏横竖屏）
+    for ent in st.base_rot.clone() {
+        let p: Vec<&str> = ent.splitn(2, '|').collect();
+        if p.len() < 2 || p[1].trim().is_empty() {
+            continue;
+        }
+        let call = format!("[SGCore]::Rotate('{}',[uint32]{})", p[0], p[1].trim());
+        match ps_core(&call) {
+            Ok(o) if o.trim().starts_with("OK") => done.push(format!("屏幕方向 {} 已还原", p[0])),
+            Ok(o) => warn.push(format!("屏幕方向 {}: {}", p[0], o.trim())),
+            Err(e) => warn.push(format!("屏幕方向 {}: {}", p[0], e)),
+        }
+    }
+    // ③ 小米屏音量（走它自己的系统，也是软件改动）
+    if st.base_mitv > 0 {
+        match mitv_volume_set(st.base_mitv) {
+            Ok(v) => done.push(format!("小米音量 → {}%", v)),
+            Err(e) => warn.push(format!("小米音量: {}", e)),
+        }
+    }
+    // ④ 音频「控制的设备」回到基线那一个
+    if !st.base_vol_id.is_empty() {
+        if set_audio_device(&st.base_vol_id).is_ok() {
+            done.push("音频控制设备已还原".to_string());
+        }
+    }
 
     for ent in st.base_hdr.clone() {
         let p: Vec<&str> = ent.splitn(2, '|').collect();

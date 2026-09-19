@@ -676,7 +676,12 @@ fn spawn_health_watch(app: tauri::AppHandle) {
                 );
             }
 
-            if cfg.auto_repair && last_fix.elapsed() > Duration::from_secs(150) {
+            // 我们主动让屏幕待机时**绝不**自动修复：待机会产生「显示器掉线」事件，
+            // 而深度修复内部含 screen_off()，会把刚被鼠标唤醒的屏又关回去（用户实测）。
+            if cfg.auto_repair
+                && !platform::standby_state()
+                && last_fix.elapsed() > Duration::from_secs(150)
+            {
                 std::thread::sleep(Duration::from_secs(6)); // 给系统 6 秒自己恢复的机会
                 let now = count_displays();
                 if now < baseline {
