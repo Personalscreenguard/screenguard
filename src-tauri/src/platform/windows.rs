@@ -555,7 +555,15 @@ public class SGCore {
   /// 把当前前台窗口铺满所有屏幕的包围盒（抖音/浏览器全屏视频、播放器都适用）。
   /// 记录窗口句柄 + 原始位置/样式到 stateFile，供 RestoreForeground 还原。
   /// 返回 OK|<窗口标题> 或 ERR:<原因>
+  // DPI 感知：不设的话本进程看到的坐标被系统缩放过（实测主屏 3840 被看成 2560、
+  // 虚拟桌面 6240x3840 被看成 3760x2507），铺满就会算错尺寸 —— 副屏那块永远铺不到。
+  // 设成 PER_MONITOR_AWARE_V2(-4) 之后拿到的才是真实物理像素。
+  // 注意：SetProcessDpiAwarenessContext 的 DllImport 本类里已经有，别重复声明。
+  static bool _dpiOn = false;
+  static void DpiOn() { if (!_dpiOn) { try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { } _dpiOn = true; } }
+
   public static string SpanForeground(string stateFile, int myPid, int mode) {
+    DpiOn();
     IntPtr h = GetForegroundWindow();
     if (h == IntPtr.Zero) return "ERR:没有前台窗口";
     if (h == GetShellWindow() || h == GetDesktopWindow()) return "ERR:当前前台是桌面/任务栏，请先切换到要铺满的窗口";
@@ -690,6 +698,7 @@ public class SGCore {
 
   /// 铺满指定的窗口（按 hwnd）。直接对目标句柄动手，不依赖前台窗口。
   public static string SpanWindow(long hwnd, string stateFile, int myPid, int mode) {
+    DpiOn();
     IntPtr h = new IntPtr(hwnd);
     if (!IsWindow(h)) return "ERR:该窗口已关闭";
     if (IsIconic(h)) ShowWindow(h, 9);
@@ -3018,6 +3027,19 @@ fn span_fg_file() -> String {
 /// mode: 0 = 铺满整块桌面包围盒；1 = 以主屏为基准（高度取主屏，避免主屏底部被裁）
 pub fn span_foreground(mode: u32) -> Result<String, String> {
     mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
+    // mode=2：**先把两块屏的清晰度自动对齐**（竖向像素高度一致），再按包围盒铺满 ——
+    // 这样两块屏都会被完整覆盖，副屏底下/中间不会留下一块没铺到的画面。
+    let (mode, pre) = if mode == 2 {
+        match align_apply() {
+            Ok(s) => {
+                std::thread::sleep(std::time::Duration::from_millis(1800));
+                (0u32, format!("已先自动对齐两屏清晰度 → {}；然后", s.replace('\n', " ")))
+            }
+            Err(e) => (1u32, format!("自动对齐没成功（{}），改用「以主屏为基准」铺满；", e)),
+        }
+    } else {
+        (mode, String::new())
+    };
     let out = ps_core(&format!(
         "[SGCore]::SpanForeground('{}', {}, {})",
         span_fg_file(),
@@ -3026,7 +3048,7 @@ pub fn span_foreground(mode: u32) -> Result<String, String> {
     ))?;
     let t = out.trim();
     if let Some(rest) = t.strip_prefix("OK|") {
-        return Ok(rest.to_string());
+        return Ok(format!("{}{}", pre, rest));
     }
     Err(t.strip_prefix("ERR:").unwrap_or(t).to_string())
 }
@@ -3453,6 +3475,18 @@ pub fn list_windows() -> Result<String, String> {
 /// 铺满指定窗口（hwnd）；mode 含义同 span_foreground
 pub fn span_window(hwnd: i64, mode: u32) -> Result<String, String> {
     mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
+    // 同 span_foreground：mode=2 先把两块屏清晰度对齐，再铺满，保证两块屏都不留没覆盖的地方
+    let (mode, pre) = if mode == 2 {
+        match align_apply() {
+            Ok(s) => {
+                std::thread::sleep(std::time::Duration::from_millis(1800));
+                (0u32, format!("已先自动对齐两屏清晰度 → {}；然后", s.replace('\n', " ")))
+            }
+            Err(e) => (1u32, format!("自动对齐没成功（{}），改用「以主屏为基准」铺满；", e)),
+        }
+    } else {
+        (mode, String::new())
+    };
     let out = ps_core(&format!(
         "[SGCore]::SpanWindow([int64]{}, '{}', {}, {})",
         hwnd,
@@ -3462,7 +3496,7 @@ pub fn span_window(hwnd: i64, mode: u32) -> Result<String, String> {
     ))?;
     let t = out.trim();
     if let Some(rest) = t.strip_prefix("OK|") {
-        Ok(rest.to_string())
+        Ok(format!("{}{}", pre, rest))
     } else if let Some(rest) = t.strip_prefix("ERR:") {
         Err(rest.to_string())
     } else {
