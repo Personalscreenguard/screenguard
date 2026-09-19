@@ -2227,6 +2227,7 @@ fn associate_all(profile: &str) -> Result<(), String> {
 /// Windows 端「色彩同步」：把 ICC 关联到所有显示屏。
 /// 关联可随时改回、无破坏性；失败会给出真实原因，不再静默假装成功。
 pub fn apply_color_space(space: &str) -> Result<(), String> {
+    mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     let profile = icc_path(space)?;
     // 先安装进系统色彩目录（Windows 只认该目录下的配置）；sRGB 为系统自带，装不上可忽略
     if let Err(e) = icc_install(&profile) {
@@ -2346,6 +2347,7 @@ fn dpi_write(key: &str, value: u32) -> Result<(), String> {
 
 /// 把副屏（以及其它屏）的缩放档统一成主屏的值；原值备份，可一键还原。
 pub fn match_dpi_apply() -> Result<String, String> {
+    mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     let displays = get_displays();
     if displays.len() < 2 {
         return Err("需要主屏 + 副屏各一块才能使用此功能".to_string());
@@ -2392,6 +2394,7 @@ pub fn match_dpi_apply() -> Result<String, String> {
 
 /// 还原到 match_dpi_apply 之前备份的缩放档
 pub fn match_dpi_restore() -> Result<String, String> {
+    mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     let bp = dpi_backup_path();
     let txt = std::fs::read_to_string(&bp)
         .map_err(|_| "没有可还原的缩放备份（还没用「窗口跨屏等大」对齐过）".to_string())?;
@@ -2431,8 +2434,31 @@ fn secondary_dev() -> Result<(String, u32), String> {
     sec.ok_or_else(|| "需要主屏 + 副屏各一块才能使用此功能".to_string())
 }
 
+// ---------- 「刚主动改过显示配置」闸门 ----------
+// 为什么要它：切旋转/写缩放/铺满/HDR/色彩都会产生一堆显示事件，自动修复线程看到
+// 就当成「显示器掉线」去修（强制重协商），于是把我们**有意**改的状态又改回去 ——
+// 用户实测：点「副屏方向」当场生效、几秒后自己变回去了，正是这个原因。
+static LAST_INTENT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+fn mark_change() {
+    if let Ok(mut g) = LAST_INTENT.lock() {
+        *g = Some(std::time::Instant::now());
+    }
+}
+
+/// 最近 secs 秒内是否由用户主动改过显示配置（自动修复要让路）
+pub fn recently_changed(secs: u64) -> bool {
+    if let Ok(g) = LAST_INTENT.lock() {
+        if let Some(t) = *g {
+            return t.elapsed().as_secs() < secs;
+        }
+    }
+    false
+}
+
 /// 横竖屏切换（再点一次转回）
 pub fn rotate_secondary() -> Result<(), String> {
+    mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     let (dev, ori) = secondary_dev()?;
     let target = if ori == 1 || ori == 3 { 0 } else { 3 };
     let call = format!(
@@ -2453,6 +2479,7 @@ pub fn rotate_secondary() -> Result<(), String> {
 
 /// 恢复副屏为竖屏（安全复位）
 pub fn restore_secondary() -> Result<(), String> {
+    mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     let (dev, ori) = secondary_dev()?;
     if ori == 3 || ori == 1 {
         return Ok(());
@@ -2614,6 +2641,7 @@ fn screen_wake_inner() -> Result<(), String> {
 
 /// DDC 单台电源模式：1=开 2=待机 4=软关（实测唤醒后需 2~5 秒 DDC 才恢复响应）
 pub fn set_display_power(display_id: &str, mode: u32) -> Result<(), String> {
+    mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     vcp_op(display_id, 0xD6, Some(mode))
 }
 
@@ -2938,6 +2966,7 @@ fn span_fg_file() -> String {
 /// 把当前前台窗口铺满所有屏（浏览器里的抖音全屏、播放器、任意窗口都可以）
 /// mode: 0 = 铺满整块桌面包围盒；1 = 以主屏为基准（高度取主屏，避免主屏底部被裁）
 pub fn span_foreground(mode: u32) -> Result<String, String> {
+    mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     let out = ps_core(&format!(
         "[SGCore]::SpanForeground('{}', {}, {})",
         span_fg_file(),
@@ -3366,6 +3395,7 @@ pub fn list_windows() -> Result<String, String> {
 
 /// 铺满指定窗口（hwnd）；mode 含义同 span_foreground
 pub fn span_window(hwnd: i64, mode: u32) -> Result<String, String> {
+    mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     let out = ps_core(&format!(
         "[SGCore]::SpanWindow([int64]{}, '{}', {}, {})",
         hwnd,
@@ -3463,6 +3493,7 @@ pub fn set_system_mute_sel(on: bool) -> Result<(), String> {
 
 /// 单台屏 HDR 开关（基线还原用）
 pub fn hdr_set_dev(dev: &str, on: bool) -> Result<String, String> {
+    mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     let out = ps_core(&format!(
         "[SGCore]::HDRSetDev('{}', {})",
         dev.replace('\'', ""),
@@ -3622,4 +3653,395 @@ pub fn primary_work_area() -> Result<(i32, i32, i32, i32), String> {
 /// 小米屏音量接口是否可用（界面据此决定是否显示这一项）
 pub fn mitv_available() -> bool {
     mitv_volume_get().is_ok()
+}
+
+// ---------- 一键检测（诊断 + 日志） ----------
+// 目的：点一下就把「所有与屏幕有关的信息」扫一遍，逐项判定（正常/警告/问题）并给出处置建议，
+// 同时把结果**写进日志**，方便事后回溯（尤其是那种偶发的掉线、颜色不对之类）。
+
+/// 日志目录：%APPDATA%\Screenguard\logs
+fn diag_log_dir() -> std::path::PathBuf {
+    let mut p = std::path::PathBuf::from(std::env::var("APPDATA").unwrap_or_default());
+    p.push("Screenguard");
+    p.push("logs");
+    let _ = std::fs::create_dir_all(&p);
+    p
+}
+
+/// 日志目录路径（界面显示用）
+pub fn diag_log_path() -> String {
+    diag_log_dir().to_string_lossy().to_string()
+}
+
+/// 在文件资源管理器里打开日志目录
+pub fn open_log_dir() -> Result<(), String> {
+    let d = diag_log_path();
+    std::process::Command::new("explorer")
+        .arg(&d)
+        .spawn()
+        .map_err(|e| format!("打开日志目录失败：{}", e))?;
+    Ok(())
+}
+
+fn portrait_of(res: &str) -> String {
+    let p: Vec<&str> = res.split('x').collect();
+    if p.len() == 2 {
+        if let (Ok(w), Ok(h)) = (p[0].trim().parse::<u32>(), p[1].trim().parse::<u32>()) {
+            return if h > w { "竖屏".to_string() } else { "横屏".to_string() };
+        }
+    }
+    "方向未知".to_string()
+}
+
+/// 一键检测：扫全部屏幕相关状态 → 逐项判定 + 建议 → 写日志 → 返回报告文本
+pub fn diag_scan() -> Result<String, String> {
+    let ts = ps("Get-Date -Format \"yyyy-MM-dd HH:mm:ss\"")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let (mut nok, mut nwarn, mut nbad) = (0u32, 0u32, 0u32);
+    let mut o = String::new();
+    o.push_str("屏幕守护 · 一键检测报告\n");
+    o.push_str(&format!("时间：{}\n", ts));
+    o.push_str("标记：[正常] 没问题 / [警告] 能用但要留意 / [问题] 需要处理\n");
+
+    // 【1】显示器
+    o.push_str("\n【1】显示器\n");
+    let ds = get_displays();
+    if ds.is_empty() {
+        nbad += 1;
+        o.push_str("[问题] 一台显示器都没枚举到\n  ↳ 检查线材、供电、KVM 是否切到本机；然后点「显示器健康 → 一键修复」\n");
+    }
+    for d in &ds {
+        let name = if d.name.trim().is_empty() { "(未命名)" } else { d.name.as_str() };
+        o.push_str(&format!(
+            "[{}] {} · {} · {}Hz · {} · {} · {}\n",
+            if d.connected { "正常" } else { "警告" },
+            name,
+            d.resolution,
+            match d.hz { Some(v) => v.to_string(), None => "?".to_string() },
+            if d.main { "主屏" } else { "副屏" },
+            if d.ddc { "DDC/CI 可用" } else { "DDC/CI 不可用" },
+            portrait_of(&d.resolution)
+        ));
+        o.push_str(&format!(
+            "  · 亮度 {} · 音量 {} · 色彩配置 {}\n",
+            match d.brightness { Some(v) => format!("{}%", v), None => "读不到".to_string() },
+            match d.volume { Some(v) => format!("{}%", v), None => "读不到".to_string() },
+            d.color_profile.clone().unwrap_or_else(|| "未读取到".to_string())
+        ));
+        if d.ddc {
+            nok += 1;
+        } else {
+            nwarn += 1;
+            o.push_str("  ↳ 该屏读不到 DDC/CI（常见于 KVM/转接链路不转发）：屏幕自身亮度音量读不到是**链路**问题、非软件故障；亮度用「总亮度(gamma)」兜底，小米这类 Android 屏的音量用「小米音量」滑块\n");
+        }
+    }
+
+    // 【2】显示链路（近 24 小时）
+    o.push_str("\n【2】显示链路（近 24 小时）\n");
+    let ev = health_events(1440);
+    let evn = ev.lines().filter(|l| !l.trim().is_empty()).count();
+    if evn == 0 {
+        nok += 1;
+        o.push_str("[正常] 没有显示器掉线记录\n");
+    } else {
+        nwarn += 1;
+        o.push_str(&format!(
+            "[警告] 有 {} 条掉线相关记录\n  ↳ 常见于 KVM 切换/线材/供电；可用「显示器健康 → 一键修复」强制重协商\n",
+            evn
+        ));
+    }
+
+    // 【3】HDR
+    o.push_str("\n【3】HDR\n");
+    let hs = hdr_states();
+    let mut sup = 0;
+    for l in hs.lines().filter(|l| l.starts_with("H|")) {
+        let p: Vec<&str> = l.split('|').collect();
+        if p.len() >= 4 {
+            let s = p[2] == "1";
+            if s {
+                sup += 1;
+            }
+            o.push_str(&format!(
+                "  {} · {} · 当前 {}\n",
+                p[1],
+                if s { "支持 HDR" } else { "不支持 HDR" },
+                if p[3] == "1" { "开" } else { "关" }
+            ));
+        }
+    }
+    if sup == 0 {
+        nwarn += 1;
+        o.push_str("[警告] 没有检测到支持 HDR 的屏\n");
+    } else {
+        nok += 1;
+        o.push_str("[正常] HDR 状态已读取\n");
+    }
+    if let Ok(g) = ps("$p=Get-Process AsHDRControl -ErrorAction SilentlyContinue; if($p){\"YES\"}else{\"NO\"}")
+    {
+        if g.trim() == "YES" {
+            nwarn += 1;
+            o.push_str("[警告] 厂商 HDR 服务 AsHDRControl 正在运行\n  ↳ HDR 很可能被它接管：程序内切换的 API 会返回成功、但状态不变（本机已实测），要改 HDR 请用「设置 → 系统 → 显示 → HDR」或厂商工具\n");
+        }
+    }
+
+    // 【4】总亮度（gamma）
+    o.push_str("\n【4】总亮度（软件层 gamma）\n");
+    let g = gamma_get();
+    let mut vals: Vec<String> = Vec::new();
+    for l in g.lines().filter(|l| l.starts_with("G|")) {
+        let p: Vec<&str> = l.split('|').collect();
+        if p.len() >= 3 {
+            vals.push(format!("{} = {}%", p[1], p[2]));
+        }
+    }
+    if vals.is_empty() {
+        nwarn += 1;
+        o.push_str("[警告] 总亮度读取失败（gamma 接口无响应）\n");
+    } else {
+        o.push_str(&format!("  {}\n", vals.join("　")));
+        if vals.iter().all(|v| v.ends_with("= 100%")) {
+            nok += 1;
+            o.push_str("[正常] 所有屏都在原始曲线（100%）\n");
+        } else {
+            nwarn += 1;
+            o.push_str("[警告] 有屏被软件调过亮度（不是原始曲线）\n  ↳ 点「亮度复位」或「一键恢复默认」可回到原样\n");
+        }
+    }
+
+    // 【5】音频
+    o.push_str("\n【5】音频输出\n");
+    match audio_endpoints() {
+        Ok(eps) => {
+            for e in &eps {
+                o.push_str(&format!(
+                    "  {} {} · 音量 {}% · {} · {}\n",
+                    if e.selected { "▶当前" } else { "　　　" },
+                    e.name,
+                    e.volume,
+                    if e.adjustable { "可调" } else { "固定音量" },
+                    if e.is_default { "系统默认设备" } else { "" }
+                ));
+            }
+            match eps.iter().find(|e| e.selected) {
+                Some(c) if c.adjustable => {
+                    nok += 1;
+                    o.push_str(&format!("[正常] 当前控制的「{}」可调音量\n", c.name));
+                }
+                Some(c) => {
+                    nwarn += 1;
+                    o.push_str(&format!("[警告] 当前控制的「{}」是**固定音量**端点\n  ↳ Windows 自己的音量条也调不动它。想调这块屏的喇叭用「小米音量」滑块，或在上面的「输出设备」里换一个\n", c.name));
+                }
+                None => {
+                    nwarn += 1;
+                    o.push_str("[警告] 没有选中的输出设备\n");
+                }
+            }
+        }
+        Err(e) => {
+            nbad += 1;
+            o.push_str(&format!("[问题] 音频端点枚举失败：{}\n", e));
+        }
+    }
+
+    // 【6】小米屏（MiTV）
+    o.push_str("\n【6】小米显示器（自带 Android 系统）\n");
+    if mitv_available() {
+        nok += 1;
+        o.push_str(&format!(
+            "[正常] 显示器音量接口可达，当前音量 {}%\n",
+            mitv_volume_get().unwrap_or(0)
+        ));
+    } else {
+        nwarn += 1;
+        o.push_str("[警告] 显示器音量接口不可达\n  ↳ 该屏是 Android 系统：确认它与电脑同网段、6095 端口可达；高频率连打会被它限流（通常几分钟自恢复）\n");
+    }
+
+    // 【7】电池
+    o.push_str("\n【7】电池\n");
+    match get_batteries() {
+        Ok(bs) if !bs.is_empty() => {
+            for b in &bs {
+                o.push_str(&format!(
+                    "  {} · {}% · {} · {}{}\n",
+                    b.name,
+                    b.percent,
+                    if b.charging { "充电中" } else { "未充电" },
+                    b.conn,
+                    if b.health > 0 { format!(" · 健康度 {}%", b.health) } else { String::new() }
+                ));
+                if b.health > 0 && b.health < 70 {
+                    nwarn += 1;
+                    o.push_str(&format!("  ↳ 健康度 {}% 偏低（若不是保养模式限充，建议关注电池）\n", b.health));
+                }
+            }
+            nok += 1;
+        }
+        Ok(_) => {
+            nwarn += 1;
+            o.push_str("[警告] 没有枚举到电池（台式机属正常）\n");
+        }
+        Err(e) => {
+            nwarn += 1;
+            o.push_str(&format!("[警告] 电池读取失败：{}\n", e));
+        }
+    }
+
+    // 【8】基线与一键恢复
+    o.push_str("\n【8】基线与一键恢复\n");
+    let st = app_state();
+    o.push_str(&format!(
+        "  基线已采集：{} · HDR {} 屏 · 色彩 {} 屏 · 方向 {} 屏 · 小米音量 {}\n",
+        if st.baseline_taken { "是" } else { "否" },
+        st.base_hdr.len(),
+        st.base_icc.len(),
+        st.base_rot.len(),
+        st.base_mitv
+    ));
+    o.push_str(&format!(
+        "  退出软件自动还原：{}\n",
+        if st.revert_on_exit { "开" } else { "关（可在「一键恢复默认」里打开）" }
+    ));
+    if !st.baseline_taken {
+        nbad += 1;
+        o.push_str("[问题] 基线未采集 →「一键恢复默认」不完整\n  ↳ 重启一次本程序即可自动采集\n");
+    } else if st.base_rot.is_empty() || st.base_mitv == 0 || st.base_icc.is_empty() {
+        nwarn += 1;
+        o.push_str("[警告] 基线缺少部分字段（方向 / 小米音量 / 色彩）\n  ↳ 重启一次本程序会补齐\n");
+    } else {
+        nok += 1;
+        o.push_str("[正常] 基线字段完整，「一键恢复默认」可覆盖全部软件层改动\n");
+    }
+
+    // 结论
+    let total = nok + nwarn + nbad;
+    o.push_str(&format!(
+        "\n===== 结论 =====\n共 {} 项：{} 正常 / {} 警告 / {} 问题\n",
+        total, nok, nwarn, nbad
+    ));
+    if nbad == 0 && nwarn == 0 {
+        o.push_str("全部正常。\n");
+    } else if nbad == 0 {
+        o.push_str("没有需要修的问题，警告项多为硬件/系统限制（DDC 链路、固定音量端点、厂商 HDR 服务），按建议处置即可。\n");
+    } else {
+        o.push_str("有问题项，请按上面的「↳」建议处理；处理完可以再点一次检测对比。\n");
+    }
+
+    // 写日志：每次检测一个文件 + 追加一行总览，方便回溯
+    let fname = format!("diag-{}.log", ts.replace(':', "-").replace(' ', "_"));
+    let path = diag_log_dir().join(&fname);
+    let mut body = o.clone();
+    body.push_str(&format!("日志文件：{}\n", path.to_string_lossy()));
+    let _ = std::fs::write(&path, &body);
+    let hist = diag_log_dir().join("diag-history.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&hist) {
+        use std::io::Write;
+        let _ = f.write_all(
+            format!("{} | {} 正常 / {} 警告 / {} 问题\n", ts, nok, nwarn, nbad).as_bytes(),
+        );
+    }
+    o.push_str(&format!("\n（已写入日志：{}\\diag-…log）", diag_log_path()));
+    Ok(o)
+}
+
+/// 一键修复：把检测里「能安全自动处理」的问题逐条修掉，然后自动复查一遍。
+/// 原则：只动软件层能确定的事（重协商链路、亮度复位、切到可调音频端点、补齐基线、
+/// 还原被铺满的窗口）；硬件/系统限制类的（DDC 链路、厂商 HDR 服务、固定音量端点本身）
+/// 不硬修，只如实说明。
+pub fn diag_fix() -> Result<String, String> {
+    mark_change(); // 修复过程本身会改显示配置，先标记，避免自动修复跟着掺和
+    let mut done: Vec<String> = Vec::new();
+    let mut skip: Vec<String> = Vec::new();
+
+    // ① 没枚举到显示器 / 有掉线记录 → 强制重协商整条链路
+    let evn = health_events(1440)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
+    let nmon = get_displays().len();
+    if nmon == 0 || evn > 0 {
+        let lvl = if nmon == 0 { 2 } else { 1 };
+        match repair_display(lvl) {
+            Ok(o) => done.push(format!(
+                "重协商显示链路（{}）：{}",
+                if lvl == 2 { "深度" } else { "轻修" },
+                o.chars().take(60).collect::<String>()
+            )),
+            Err(e) => skip.push(format!("重协商显示链路：{}", e)),
+        }
+    } else {
+        done.push("显示链路：近 24 小时无掉线记录，无需重协商".to_string());
+    }
+
+    // ② 总亮度不在原始曲线 → 复位
+    let g = gamma_get();
+    let not_100 = g
+        .lines()
+        .filter(|l| l.starts_with("G|"))
+        .any(|l| !l.trim().ends_with("|100"));
+    if not_100 {
+        match gamma_set(100) {
+            Ok(_) => done.push("总亮度已复位到 100%（原始曲线）".to_string()),
+            Err(e) => skip.push(format!("总亮度复位：{}", e)),
+        }
+    }
+
+    // ③ 当前控制的是「固定音量」端点 → 自动切到一个可调端点
+    if let Ok(eps) = audio_endpoints() {
+        let bad = eps
+            .iter()
+            .find(|e| e.selected)
+            .map(|e| !e.adjustable)
+            .unwrap_or(false);
+        if bad {
+            let good = eps
+                .iter()
+                .find(|e| e.adjustable && e.is_default)
+                .or_else(|| eps.iter().find(|e| e.adjustable));
+            match good {
+                Some(t) => match set_audio_device(&t.id) {
+                    Ok(_) => done.push(format!("音频控制设备已切到可调的「{}」", t.name)),
+                    Err(e) => skip.push(format!("切换音频设备：{}", e)),
+                },
+                None => skip.push("音频：没有找到可调的输出端点".to_string()),
+            }
+        }
+    }
+
+    // ④ 基线不完整 → 补齐（旋转方向 / 小米音量 / 色彩）
+    let st = app_state();
+    if !st.baseline_taken || st.base_rot.is_empty() || st.base_mitv == 0 || st.base_icc.is_empty() {
+        match capture_baseline() {
+            Ok(o) => done.push(format!("恢复基线：{}", o)),
+            Err(e) => skip.push(format!("恢复基线：{}", e)),
+        }
+    }
+
+    // ⑤ 有窗口被铺满还没还原 → 还原
+    let _ = restore_foreground();
+
+    // ⑥ 小米屏接口（能修的是「等它自己恢复」，不硬修）
+    if !mitv_available() {
+        skip.push("小米屏音量接口当前不可达：确认同网段/6095 端口可达；高频连打会被限流，等几分钟再试".to_string());
+    }
+
+    let mut o = String::new();
+    o.push_str("一键修复结果\n");
+    o.push_str(&format!("已处理 {} 项：\n", done.len()));
+    for d in &done {
+        o.push_str(&format!("  ✓ {}\n", d));
+    }
+    if !skip.is_empty() {
+        o.push_str(&format!("\n无法自动修 / 需你确认 {} 项：\n", skip.len()));
+        for s in &skip {
+            o.push_str(&format!("  ! {}\n", s));
+        }
+    }
+    o.push_str("\n========== 修复后自动复查 ==========\n");
+    match diag_scan() {
+        Ok(r) => o.push_str(&r),
+        Err(e) => o.push_str(&format!("复查失败：{}\n", e)),
+    }
+    Ok(o)
 }

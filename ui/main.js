@@ -422,17 +422,19 @@ document.getElementById('restore-fg').onclick = async () => {
   try { await invoke('restore_foreground'); setStatus('已还原上一个被铺满的窗口'); }
   catch (e) { setStatus('还原失败：' + errText(e), false); }
 };
+// ⚠️ 重要：Windows 改「每屏缩放」只能写注册表，**必须注销或重新登录才生效**，
+// 没有运行时 API 能立刻变。所以点完当场看不出任何变化是正常的 —— 这里明说，免得白点。
 document.getElementById('match-ppi').onclick = async () => {
   try {
-    setStatus('正在对齐两块屏缩放…');
+    setStatus('正在写入缩放档…（写入后需注销/重新登录才生效）');
     const msg = await invoke('match_dpi_apply');
-    setStatus(String(msg));
+    setStatus('✅ ' + msg + ' —— 注意：窗口现在不会立刻变小，Windows 限制必须先注销或重新登录（原值已备份，「还原缩放」可回退）');
   } catch (e) { setStatus('对齐失败：' + errText(e), false); }
 };
 document.getElementById('dpi-restore').onclick = async () => {
   try {
     const msg = await invoke('match_dpi_restore');
-    setStatus(String(msg));
+    setStatus('✅ ' + msg + ' —— 同样需要注销或重新登录才生效');
   } catch (e) { setStatus('还原失败：' + errText(e), false); }
 };
 // 副屏横竖屏：按钮直接显示**当前方向**，点一下切换
@@ -462,7 +464,10 @@ document.getElementById('rotate-secondary').onclick = async () => {
   btn.disabled = true;
   try {
     setStatus('正在切换副屏方向…（屏幕会短暂黑一下，稍等）');
-    await invoke(wasPortrait ? 'restore_secondary' : 'rotate_secondary');
+    // 注意方向别接反：现在**竖屏**时要的是横屏 → 调 rotate_secondary（它把副屏转成横屏）；
+    // 现在**横屏**时才调 restore_secondary（它把副屏恢复成竖屏）。
+    // 之前写反了，于是「本来竖屏、点一下又叫它竖屏」，用户看到的就是「点了没反应」。
+    await invoke(wasPortrait ? 'rotate_secondary' : 'restore_secondary');
     setStatus(wasPortrait ? '已把副屏切为横屏' : '已把副屏切为竖屏');
     setTimeout(loadRotateStatus, 2600);
   } catch (e) { setStatus('切换失败：' + errText(e), false); }
@@ -588,6 +593,54 @@ async function loadMitvVolume() {
     deb = setTimeout(() => { if (poll) { clearInterval(poll); poll = null; } }, 8000);
   });
   loadMitvVolume();
+})();
+
+// ===== 一键检测 =====
+(function () {
+  const btn = document.getElementById('diag-run');
+  const open = document.getElementById('diag-open');
+  const pre = document.getElementById('diag-out');
+  const when = document.getElementById('diag-when');
+  const dirEl = document.getElementById('diag-dir');
+  if (dirEl) {
+    (async () => {
+      try {
+        const p = await invoke('diag_log_path');
+        dirEl.textContent = '日志目录：' + p + '（每次检测一个 diag-…log，并追加一行到 diag-history.log）';
+      } catch (e) { dirEl.textContent = '日志目录：%APPDATA%\\Screenguard\\logs'; }
+    })();
+  }
+  if (open) open.onclick = async () => {
+    try { await invoke('open_log_dir'); setStatus('已打开日志文件夹'); }
+    catch (e) { setStatus('打开失败：' + errText(e), false); }
+  };
+  const fix = document.getElementById('diag-fix');
+  if (fix) fix.onclick = async () => {
+    fix.disabled = true;
+    pre.textContent = '正在修复…（重协商显示链路 / 亮度复位 / 切换到可调音频端点 / 补齐恢复基线 / 还原被铺满的窗口，然后自动复查）';
+    try {
+      const r = await invoke('diag_fix');
+      pre.textContent = String(r);
+      if (when) when.textContent = '上次修复+复查：' + new Date().toLocaleTimeString();
+      setStatus('修复完成，已写入日志');
+    } catch (e) {
+      pre.textContent = '修复失败：' + errText(e);
+      setStatus('修复失败', false);
+    } finally { fix.disabled = false; }
+  };
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true;
+    pre.textContent = '正在检测…（依次读取显示器 / 事件日志 / HDR / 音频 / 小米屏 / 电池 / 基线，约几秒）';
+    try {
+      const r = await invoke('diag_scan');
+      pre.textContent = String(r);
+      if (when) when.textContent = '上次检测：' + new Date().toLocaleTimeString();
+      setStatus('检测完成，已写入日志');
+    } catch (e) {
+      pre.textContent = '检测失败：' + errText(e);
+      setStatus('检测失败', false);
+    } finally { btn.disabled = false; }
+  };
 })();
 document.getElementById('refresh-btn').onclick = () => refreshDisplays();
 document.getElementById('battery-refresh-btn').onclick = () => loadBatteries();

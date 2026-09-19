@@ -350,6 +350,34 @@ fn set_revert_on_exit(on: bool) -> Result<(), String> {
     platform::set_revert_on_exit(on)
 }
 
+/// 一键检测：扫描所有与屏幕相关的状态，逐项判定 + 建议，并写入日志
+#[tauri::command]
+async fn diag_scan() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(platform::diag_scan)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 一键修复：把检测出的、能安全自动处理的问题修掉并自动复查
+#[tauri::command]
+async fn diag_fix() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(platform::diag_fix)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 在资源管理器里打开日志目录
+#[tauri::command]
+fn open_log_dir() -> Result<(), String> {
+    platform::open_log_dir()
+}
+
+/// 日志目录路径（界面显示）
+#[tauri::command]
+fn diag_log_path() -> String {
+    platform::diag_log_path()
+}
+
 /// 小米显示器（REDMI G Pro 27U）当前音量：走它自己的 MiTV 接口（DDC 不通）
 #[tauri::command]
 async fn mitv_volume_get() -> Result<u32, String> {
@@ -683,6 +711,7 @@ fn spawn_health_watch(app: tauri::AppHandle) {
             // 而深度修复内部含 screen_off()，会把刚被鼠标唤醒的屏又关回去（用户实测）。
             if cfg.auto_repair
                 && !platform::standby_state()
+                && !platform::recently_changed(120)
                 && last_fix.elapsed() > Duration::from_secs(150)
             {
                 std::thread::sleep(Duration::from_secs(6)); // 给系统 6 秒自己恢复的机会
@@ -800,6 +829,9 @@ pub fn run() {
             std::thread::spawn(|| {
                 std::thread::sleep(std::time::Duration::from_secs(7));
                 let _ = platform::capture_baseline();
+                // 采集完基线再自动跑一次「一键检测」并落日志：这样每次开机都有一条基线记录，
+                // 偶发的掉线/颜色异常事后能翻日志对比（用户要的「记录日志」）。
+                let _ = platform::diag_scan();
             });
 
             // 全局快捷键：Ctrl+Alt+L 切换「全部屏幕待机 / 唤醒」（失败只记日志，不影响启动）
@@ -869,6 +901,10 @@ pub fn run() {
             mitv_volume_get,
             mitv_volume_set,
             mitv_available,
+            diag_scan,
+            diag_fix,
+            open_log_dir,
+            diag_log_path,
             adb_status,
             adb_connect,
             adb_power,

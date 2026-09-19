@@ -141,6 +141,21 @@
       <div class="hint">把副屏的缩放档改成与主屏一致（<b>原值自动备份</b>，可一键还原）。为什么以前"看着没实现"：Windows 改每屏缩放只有注册表一条路、且<b>必须注销或重新登录才生效</b>，没有运行时 API 能立刻变 —— 这是系统限制。点完按钮重启登录即可看到效果。</div>
     </section>
 
+    <!-- ===== 一键检测 ===== -->
+    <section class="card">
+      <div class="card-head">
+        <h2>🩺 一键检测</h2>
+        <span class="hint" id="diag-when">尚未检测</span>
+      </div>
+      <div class="btn-row">
+        <button class="primary" id="diag-run">开始检测</button>
+        <button class="ghost" id="diag-fix">🔧 一键修复检测出的问题</button>
+        <button class="ghost" id="diag-open">📂 打开日志文件夹</button>
+      </div>
+      <pre id="diag-out" style="max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:Consolas,ui-monospace,monospace;font-size:12px;line-height:1.55;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:10px;padding:10px;margin:10px 0 6px;color:var(--foreground);">点「开始检测」，会把所有与屏幕有关的状态扫一遍并逐项判定：显示器（分辨率/刷新率/主副屏/DDC/亮度/音量/色彩/方向）、显示链路掉线、HDR、总亮度、音频端点、小米屏接口、电池健康度、恢复基线。结果会同时写入日志。</pre>
+      <div class="hint" id="diag-dir">日志目录：读取中…</div>
+    </section>
+
     <!-- ===== 视频跨屏 ===== -->
     <section class="card">
       <div class="card-head">
