@@ -276,22 +276,40 @@ document.getElementById('cell-brisync').onclick = async (ev)=>{
   } catch(e){ quickFail(c); pwHint('亮度同步失败：' + (e && e.message ? e.message : e), true); }
 };
 
-document.getElementById('cell-hdr').onclick = async (ev)=>{
-  const c = ev.currentTarget; flash(c);
-  pwHint('正在读取 HDR 状态…');
+// HDR：格子直接显示当前状态（开/关/混合），点一下设成一致
+async function paintHdrCell() {
+  const c = document.getElementById('cell-hdr');
+  if (!c) return;
   try {
     const raw = String(await invoke('hdr_states') || '');
-    let anyOn = false, sup = 0;
+    let sup = 0, on = 0;
     for (const line of raw.split('\n')) {
       const p = line.split('|');
-      if (p[0] === 'H' && p.length >= 4) { if (p[2] === '1') sup++; if (p[3] === '1') anyOn = true; }
+      if (p[0] === 'H' && p.length >= 4) { if (p[2] === '1') sup++; if (p[3] === '1') on++; }
+    }
+    const lbl = c.querySelector('.lbl');
+    lbl.textContent = !sup ? 'HDR 不支持' : (on === sup ? 'HDR 开' : (on === 0 ? 'HDR 关' : 'HDR 混合'));
+    c.title = '点一下把所有屏 HDR 设成一致';
+  } catch (e) {}
+}
+document.getElementById('cell-hdr').onclick = async (ev)=>{
+  const c = ev.currentTarget; flash(c);
+  pwHint('正在切换 HDR…');
+  try {
+    const raw = String(await invoke('hdr_states') || '');
+    let sup = 0, on = 0;
+    for (const line of raw.split('\n')) {
+      const p = line.split('|');
+      if (p[0] === 'H' && p.length >= 4) { if (p[2] === '1') sup++; if (p[3] === '1') on++; }
     }
     if (!sup) { pwHint('本机没有支持 HDR 的显示器', true); return; }
-    const want = !anyOn;
+    const want = !(on === sup);
     const r = await invoke('hdr_set', { on: want });
-    pwHint('HDR ' + (want ? '已开启' : '已关闭') + '：' + r);
+    pwHint(String(r));
+    await paintHdrCell();
   } catch(e){ quickFail(c); pwHint('HDR 切换失败：' + (e && e.message ? e.message : e), true); }
 };
+paintHdrCell();
 
 document.getElementById('cell-align').onclick = async (ev)=>{
   const c = ev.currentTarget; flash(c);

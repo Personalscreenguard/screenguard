@@ -71,11 +71,17 @@
         <input type="range" min="40" max="160" value="100" id="all-bri">
         <span class="val" id="all-bri-val">100%</span>
       </div>
+      <div class="slider-row" id="mitv-row" style="display:none">
+        <label>小米音量</label>
+        <input type="range" min="0" max="100" value="0" id="mitv-vol">
+        <span class="val" id="mitv-vol-val">-</span>
+      </div>
       <div class="btn-row">
         <button class="ghost" id="mute-btn">🔇 静音</button>
         <button class="ghost" id="bri-reset">☀️ 亮度复位</button>
       </div>
       <div class="hint" id="audio-hint">音量控制当前默认输出设备（与托盘音量同源）。总亮度作用于<b>所有屏幕</b>（含不走 DDC/CI 的显示器）：三通道同曲线，只改明暗、不动色相，范围 40~160，重启后自动恢复。</div>
+      <div class="hint" id="mitv-hint" style="display:none">「小米音量」走显示器自己的系统（MiTV 接口，每次步进 1%），因为小米屏不支持 DDC/CI、电脑侧音频端点又是固定音量。</div>
     </section>
 
     <!-- ===== 电池设备 ===== -->
@@ -114,8 +120,8 @@
         <button class="ghost" id="match-mac">对齐 Mac 内建屏</button>
       </div>
       <div class="btn-row">
-        <button class="ghost" id="bri-sync">☀️ 亮度同步（各屏亮度取齐）</button>
-        <button class="ghost" id="hdr-sync">🌈 HDR 同步（全部开或全关）</button>
+        <button class="ghost" id="bri-sync">☀️ 亮度同步（各屏取齐）</button>
+        <button class="ghost" id="hdr-sync">🌈 HDR：读取中…</button>
       </div>
       <div class="calib-note" id="color-note">支持 8 种目标色彩空间（sRGB / P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto / 灰度）｜Windows 只自带 sRGB，其它需把 .icc 放进 %LOCALAPPDATA%\screenguard_icc\（软按文件名自动识别，不限这三种）｜深度校准仍需硬件校色仪（DisplayCAL）</div>
     </section>
@@ -130,8 +136,7 @@
         <button class="ghost" id="dpi-restore">↩ 还原缩放</button>
       </div>
       <div class="btn-row">
-        <button class="ghost" id="rotate-secondary">副屏横竖屏切换</button>
-        <button class="ghost" id="restore-secondary">恢复副屏竖屏</button>
+        <button class="ghost" id="rotate-secondary">🔄 副屏方向：读取中…</button>
       </div>
       <div class="hint">把副屏的缩放档改成与主屏一致（<b>原值自动备份</b>，可一键还原）。为什么以前"看着没实现"：Windows 改每屏缩放只有注册表一条路、且<b>必须注销或重新登录才生效</b>，没有运行时 API 能立刻变 —— 这是系统限制。点完按钮重启登录即可看到效果。</div>
     </section>

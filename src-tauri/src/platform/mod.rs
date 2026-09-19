@@ -249,6 +249,21 @@ pub fn app_state_json() -> String {
     String::from("{}")
 }
 
+#[cfg(not(target_os = "windows"))]
+pub fn mitv_volume_get() -> Result<u32, String> {
+    Err("小米显示器音量控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn mitv_volume_set(_target: u32) -> Result<u32, String> {
+    Err("小米显示器音量控制仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn mitv_available() -> bool {
+    false
+}
+
 // ---------- 屏幕电源控制（方案A）：非 Windows 平台存根 ----------
 // macOS/Linux 可分别用 pmset displaysleepnow / xset dpms force off 实现，
 // 属后续版本；当前先明确告知，避免 UI 误以为可用。

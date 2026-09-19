@@ -3038,6 +3038,9 @@ pub struct AppState {
     pub base_vol: u32,
     #[serde(default)]
     pub base_mute: bool,
+    /// 小米显示器 MiTV Assistant 的地址（空 = 用默认）
+    #[serde(default)]
+    pub mitv_ip: String,
 }
 
 pub fn app_state() -> AppState {
@@ -3301,4 +3304,100 @@ pub fn hdr_set_dev(dev: &str, on: bool) -> Result<String, String> {
     } else {
         Err(t.trim_start_matches("ERR:").to_string())
     }
+}
+
+// ---------- 小米显示器（REDMI G Pro 27U）：MiTV Assistant 音量 ----------
+// 背景：小米这块屏不支持 DDC/CI（实测换过 Type-C 口、也换过 Intel/NVIDIA 分支，都不通），
+// 所以它的**亮度**只能走软件层 gamma（见「总亮度」）。但它的**音量另有一条路**：
+// 显示器本体是 Android(hyperOS)，6095 端口跑着 MiTV Assistant，实测：
+//   GET /controller?action=getvolume                    -> {"data":{"volume":10,...}}
+//   GET /controller?action=keyevent&keycode=volumeup    -> 每次 +1（实测 10→11）
+//   GET /controller?action=keyevent&keycode=volumedown  -> 每次 -1（实测 11→10）
+// 没有 setvolume（404），只能按键步进 → 用「读-步进-回读」逼近目标值。
+// 只动音量键，不动电源/其它键；每次步进后回读校验，异常立即停止。
+
+const MITV_IP_DEFAULT: &str = "192.168.31.216";
+
+fn mitv_ip() -> String {
+    let ip = app_state().mitv_ip;
+    if ip.trim().is_empty() {
+        MITV_IP_DEFAULT.to_string()
+    } else {
+        ip.trim().to_string()
+    }
+}
+
+fn mitv_get(action: &str) -> Result<String, String> {
+    let url = format!("http://{}:6095/controller?action={}", mitv_ip(), action);
+    let script = format!(
+        "$ProgressPreference='SilentlyContinue';try{{(Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 -Uri '{}').Content}}catch{{'ERR:'+$_.Exception.Message}}",
+        url
+    );
+    let out = ps(&script)?;
+    let t = out.trim();
+    if t.is_empty() {
+        return Err("显示器无响应（确认显示器已联网且与电脑同网段）".to_string());
+    }
+    if let Some(rest) = t.strip_prefix("ERR:") {
+        return Err(format!(
+            "连接显示器失败：{}",
+            rest.chars().take(90).collect::<String>()
+        ));
+    }
+    Ok(t.to_string())
+}
+
+fn mitv_volume_parse(body: &str) -> Option<u32> {
+    let key = "\"volume\"";
+    let i = body.find(key)? + key.len();
+    let rest = &body[i..];
+    let c = rest.find(':')? + 1;
+    let digits: String = rest[c..]
+        .chars()
+        .skip_while(|ch| ch.is_whitespace())
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
+    digits.parse::<u32>().ok()
+}
+
+/// 读小米屏当前音量（0-100）
+pub fn mitv_volume_get() -> Result<u32, String> {
+    let body = mitv_get("getvolume")?;
+    mitv_volume_parse(&body).ok_or_else(|| {
+        format!(
+            "音量解析失败：{}",
+            body.chars().take(80).collect::<String>()
+        )
+    })
+}
+
+/// 把小米屏音量调到 target。
+/// 说明：MiTV 没有 setvolume，只能按键步进（每次 ±1），所以这里「读-步进-回读」逼近。
+/// 实测：把整个循环塞进一个 PowerShell 脚本里反而容易因为引号/转义出问题，
+/// 因此改回 Rust 循环调用已经验证可用的 `mitv_get`（每步一次进程开销，可接受）。
+pub fn mitv_volume_set(target: u32) -> Result<u32, String> {
+    let target = target.min(100);
+    let mut now = mitv_volume_get()?;
+    let mut guard = 0;
+    while now != target && guard < 120 {
+        let act = if target > now {
+            "keyevent&keycode=volumeup"
+        } else {
+            "keyevent&keycode=volumedown"
+        };
+        mitv_get(act)?;
+        std::thread::sleep(std::time::Duration::from_millis(90));
+        let nv = mitv_volume_get()?;
+        if nv == now {
+            break; // 到顶/到底或没生效，避免死循环
+        }
+        now = nv;
+        guard += 1;
+    }
+    Ok(now)
+}
+
+/// 小米屏音量接口是否可用（界面据此决定是否显示这一项）
+pub fn mitv_available() -> bool {
+    mitv_volume_get().is_ok()
 }

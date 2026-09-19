@@ -187,7 +187,7 @@ async function loadAudio() {
     muteBtn.disabled = !cur.adjustable;
     hint.textContent = cur.adjustable
       ? `控制的是上面选中的输出设备（与系统托盘音量同源）。总亮度作用于所有屏幕，不依赖 DDC。`
-      : '这个输出端点（常见于 HDMI/DP 显示器音频）是固定音量，Windows 自己的滑块也调不动 → 请在上面「输出设备」里换一个（扬声器/耳机），换了之后滑块立刻可用。';
+      : '这个端点（显示器音频）是固定音量，Windows 自己的滑块也调不动 → 想调这块屏的喇叭，用下面的「小米音量」滑块（走显示器自己的系统）；或在上面的「输出设备」里换成扬声器/耳机。';
   } catch (e) {
     card.style.display = '';
     devEl.textContent = '不可用';
@@ -290,38 +290,71 @@ document.getElementById('match-mac').onclick = () => {
   run('match_mac', {}, `已${label}`);
 };
 
-// 亮度同步：把所有能读到亮度的屏统一到平均值（读不到 DDC 的屏由「总亮度」覆盖）
+// 亮度同步：以「主屏亮度」为基准，把其它能读到亮度的屏对齐过去。
+// 读不到独立亮度的屏（DDC 不通，如小米）由「总亮度」统一控制 —— 如实说明。
 document.getElementById('bri-sync').onclick = async () => {
   try {
     setStatus('正在同步各屏亮度…');
-    const ds = await invoke('get_displays');
-    const withBri = (ds || []).filter(d => d.brightness != null);
+    const ds = await invoke('get_displays') || [];
+    const withBri = ds.filter(d => d.brightness != null);
     if (!withBri.length) {
-      setStatus('两块屏都读不到独立亮度（DDC 不通）→ 请用「系统控制 → 总亮度」统一调节', false);
+      setStatus('两块屏都读不到独立亮度（DDC 不通）→ 请用「总亮度」统一调节（对不支持的屏也生效）', false);
       return;
     }
-    const avg = Math.round(withBri.reduce((s, d) => s + d.brightness, 0) / withBri.length);
-    for (const d of withBri) { try { await invoke('set_brightness', { displayId: d.id, value: avg }); } catch(e){} }
-    setStatus(`已把 ${withBri.length} 台屏亮度统一为 ${avg}%`);
+    const ref = withBri.find(d => d.main) || withBri[0];
+    const target = Number(ref.brightness);
+    const changed = [];
+    for (const d of withBri) {
+      if (Number(d.brightness) === target) continue;
+      try { await invoke('set_brightness', { displayId: d.id, value: target }); changed.push(d.name || d.id); } catch (e) {}
+    }
+    const unread = ds.length - withBri.length;
+    let msg = `以「${ref.name || '主屏'}」的 ${target}% 为基准：` + (changed.length ? `已调整 ${changed.join('、')}` : '各可读屏已是同一值');
+    if (unread > 0) msg += `；另有 ${unread} 台屏读不到独立亮度（DDC 不通），由「总亮度」统一控制`;
+    setStatus(msg);
   } catch (e) { setStatus('亮度同步失败：' + errText(e), false); }
 };
 
-// HDR 同步：读状态 → 有开就全关，全关就全开
-document.getElementById('hdr-sync').onclick = async () => {
+// HDR：按钮直接显示**当前状态**（开 / 关 / 混合），点一下才把所有屏设成一致。
+// 说明：本机实测 Windows 的 HDR 设置 API 返回成功但状态可能不变（被厂商/驱动接管），
+// 所以结果里会带上逐台原始明细，不给你一个漂亮但不实的结论。
+let hdrStat = { sup: 0, on: 0, total: 0 };
+async function loadHdrStatus() {
+  const btn = document.getElementById('hdr-sync');
+  if (!btn) return;
   try {
-    setStatus('正在读取 HDR 状态…');
     const raw = String(await invoke('hdr_states') || '');
-    let anyOn = false, sup = 0;
+    let sup = 0, on = 0, total = 0;
     for (const line of raw.split('\n')) {
       const p = line.split('|');
-      if (p[0] === 'H' && p.length >= 4) { if (p[2] === '1') sup++; if (p[3] === '1') anyOn = true; }
+      if (p[0] === 'H' && p.length >= 4) {
+        total++;
+        if (p[2] === '1') sup++;
+        if (p[3] === '1') on++;
+      }
     }
-    if (!sup) { setStatus('本机没有支持 HDR 的显示器', false); return; }
-    const want = !anyOn;
+    hdrStat = { sup, on, total };
+    let txt;
+    if (!sup) txt = 'HDR：本机不支持';
+    else if (on === sup) txt = 'HDR：开';
+    else if (on === 0) txt = 'HDR：关';
+    else txt = `HDR：混合（${on}/${sup} 开）`;
+    btn.textContent = '🌈 ' + txt;
+    btn.title = '点一下把所有屏的 HDR 设成一致';
+  } catch (e) {
+    btn.textContent = '🌈 HDR：读取失败';
+  }
+}
+document.getElementById('hdr-sync').onclick = async () => {
+  try {
+    setStatus('正在切换 HDR…');
+    const want = !(hdrStat.sup > 0 && hdrStat.on === hdrStat.sup);
     const r = await invoke('hdr_set', { on: want });
-    setStatus(`HDR ${want ? '已开启' : '已关闭'}：${r}`);
-  } catch (e) { setStatus('HDR 同步失败：' + errText(e), false); }
+    setStatus(String(r));
+    await loadHdrStatus();
+  } catch (e) { setStatus('HDR 切换失败：' + errText(e), false); }
 };
+loadHdrStatus();
 
 // 总亮度（gamma，对所有屏生效）
 const bri = { latest: null, busy: false };
@@ -396,8 +429,40 @@ document.getElementById('dpi-restore').onclick = async () => {
     setStatus(String(msg));
   } catch (e) { setStatus('还原失败：' + errText(e), false); }
 };
-document.getElementById('rotate-secondary').onclick = () => run('rotate_secondary', {}, '已切换副屏横竖屏');
-document.getElementById('restore-secondary').onclick = () => run('restore_secondary', {}, '已恢复副屏为竖屏');
+// 副屏横竖屏：按钮直接显示**当前方向**，点一下切换
+// （原「切换 + 恢复副屏竖屏」两个按钮已合并成一个，避免用户记不清该点哪个）
+async function loadRotateStatus() {
+  const btn = document.getElementById('rotate-secondary');
+  if (!btn) return;
+  try {
+    const ds = await invoke('get_displays') || [];
+    const sec = ds.find(d => !d.main) || ds[0];
+    if (!sec) { btn.textContent = '🔄 副屏方向：未检测到副屏'; return; }
+    // 后端返回的是 resolution 字符串（如 "2400x3840"），不是 w/h 字段
+    let W = Number(sec.w != null ? sec.w : sec.width);
+    let H = Number(sec.h != null ? sec.h : sec.height);
+    if (!W || !H) {
+      const m = String(sec.resolution || '').match(/^(\d+)\s*x\s*(\d+)/i);
+      if (m) { W = Number(m[1]); H = Number(m[2]); }
+    }
+    const portrait = H > W;
+    btn.textContent = `🔄 副屏方向：${portrait ? '竖屏' : '横屏'}${W ? `（${W}x${H}）` : ''}（点击切换）`;
+    btn.dataset.portrait = portrait ? '1' : '0';
+  } catch (e) { btn.textContent = '🔄 副屏方向：读取失败'; }
+}
+document.getElementById('rotate-secondary').onclick = async () => {
+  const btn = document.getElementById('rotate-secondary');
+  const wasPortrait = btn.dataset.portrait === '1';
+  btn.disabled = true;
+  try {
+    setStatus('正在切换副屏方向…（屏幕会短暂黑一下，稍等）');
+    await invoke(wasPortrait ? 'restore_secondary' : 'rotate_secondary');
+    setStatus(wasPortrait ? '已把副屏切为横屏' : '已把副屏切为竖屏');
+    setTimeout(loadRotateStatus, 2600);
+  } catch (e) { setStatus('切换失败：' + errText(e), false); }
+  finally { setTimeout(() => { btn.disabled = false; }, 1800); }
+};
+loadRotateStatus();
 // ===== v0.3.3：窗口选择器 / 恢复默认 / 输出设备选择 =====
 async function loadSpanTargets() {
   const sel = document.getElementById('span-target');
@@ -465,6 +530,51 @@ document.getElementById('restore-defaults').onclick = async () => {
       setStatus('已切换控制「' + (sel.options[sel.selectedIndex] || {}).text + '」');
     } catch (e) { setStatus('切换输出设备失败：' + errText(e), false); }
   };
+})();
+
+// ===== 小米屏音量（走显示器自己的 MiTV 接口：DDC 不通、电脑侧音频端点又是固定音量）=====
+async function loadMitvVolume() {
+  const row = document.getElementById('mitv-row');
+  const hint = document.getElementById('mitv-hint');
+  if (!row) return;
+  try {
+    const ok = await invoke('mitv_available');
+    if (!ok) { row.style.display = 'none'; if (hint) hint.style.display = 'none'; return; }
+    const v = await invoke('mitv_volume_get');
+    row.style.display = '';
+    if (hint) hint.style.display = '';
+    document.getElementById('mitv-vol').value = v;
+    document.getElementById('mitv-vol-val').textContent = v + '%';
+  } catch (e) {
+    row.style.display = 'none';
+    if (hint) hint.style.display = 'none';
+  }
+}
+const mitv = { latest: null, busy: false };
+function sendMitv(v) {
+  mitv.latest = v;
+  if (mitv.busy) return;
+  mitv.busy = true;
+  (async () => {
+    while (mitv.latest !== null) {
+      const t = mitv.latest; mitv.latest = null;
+      try {
+        const got = await invoke('mitv_volume_set', { target: Number(t) });
+        document.getElementById('mitv-vol-val').textContent = got + '%';
+        document.getElementById('mitv-vol').value = got;
+      } catch (e) { setStatus('小米音量设置失败：' + errText(e), false); }
+    }
+    mitv.busy = false;
+  })();
+}
+(function () {
+  const sl = document.getElementById('mitv-vol');
+  if (!sl) return;
+  sl.addEventListener('input', (ev) => {
+    document.getElementById('mitv-vol-val').textContent = ev.target.value + '%';
+    sendMitv(ev.target.value);
+  });
+  loadMitvVolume();
 })();
 document.getElementById('refresh-btn').onclick = () => refreshDisplays();
 document.getElementById('battery-refresh-btn').onclick = () => loadBatteries();

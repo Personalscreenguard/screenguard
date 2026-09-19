@@ -347,6 +347,30 @@ fn set_revert_on_exit(on: bool) -> Result<(), String> {
     platform::set_revert_on_exit(on)
 }
 
+/// 小米显示器（REDMI G Pro 27U）当前音量：走它自己的 MiTV 接口（DDC 不通）
+#[tauri::command]
+async fn mitv_volume_get() -> Result<u32, String> {
+    tauri::async_runtime::spawn_blocking(platform::mitv_volume_get)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 把小米显示器音量调到指定值（按键步进逼近，返回实际读回值）
+#[tauri::command]
+async fn mitv_volume_set(target: u32) -> Result<u32, String> {
+    tauri::async_runtime::spawn_blocking(move || platform::mitv_volume_set(target))
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 小米显示器音量接口是否可用
+#[tauri::command]
+async fn mitv_available() -> bool {
+    tauri::async_runtime::spawn_blocking(platform::mitv_available)
+        .await
+        .unwrap_or(false)
+}
+
 // ---------- 方案B：ADB 联网精细控制（可选增强） ----------
 
 /// ADB 能力探测（是否找到 adb / 已连接设备）
@@ -806,6 +830,9 @@ pub fn run() {
             restore_defaults,
             app_state_json,
             set_revert_on_exit,
+            mitv_volume_get,
+            mitv_volume_set,
+            mitv_available,
             adb_status,
             adb_connect,
             adb_power,
