@@ -3243,6 +3243,9 @@ pub struct AppState {
     /// 原始分辨率基线（"设备|宽x高|刷新率"），用于「还原两块屏原始清晰度」
     #[serde(default)]
     pub base_mode: Vec<String>,
+    /// 原始显示器位置基线（"设备|x|y"）——对齐时会把顶边拉齐，还原时要放回去
+    #[serde(default)]
+    pub base_pos: Vec<String>,
     /// 小米显示器 MiTV Assistant 的地址（空 = 用默认）
     #[serde(default)]
     pub mitv_ip: String,
@@ -4194,6 +4197,106 @@ const DM_PELSWIDTH: u32 = 0x0008_0000;
 const DM_PELSHEIGHT: u32 = 0x0010_0000;
 const DM_DISPLAYFREQUENCY: u32 = 0x0040_0000;
 const CDS_TEST: u32 = 2;
+const DM_POSITION: u32 = 0x0000_0020;
+const CDS_NORESET: u32 = 0x1000_0000;
+const CDS_UPDATEREGISTRY: u32 = 0x0000_0001;
+
+/// 读某块屏在虚拟桌面里的当前位置（x, y）—— dmPosition 在 DEVMODEW 偏移 76/80
+fn cur_pos(dev: &str) -> (i32, i32) {
+    let name = dev_name_ptr(dev);
+    let mut b = [0u8; 220];
+    b[68] = 220;
+    let ok = unsafe { EnumDisplaySettingsW(name.as_ptr(), 0xFFFF_FFFF, b.as_mut_ptr()) };
+    if ok == 0 {
+        return (0, 0);
+    }
+    (
+        i32::from_le_bytes([b[76], b[77], b[78], b[79]]),
+        i32::from_le_bytes([b[80], b[81], b[82], b[83]]),
+    )
+}
+
+/// 把一块屏移到 (x,y)：用 CDS_NORESET（先攒着，最后统一次生效）
+/// 注意：**必须基于当前模式**（先 EnumDisplaySettings 取回完整 devmode）再改 dmPosition，
+/// 否则只带 DM_POSITION 的调用会被驱动拒掉（实测返回 -4 = BADFLAGS）。
+fn set_pos_norset(dev: &str, x: i32, y: i32) -> Result<(), String> {
+    let name = dev_name_ptr(dev);
+    let mut b = [0u8; 220];
+    b[68] = 220;
+    let ok = unsafe { EnumDisplaySettingsW(name.as_ptr(), 0xFFFF_FFFF, b.as_mut_ptr()) };
+    if ok == 0 {
+        return Err(format!("读 {} 当前模式失败", dev));
+    }
+    // 在已有模式基础上，追加「位置」和「宽高」字段（带上宽高才不会 BADFLAGS）
+    let fields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+    let cur = u32::from_le_bytes([b[72], b[73], b[74], b[75]]);
+    b[72..76].copy_from_slice(&(cur | fields).to_le_bytes());
+    b[76..80].copy_from_slice(&x.to_le_bytes());
+    b[80..84].copy_from_slice(&y.to_le_bytes());
+    let r = unsafe {
+        // 注意：CDS_NORESET 必须和 CDS_UPDATEREGISTRY 一起用（0x10000001）。
+        // 只给 CDS_NORESET 会被驱动拒掉（实测返回 -4 BADFLAGS）——这是官方样例的写法。
+        ChangeDisplaySettingsExW(
+            name.as_ptr(),
+            b.as_mut_ptr(),
+            std::ptr::null_mut(),
+            CDS_NORESET | CDS_UPDATEREGISTRY,
+            std::ptr::null_mut(),
+        )
+    };
+    if r != 0 {
+        return Err(format!("设置 {} 位置失败（码 {}）", dev, r));
+    }
+    Ok(())
+}
+
+/// 让两块屏的**顶边对齐**（消除上下错位）。
+/// 为什么必须做：两屏若上下错开，虚拟桌面高度会变成两屏高度之和，
+/// 跨屏铺满时画面会被**竖着切成两半**（一边上半幅、一边下半幅）。
+/// 顶边拉齐后虚拟桌面 = (两屏宽度之和) × (公共高度)，一个窗口正好完整覆盖两块屏。
+pub fn align_positions() -> Result<String, String> {
+    let infos = align_gather();
+    if infos.len() < 2 {
+        return Err("需要两块以上已连接的屏".to_string());
+    }
+    // 把面积最大的那块当主屏，位置不动；其余屏顶边与主屏齐平、水平紧密相邻
+    let mut main_idx = 0usize;
+    let mut best = 0u64;
+    for (i, it) in infos.iter().enumerate() {
+        let a = (it.3).0 as u64 * (it.3).1 as u64;
+        if a > best {
+            best = a;
+            main_idx = i;
+        }
+    }
+    let (mdev, _, _, mcur, _, _) = infos[main_idx].clone();
+    let (mx, my) = cur_pos(&mdev);
+    let _ = set_pos_norset(&mdev, mx, my);
+    let mut cursor_right = mx + mcur.0 as i32;
+    let mut done = Vec::new();
+    for (i, it) in infos.iter().enumerate() {
+        if i == main_idx {
+            continue;
+        }
+        let (dev, _, _, cur, _, _) = it;
+        let (px, py) = cur_pos(dev);
+        let on_left = px < mx;
+        let tx = if on_left { mx - cur.0 as i32 } else { cursor_right };
+        if !on_left {
+            cursor_right += cur.0 as i32;
+        }
+        set_pos_norset(dev, tx, my)?;
+        done.push(format!("{} 从 y={} 拉到 y={}、x={}", dev, py, my, tx));
+    }
+    let r = unsafe {
+        ChangeDisplaySettingsExW(std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), 0, std::ptr::null_mut())
+    };
+    if r != 0 {
+        return Err(format!("应用显示器位置失败（码 {}）", r));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    Ok(format!("已把两屏顶边对齐：{}", done.join("；")))
+}
 
 /// 构造 DEVMODEW 缓冲区（显式字节偏移，见 display_modes_ffi 的说明）
 fn devmode_buf(w: u32, h: u32, hz: u32) -> [u8; 220] {
@@ -4308,6 +4411,15 @@ fn snapshot_modes(infos: &[(String, String, Vec<(u32, u32)>, (u32, u32, u32), f6
         .iter()
         .map(|(dev, _, _, cur, _, _)| format!("{}|{}x{}|{}", dev, cur.0, cur.1, cur.2))
         .collect();
+    if st.base_pos.is_empty() {
+        st.base_pos = infos
+            .iter()
+            .map(|(dev, _, _, _, _, _)| {
+                let (x, y) = cur_pos(dev);
+                format!("{}|{}|{}", dev, x, y)
+            })
+            .collect();
+    }
     save_app_state(&st)
 }
 
@@ -4332,6 +4444,27 @@ pub fn align_restore_modes() -> Result<String, String> {
                     Err(e2) => done.push(format!("{} 还原失败：{}", dev, e2)),
                 }
             }
+        }
+    }
+    // 位置也放回去（对齐时把两屏顶边拉齐过）
+    if !st.base_pos.is_empty() {
+        let mut n = 0;
+        for e in st.base_pos.iter() {
+            let p: Vec<&str> = e.split('|').collect();
+            if p.len() >= 3 {
+                let x: i32 = p[1].parse().unwrap_or(0);
+                let y: i32 = p[2].parse().unwrap_or(0);
+                if set_pos_norset(p[0], x, y).is_ok() {
+                    n += 1;
+                }
+            }
+        }
+        if n > 0 {
+            let _ = unsafe {
+                ChangeDisplaySettingsExW(std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), 0, std::ptr::null_mut())
+            };
+            std::thread::sleep(std::time::Duration::from_millis(900));
+            done.push(format!("{} 台屏的位置也还原了", n));
         }
     }
     Ok(format!("已还原原始分辨率：{}", done.join("；")))
@@ -4388,9 +4521,14 @@ pub fn align_apply() -> Result<String, String> {
         let ca = cur_mode(&a.0);
         let cb = cur_mode(&b.0);
         if ca.1 == cb.1 && ca.1 > 0 {
+            // 分辨率高度一致了，再把两块屏的**顶边拉齐**（否则虚拟桌面高度会翻倍、画面被竖切）
+            let posmsg = match align_positions() {
+                Ok(p) => p,
+                Err(e) => format!("（顶边对齐未成功：{}）", e),
+            };
             return Ok(format!(
-                "已对齐：{} {} → {}x{}@{}；{} {} → {}x{}@{}\n两屏竖向像素高度一致（{}），跨屏不丢画面",
-                a.1, a.0, ca.0, ca.1, ca.2, b.1, b.0, cb.0, cb.1, cb.2, ca.1
+                "已对齐：{} {} → {}x{}@{}；{} {} → {}x{}@{}\n两屏竖向像素高度一致（{}），跨屏不丢画面\n{}",
+                a.1, a.0, ca.0, ca.1, ca.2, b.1, b.0, cb.0, cb.1, cb.2, ca.1, posmsg
             ));
         }
         let _ = align_restore_modes();
