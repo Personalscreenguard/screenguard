@@ -149,7 +149,7 @@ pub fn hdr_set(_on: bool) -> Result<String, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn span_foreground() -> Result<String, String> {
+pub fn span_foreground(_mode: u32) -> Result<String, String> {
     Err("窗口铺满仅支持 Windows".to_string())
 }
 
@@ -200,7 +200,7 @@ pub fn list_windows() -> Result<String, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn span_window(_hwnd: i64) -> Result<String, String> {
+pub fn span_window(_hwnd: i64, _mode: u32) -> Result<String, String> {
     Err("窗口铺满仅支持 Windows".to_string())
 }
 

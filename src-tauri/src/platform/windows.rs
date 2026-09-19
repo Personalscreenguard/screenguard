@@ -555,7 +555,7 @@ public class SGCore {
   /// 把当前前台窗口铺满所有屏幕的包围盒（抖音/浏览器全屏视频、播放器都适用）。
   /// 记录窗口句柄 + 原始位置/样式到 stateFile，供 RestoreForeground 还原。
   /// 返回 OK|<窗口标题> 或 ERR:<原因>
-  public static string SpanForeground(string stateFile, int myPid) {
+  public static string SpanForeground(string stateFile, int myPid, int mode) {
     IntPtr h = GetForegroundWindow();
     if (h == IntPtr.Zero) return "ERR:没有前台窗口";
     if (h == GetShellWindow() || h == GetDesktopWindow()) return "ERR:当前前台是桌面/任务栏，请先切换到要铺满的窗口";
@@ -575,33 +575,7 @@ public class SGCore {
     SGRECT wr;
     if (!GetWindowRect(h, out wr)) return "ERR:读取窗口位置失败";
     if (wr.Right - wr.Left <= 0 || wr.Bottom - wr.Top <= 0) return "ERR:窗口尺寸无效（可能已被最小化）";
-    long oldStyle = GetWindowLongPtr(h, GWL_STYLE).ToInt64();
-    int vx0 = GetSystemMetrics(76), vy0 = GetSystemMetrics(77);
-    int vw0 = GetSystemMetrics(78), vh0 = GetSystemMetrics(79);
-    // 防呆：已经处于铺满状态、且备份记录属于同一个窗口时，不要再覆盖备份
-    // （否则连点两次「铺满」会把备份写成铺满后的矩形，「还原」就再也回不去了）
-    bool alreadySpanned = Math.Abs(wr.Left - vx0) < 4 && Math.Abs(wr.Top - vy0) < 4
-      && Math.Abs((wr.Right - wr.Left) - vw0) < 8 && Math.Abs((wr.Bottom - wr.Top) - vh0) < 8;
-    bool sameWin = false;
-    try {
-      if (System.IO.File.Exists(stateFile)) {
-        sameWin = JsInt(System.IO.File.ReadAllText(stateFile), "hwnd") == h.ToInt64();
-      }
-    } catch { }
-    if (!(alreadySpanned && sameWin)) {
-      string json = "{\"hwnd\":" + h.ToInt64() + ",\"x\":" + wr.Left + ",\"y\":" + wr.Top
-        + ",\"w\":" + (wr.Right - wr.Left) + ",\"h\":" + (wr.Bottom - wr.Top)
-        + ",\"style\":" + oldStyle + "}";
-      try { System.IO.File.WriteAllText(stateFile, json); } catch { }
-    }
-    long s = oldStyle;
-    s &= ~((long)WS_CAPTION | (long)WS_THICKFRAME);
-    s |= (long)WS_POPUP;
-    SetWindowLongPtr(h, GWL_STYLE, new IntPtr(s));
-    int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77);
-    int vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
-    SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-    return "OK|" + (string.IsNullOrEmpty(title) ? "（无标题窗口）" : title);
+    return SpanHandle(h, stateFile, myPid, mode);
   }
 
   /// 还原上一次被铺满的窗口（按记录里的句柄找，不依赖当前前台）
@@ -656,14 +630,72 @@ public class SGCore {
     return sb.ToString();
   }
 
-  /// 铺满指定的窗口（按 hwnd）。先把它置前，再复用前台窗口那套逻辑，保证行为完全一致。
-  public static string SpanWindow(long hwnd, string stateFile, int myPid) {
+  /// 真正干活的实现：对**指定句柄**动手（不依赖前台窗口）。
+  /// 必须拆出来：SetForegroundWindow 常常被 Windows 拒绝（后台程序不能抢前台），
+  /// 于是原来「先置前再走前台那套逻辑」会把**别人**的窗口铺满 —— 实测拿记事本当靶子，
+  /// 结果铺满的是当时真正在前台的抖音窗口。
+  static string SpanHandle(IntPtr h, string stateFile, int myPid, int mode) {
+    StringBuilder tb = new StringBuilder(512);
+    GetWindowTextW(h, tb, 300);
+    string title = tb.ToString();
+    // 这两句原来在读前台窗口的那段里，搬到 SpanHandle 时必须一起带上（否则 wr 未声明）
+    SGRECT wr;
+    if (!GetWindowRect(h, out wr)) return "ERR:读取窗口位置失败";
+    if (wr.Right - wr.Left <= 0 || wr.Bottom - wr.Top <= 0) return "ERR:窗口尺寸无效（可能已被最小化）";
+    long oldStyle = GetWindowLongPtr(h, GWL_STYLE).ToInt64();
+    int vx0 = GetSystemMetrics(76), vy0 = GetSystemMetrics(77);
+    int vw0 = GetSystemMetrics(78), vh0 = GetSystemMetrics(79);
+    // 防呆：已经处于铺满状态、且备份记录属于同一个窗口时，不要再覆盖备份
+    // （否则连点两次「铺满」会把备份写成铺满后的矩形，「还原」就再也回不去了）
+    bool alreadySpanned = Math.Abs(wr.Left - vx0) < 4 && Math.Abs(wr.Top - vy0) < 4
+      && Math.Abs((wr.Right - wr.Left) - vw0) < 8 && Math.Abs((wr.Bottom - wr.Top) - vh0) < 8;
+    // 以主屏为基准时，铺满后的矩形不是包围盒，而是「包围盒宽 × 主屏高」，要按这个口径判断
+    if (mode == 1) {
+      int ph0 = GetSystemMetrics(1); // SM_CYSCREEN = 主屏高
+      alreadySpanned = Math.Abs(wr.Left - vx0) < 4 && Math.Abs(wr.Top) < 4
+        && Math.Abs((wr.Right - wr.Left) - vw0) < 8 && Math.Abs((wr.Bottom - wr.Top) - ph0) < 8;
+    }
+    bool sameWin = false;
+    try {
+      if (System.IO.File.Exists(stateFile)) {
+        sameWin = JsInt(System.IO.File.ReadAllText(stateFile), "hwnd") == h.ToInt64();
+      }
+    } catch { }
+    if (!(alreadySpanned && sameWin)) {
+      string json = "{\"hwnd\":" + h.ToInt64() + ",\"x\":" + wr.Left + ",\"y\":" + wr.Top
+        + ",\"w\":" + (wr.Right - wr.Left) + ",\"h\":" + (wr.Bottom - wr.Top)
+        + ",\"style\":" + oldStyle + "}";
+      try { System.IO.File.WriteAllText(stateFile, json); } catch { }
+    }
+    long s = oldStyle;
+    s &= ~((long)WS_CAPTION | (long)WS_THICKFRAME);
+    s |= (long)WS_POPUP;
+    SetWindowLongPtr(h, GWL_STYLE, new IntPtr(s));
+    int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77);
+    int vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
+    if (mode == 1) {
+      // 「以主屏为基准」：宽度照样横跨整块桌面，但高度只取**主屏高度**并对齐主屏顶端。
+      // 为什么需要：两块屏分辨率不同（本机主屏 3840x2160 横、副屏 2400x3840 竖），
+      // 把窗口放大到整个包围盒(4160x2560)再整体缩放，较短的那块屏底部必然被裁掉；
+      // 用主屏高度 → 主屏画面完整无裁切，竖屏那块上下留边而不是切掉画面（用户实测反馈）。
+      int ph = GetSystemMetrics(1); // SM_CYSCREEN
+      if (ph > 0 && ph < vh) {
+        vh = ph;
+        vy = 0;
+      }
+    }
+    SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    return "OK|" + (string.IsNullOrEmpty(title) ? "（无标题窗口）" : title);
+  }
+
+  /// 铺满指定的窗口（按 hwnd）。直接对目标句柄动手，不依赖前台窗口。
+  public static string SpanWindow(long hwnd, string stateFile, int myPid, int mode) {
     IntPtr h = new IntPtr(hwnd);
     if (!IsWindow(h)) return "ERR:该窗口已关闭";
     if (IsIconic(h)) ShowWindow(h, 9);
-    SetForegroundWindow(h);
-    System.Threading.Thread.Sleep(200);
-    return SpanForeground(stateFile, myPid);
+    // 直接对目标句柄动手，**不**依赖 SetForegroundWindow
+    // （它会失败，导致铺满的是当时真正在前台的**别人**的窗口 —— 实测踩过）
+    return SpanHandle(h, stateFile, myPid, mode);
   }
 
   /// 对指定显示设备执行 DDC/CI（VCP 读或写），返回是否命中；retries 为最大重试次数
@@ -2904,11 +2936,13 @@ fn span_fg_file() -> String {
 }
 
 /// 把当前前台窗口铺满所有屏（浏览器里的抖音全屏、播放器、任意窗口都可以）
-pub fn span_foreground() -> Result<String, String> {
+/// mode: 0 = 铺满整块桌面包围盒；1 = 以主屏为基准（高度取主屏，避免主屏底部被裁）
+pub fn span_foreground(mode: u32) -> Result<String, String> {
     let out = ps_core(&format!(
-        "[SGCore]::SpanForeground('{}', {})",
+        "[SGCore]::SpanForeground('{}', {}, {})",
         span_fg_file(),
-        std::process::id()
+        std::process::id(),
+        mode
     ))?;
     let t = out.trim();
     if let Some(rest) = t.strip_prefix("OK|") {
@@ -3146,6 +3180,30 @@ pub fn app_state_json() -> String {
 pub fn capture_baseline() -> Result<String, String> {
     let mut st = app_state();
     if st.baseline_taken {
+        // 基线只在首启采一次（否则第二次启动会把「上次改过的状态」当原始值）。
+        // 但新增字段（旋转方向 / 小米音量）在老版本装机上是空的 —— 这里做一次**补齐**：
+        // 只填空缺的字段，不动已有的 HDR / ICC / 音量基线。
+        let mut filled = false;
+        if st.base_rot.is_empty() {
+            let raw = mode_detail();
+            for line in raw.lines() {
+                let p: Vec<&str> = line.split('|').collect();
+                if p.len() >= 6 && p[0] == "M" {
+                    st.base_rot.push(format!("{}|{}", p[1], p[5].trim()));
+                }
+            }
+            filled = true;
+        }
+        if st.base_mitv == 0 {
+            if let Ok(v) = mitv_volume_get() {
+                st.base_mitv = v;
+                filled = true;
+            }
+        }
+        if filled {
+            save_app_state(&st)?;
+            return Ok("基线已存在，补齐了新增字段".to_string());
+        }
         return Ok("基线已存在".to_string());
     }
     st.base_hdr = hdr_states()
@@ -3306,13 +3364,14 @@ pub fn list_windows() -> Result<String, String> {
     }
 }
 
-/// 铺满指定窗口（hwnd）
-pub fn span_window(hwnd: i64) -> Result<String, String> {
+/// 铺满指定窗口（hwnd）；mode 含义同 span_foreground
+pub fn span_window(hwnd: i64, mode: u32) -> Result<String, String> {
     let out = ps_core(&format!(
-        "[SGCore]::SpanWindow([int64]{}, '{}', {})",
+        "[SGCore]::SpanWindow([int64]{}, '{}', {}, {})",
         hwnd,
         span_fg_file(),
-        std::process::id()
+        std::process::id(),
+        mode
     ))?;
     let t = out.trim();
     if let Some(rest) = t.strip_prefix("OK|") {

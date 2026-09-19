@@ -252,8 +252,10 @@ async fn hdr_set(on: bool) -> Result<String, String> {
 
 /// 双屏铺满：把当前前台窗口铺满所有屏（不限播放器）
 #[tauri::command]
-async fn span_foreground() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(platform::span_foreground)
+async fn span_foreground(mode: Option<u32>) -> Result<String, String> {
+    // 默认 mode=1「以主屏为基准」：本机两块屏分辨率不同，用包围盒会把主屏底部裁掉
+    let m = mode.unwrap_or(1);
+    tauri::async_runtime::spawn_blocking(move || platform::span_foreground(m))
         .await
         .map_err(|e| format!("后台任务失败：{}", e))?
 }
@@ -305,8 +307,9 @@ async fn list_windows() -> Result<String, String> {
 
 /// 铺满指定窗口（按 hwnd，用户从列表里挑）
 #[tauri::command]
-async fn span_window(hwnd: i64) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || platform::span_window(hwnd))
+async fn span_window(hwnd: i64, mode: Option<u32>) -> Result<String, String> {
+    let m = mode.unwrap_or(1);
+    tauri::async_runtime::spawn_blocking(move || platform::span_window(hwnd, m))
         .await
         .map_err(|e| format!("后台任务失败：{}", e))?
 }

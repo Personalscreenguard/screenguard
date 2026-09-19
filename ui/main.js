@@ -405,10 +405,16 @@ loadGamma();
 })();
 
 // 铺满任意前台窗口
+// 铺满方式：1 = 以主屏为基准（默认，主屏不会被裁）；0 = 铺满整块桌面包围盒
+function spanMode() {
+  const el = document.getElementById('span-mode');
+  return el && el.value === '0' ? 0 : 1;
+}
+
 document.getElementById('span-fg').onclick = async () => {
   try {
     setStatus('正在把当前窗口铺满两块屏…');
-    const title = await invoke('span_foreground');
+    const title = await invoke('span_foreground', { mode: spanMode() });
     setStatus(`已铺满：「${title}」（点「还原」回到原位置）`);
   } catch (e) { setStatus('铺满失败：' + errText(e), false); }
 };
@@ -491,7 +497,7 @@ document.getElementById('span-pick').onclick = async () => {
   if (!hwnd) { setStatus('请先点「刷新窗口列表」并选一个窗口', false); return; }
   try {
     setStatus('正在铺满…');
-    const title = await invoke('span_window', { hwnd });
+    const title = await invoke('span_window', { hwnd, mode: spanMode() });
     setStatus(`已铺满：「${title}」。还原：点「↩ 还原」或按 Ctrl+Alt+R`);
   } catch (e) { setStatus('铺满失败：' + errText(e), false); }
 };
