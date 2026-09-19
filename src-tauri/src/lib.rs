@@ -378,6 +378,20 @@ fn diag_log_path() -> String {
     platform::diag_log_path()
 }
 
+/// 双屏对齐体检：算 PPI 误差、丢画面比例，并推荐"高度能对上"的分辨率组合（只读）
+#[tauri::command]
+async fn align_report() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(platform::align_report)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 记录某块屏的物理尺寸（对角线英寸），供 EDID 未上报时计算 PPI
+#[tauri::command]
+fn set_screen_inches(manuf: String, inches: f64) -> Result<(), String> {
+    platform::set_screen_inches(&manuf, inches)
+}
+
 /// 小米显示器（REDMI G Pro 27U）当前音量：走它自己的 MiTV 接口（DDC 不通）
 #[tauri::command]
 async fn mitv_volume_get() -> Result<u32, String> {
@@ -905,6 +919,8 @@ pub fn run() {
             diag_fix,
             open_log_dir,
             diag_log_path,
+            align_report,
+            set_screen_inches,
             adb_status,
             adb_connect,
             adb_power,

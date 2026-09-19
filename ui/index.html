@@ -142,6 +142,26 @@
       <div class="hint">把副屏的缩放档改成与主屏一致（<b>原值自动备份</b>，可一键还原）。为什么以前"看着没实现"：Windows 改每屏缩放只有注册表一条路、且<b>必须注销或重新登录才生效</b>，没有运行时 API 能立刻变 —— 这是系统限制。点完按钮重启登录即可看到效果。</div>
     </section>
 
+    <!-- ===== 双屏对齐体检 ===== -->
+    <section class="card">
+      <div class="card-head">
+        <h2>📐 双屏对齐体检</h2>
+        <span class="hint">只读分析 · 不改任何显示设置</span>
+      </div>
+      <div class="btn-row">
+        <button class="primary" id="align-run">开始体检</button>
+        <button class="ghost" id="align-copy">📋 复制结论</button>
+      </div>
+      <pre id="align-out" style="max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:Consolas,ui-monospace,monospace;font-size:12px;line-height:1.55;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:10px;padding:10px;margin:10px 0 6px;color:var(--foreground);">两块屏跨屏拼画面要对得齐，唯一的条件是「竖向像素高度 ≈ 与各自物理高度成正比」（即竖向像素密度一致）。点「开始体检」会读取每块屏的物理尺寸、当前分辨率、全部可用分辨率，算出：谁会被切掉多少画面、PPI 差多少、哪些分辨率组合能对上、以及推荐方案。</pre>
+      <div class="color-row">
+        <label>屏幕尺寸</label>
+        <input id="align-manuf" placeholder="厂商代码" style="width:110px;margin-right:6px">
+        <input id="align-inches" placeholder="对角线英寸" style="width:96px;margin-right:6px">
+        <button class="ghost" id="align-save">保存尺寸</button>
+      </div>
+      <div class="hint" id="align-sizes">已记录尺寸：读取中…</div>
+    </section>
+
     <!-- ===== 一键检测 ===== -->
     <section class="card">
       <div class="card-head">

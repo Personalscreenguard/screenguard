@@ -642,6 +642,54 @@ async function loadMitvVolume() {
     } finally { btn.disabled = false; }
   };
 })();
+// ===== 双屏对齐体检 =====
+(function () {
+  const btn = document.getElementById('align-run');
+  const pre = document.getElementById('align-out');
+  const save = document.getElementById('align-save');
+  const mf = document.getElementById('align-manuf');
+  const inch = document.getElementById('align-inches');
+  const sizes = document.getElementById('align-sizes');
+
+  async function paintSizes() {
+    try {
+      const raw = await invoke('app_state_json');
+      const st = JSON.parse(String(raw));
+      const arr = (st && st.screen_in) || [];
+      sizes.textContent = '已记录尺寸：' + (arr.length ? arr.map(s => s.replace('|', ' → ') + ' 英寸').join('　') : '（无）')
+        + '　｜　EDID 会上报尺寸的屏不用填；没上报的屏请填「厂商代码 + 对角线英寸」。厂商代码见体检结果里的括号。';
+    } catch (e) { sizes.textContent = '已记录尺寸：读取失败'; }
+  }
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true;
+    pre.textContent = '正在体检…（读 EDID 物理尺寸 + 每屏全部可用分辨率，约几秒）';
+    try {
+      pre.textContent = String(await invoke('align_report'));
+      setStatus('体检完成');
+    } catch (e) { pre.textContent = '体检失败：' + errText(e); }
+    finally { btn.disabled = false; }
+  };
+  const cp = document.getElementById('align-copy');
+  if (cp) cp.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(pre.textContent || '');
+      setStatus('结论已复制到剪贴板');
+    } catch (e) { setStatus('复制失败（可手动选中复制）', false); }
+  };
+  if (save) save.onclick = async () => {
+    const m = (mf.value || '').trim().toUpperCase();
+    const v = Number(inch.value);
+    if (!m || !(v > 5 && v < 60)) { setStatus('请填：厂商代码（如 MTI1B1A）+ 对角线英寸（如 16）', false); return; }
+    try {
+      await invoke('set_screen_inches', { manuf: m, inches: v });
+      setStatus('已记录 ' + m + ' = ' + v + ' 英寸');
+      mf.value = ''; inch.value = '';
+      await paintSizes();
+    } catch (e) { setStatus('保存失败：' + errText(e), false); }
+  };
+  paintSizes();
+})();
+
 document.getElementById('refresh-btn').onclick = () => refreshDisplays();
 document.getElementById('battery-refresh-btn').onclick = () => loadBatteries();
 

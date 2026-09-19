@@ -1219,6 +1219,50 @@ public class SGAudio {
     return "WA|0|0|0|0";
   }
 
+  // ---- 双屏对齐体检：枚举某块屏支持的所有分辨率 ----
+  // 注意：这里**不用结构体**，直接用显式字节偏移操作 220 字节缓冲区 ——
+  // 之前用 [StructLayout] 声明 DEVMODEW，dmSize/偏移没对上，EnumDisplaySettingsW 第一次就返回 false，
+  // 结果「可用分辨率只有 1 种」。DEVMODEW(Unicode) 布局（共 220 字节）：
+  //   0..63 dmDeviceName[32] · 64 dmSpecVersion · 66 dmDriverVersion · 68 dmSize · 70 dmDriverExtra
+  //   72 dmFields · 76..91 打印参数联合体 · 92 dmColor … 100 dmCollate
+  //   102..165 dmFormName[32] · 166 dmLogPixels · 172 dmBitsPerPel · 176 dmPelsWidth ·
+  //   180 dmPelsHeight · 184 dmDisplayFlags · 188 dmDisplayFrequency
+  [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "EnumDisplaySettingsW")]
+  static extern bool EnumDisplaySettingsW(string dev, int mode, IntPtr dm);
+
+  /// 按显示器编号枚举分辨率（**只传数字**：设备名里的 `\\.\` 反斜杠经
+  /// 命令行传给 PowerShell 时会被吃掉一个，实测会变成 `\.\DISPLAY1` 导致 API 报 203）
+  public static string DisplayModesNum(int n) {
+    return DisplayModes("\\\\.\\DISPLAY" + n);
+  }
+
+  /// 列出某块屏支持的分辨率（去重，按面积从大到小），形如 MODES|<宽x高 …>|<个数>
+  public static string DisplayModes(string dev) {
+    const int SZ = 220;
+    IntPtr buf = Marshal.AllocHGlobal(SZ);
+    try {
+      var list = new System.Collections.Generic.List<int[]>();
+      var seen = new System.Collections.Generic.HashSet<string>();
+      for (int i = 0; i < 4000; i++) {
+        for (int b = 0; b < SZ; b++) Marshal.WriteByte(buf, b, 0);
+        Marshal.WriteInt16(buf, 68, (short)SZ);
+        if (!EnumDisplaySettingsW(dev, i, buf)) break;
+        int w = Marshal.ReadInt32(buf, 176);
+        int h = Marshal.ReadInt32(buf, 180);
+        int f = Marshal.ReadInt32(buf, 188);
+        if (w >= 640 && h >= 480 && f >= 24) {
+          string k = w + "x" + h;
+          if (seen.Add(k)) list.Add(new int[] { w, h });
+        }
+      }
+      list.Sort(delegate(int[] a, int[] b) { return (b[0] * b[1]).CompareTo(a[0] * a[1]); });
+      var sb = new StringBuilder();
+      foreach (int[] m in list) sb.Append(m[0]).Append("x").Append(m[1]).Append(" ");
+      return "MODES|" + sb.ToString().Trim() + "|" + list.Count;
+    } catch (Exception e) { return "MODES||0|ERR:" + Esc(e.Message); }
+    finally { Marshal.FreeHGlobal(buf); }
+  }
+
   public static string AudioList() {
     var sb = new StringBuilder();
     try {
@@ -3171,6 +3215,9 @@ pub struct AppState {
     /// 小米屏基线音量（0 = 未记录/不可用）
     #[serde(default)]
     pub base_mitv: u32,
+    /// 手动填写的屏幕物理尺寸（"厂商代码|对角线英寸"）——EDID 没上报物理尺寸时用
+    #[serde(default)]
+    pub screen_in: Vec<String>,
     /// 小米显示器 MiTV Assistant 的地址（空 = 用默认）
     #[serde(default)]
     pub mitv_ip: String,
@@ -4050,5 +4097,344 @@ pub fn diag_fix() -> Result<String, String> {
         Ok(r) => o.push_str(&r),
         Err(e) => o.push_str(&format!("复查失败：{}\n", e)),
     }
+    Ok(o)
+}
+
+// ---------- 双屏对齐体检（只读分析，不改系统设置） ----------
+// 原理：一个窗口跨两块屏时，Windows 只用**一个像素比例**、不做逐屏缩放。
+// 所以「跨屏画面能对得齐」的唯一条件是：两屏的**竖向像素高度 ≈ 与各自物理高度成正比**，
+// 等价于「竖向像素密度 PPI 一致」。物理高度接近的两块屏，只要竖向像素数相同就基本完美。
+
+#[derive(Clone)]
+struct AlignInfo {
+    manuf: String,
+    dev: String,
+    name: String,
+    is_main: bool,
+    px: (u32, u32),
+    modes: Vec<(u32, u32)>,
+    phys_w: f64,
+    phys_h: f64,
+    src: String,
+    nat: f64,
+}
+
+/// 读注册表 EDID 的物理尺寸：返回 (厂商代码, cmH, cmV)
+fn edid_sizes() -> Vec<(String, u32, u32)> {
+    let script = "Get-ChildItem 'HKLM:\\SYSTEM\\CurrentControlSet\\Enum\\DISPLAY' -ErrorAction SilentlyContinue | ForEach-Object { $m=$_.PSChildName; Get-ChildItem $_.PSPath -ErrorAction SilentlyContinue | ForEach-Object { try { $e=(Get-ItemProperty ($_.PSPath + '\\Device Parameters') -Name EDID -ErrorAction Stop).EDID; if ($e.Length -ge 128) { 'E|' + $m + '|' + $e[21] + '|' + $e[22] } } catch {} } }";
+    let mut v = Vec::new();
+    if let Ok(out) = ps(script) {
+        for l in out.lines().filter(|l| l.starts_with("E|")) {
+            let p: Vec<&str> = l.split('|').collect();
+            if p.len() >= 4 {
+                v.push((
+                    p[1].trim().to_string(),
+                    p[2].trim().parse().unwrap_or(0),
+                    p[3].trim().parse().unwrap_or(0),
+                ));
+            }
+        }
+    }
+    v
+}
+
+/// 记下某块屏的物理尺寸（对角线英寸），供 EDID 没上报时使用
+pub fn set_screen_inches(manuf: &str, inches: f64) -> Result<(), String> {
+    let mut st = app_state();
+    st.screen_in.retain(|e| e.split('|').next() != Some(manuf));
+    st.screen_in.push(format!("{}|{}", manuf, inches));
+    save_app_state(&st)
+}
+
+#[cfg(target_os = "windows")]
+extern "system" {
+    fn EnumDisplaySettingsW(dev: *const u16, mode: u32, dm: *mut u8) -> i32;
+}
+
+/// 枚举某块屏支持的所有分辨率 —— **Rust 原生直接调 user32**，不经过 PowerShell/C#。
+/// 为什么绕开 C#：同一个 220 字节缓冲在 Python 里能通，走 C#+PowerShell 却一直返回
+/// 失败（203），怀疑是命令行/托管编组环节的问题；原生 FFI 最直接也最快。
+/// DEVMODEW(Unicode) 关键偏移：dmSize=68、dmPelsWidth=172、dmPelsHeight=176、
+/// dmDisplayFrequency=184（总长 220）。
+fn display_modes_ffi(dev: &str) -> Vec<(u32, u32)> {
+    let mut name: Vec<u16> = dev.encode_utf16().collect();
+    name.push(0);
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for i in 0..2000u32 {
+        let mut buf = [0u8; 220];
+        buf[68] = 220;
+        let ok = unsafe { EnumDisplaySettingsW(name.as_ptr(), i, buf.as_mut_ptr()) };
+        if ok == 0 {
+            break;
+        }
+        let w = u32::from_le_bytes([buf[172], buf[173], buf[174], buf[175]]);
+        let h = u32::from_le_bytes([buf[176], buf[177], buf[178], buf[179]]);
+        let f = u32::from_le_bytes([buf[184], buf[185], buf[186], buf[187]]);
+        if w >= 640 && h >= 480 && f >= 24 && !out.contains(&(w, h)) {
+            out.push((w, h));
+        }
+    }
+    out
+}
+
+#[cfg(not(target_os = "windows"))]
+fn display_modes_ffi(_dev: &str) -> Vec<(u32, u32)> {
+    Vec::new()
+}
+
+pub fn align_report() -> Result<String, String> {
+    let edid = edid_sizes();
+    let st = app_state();
+    let md = mode_detail();
+    let mut infos: Vec<AlignInfo> = Vec::new();
+    for d in get_displays().into_iter().filter(|d| d.connected) {
+        let manuf = d.id.split('\\').nth(1).unwrap_or("").to_string();
+        let dev = resolve_dev(&d.id).unwrap_or_default();
+        let mut px = (0u32, 0u32);
+        for l in md.lines() {
+            let p: Vec<&str> = l.split('|').collect();
+            if p.len() >= 4 && p[0] == "M" && p[1] == dev {
+                px = (p[2].trim().parse().unwrap_or(0), p[3].trim().parse().unwrap_or(0));
+            }
+        }
+        if px.0 == 0 || px.1 == 0 {
+            continue;
+        }
+        let mut modes: Vec<(u32, u32)> = display_modes_ffi(&dev);
+        if modes.is_empty() {
+            modes.push(px);
+        }
+        let nat_mode = modes
+            .iter()
+            .cloned()
+            .max_by_key(|m| (m.0 as u64) * (m.1 as u64))
+            .unwrap_or(px);
+        let nat = nat_mode.0 as f64 / nat_mode.1 as f64;
+        let portrait = px.1 > px.0;
+        let (mut pw, mut ph, mut src) = (0.0f64, 0.0f64, String::from("未知（EDID 未上报，请手动填英寸）"));
+        if let Some((_, ch, cv)) = edid.iter().find(|(m, a, b)| *m == manuf && *a > 0 && *b > 0).cloned() {
+            // EDID 的 cmH/cmV 是「面板原生方向」的物理宽高；而原生模式（面积最大的那个）
+            // 也在原生方向，两者一致 → 直接对应，**不要**再按当前横竖去交换。
+            pw = ch as f64 / 2.54;
+            ph = cv as f64 / 2.54;
+            src = format!("EDID 上报 {}×{} cm", ch, cv);
+        }
+        if ph <= 0.0 {
+            if let Some(ent) = st
+                .screen_in
+                .iter()
+                .find(|e| e.split('|').next() == Some(manuf.as_str()))
+            {
+                let p: Vec<&str> = ent.split('|').collect();
+                if p.len() >= 2 {
+                    if let Ok(di) = p[1].trim().parse::<f64>() {
+                        if di > 5.0 {
+                            // 由对角线 + 原生比例推物理宽高（在原生方向）：
+                            // nat = w/h，D² = w² + h² → h = D/√(nat²+1)，w = nat·h
+                            let nh = di / (nat * nat + 1.0).sqrt();
+                            let nw = nh * nat;
+                            pw = nw;
+                            ph = nh;
+                            src = format!("按你填的 {:.0} 英寸 + 原生比例推算", di);
+                        }
+                    }
+                }
+            }
+        }
+        infos.push(AlignInfo { manuf, dev, name: d.name.clone(), is_main: d.main, px, modes, phys_w: pw, phys_h: ph, src, nat });
+    }
+
+    let mut o = String::new();
+    o.push_str("双屏对齐体检（只读分析，不会修改任何显示设置）\n");
+    if infos.len() < 2 {
+        o.push_str("\n只检测到 1 块屏（或读取失败），无法做对齐分析。\n");
+        return Ok(o);
+    }
+    o.push_str("\n【每块屏】\n");
+    for i in &infos {
+        let portrait = i.px.1 > i.px.0;
+        let ppi = if i.phys_h > 0.0 { i.px.1 as f64 / i.phys_h } else { 0.0 };
+        o.push_str(&format!(
+            "  {} {} · {}x{} · {} · {}\n",
+            if i.is_main { "主屏" } else { "副屏" },
+            if i.name.trim().is_empty() { i.manuf.as_str() } else { i.name.as_str() },
+            i.px.0, i.px.1,
+            if portrait { "竖屏" } else { "横屏" },
+            i.dev
+        ));
+        o.push_str(&format!(
+            "     物理 {} · 画布高 {:.1} 英寸 · 竖向 {:.0} 像素/英寸 · 原生比例 {:.3} · 可用分辨率 {} 种（最大 {}x{}）\n",
+            i.src,
+            i.phys_h,
+            ppi,
+            i.nat,
+            i.modes.len(),
+            i.modes.iter().map(|m| m.0).max().unwrap_or(0),
+            i.modes.iter().map(|m| m.1).max().unwrap_or(0)
+        ));
+    }
+
+    // ---- 现行诊断 ----
+    o.push_str("\n【现状诊断】\n");
+    let h_max = infos.iter().map(|i| i.px.1).max().unwrap_or(0);
+    let ppis: Vec<f64> = infos
+        .iter()
+        .filter(|i| i.phys_h > 0.0)
+        .map(|i| i.px.1 as f64 / i.phys_h)
+        .collect();
+    let mut bad = 0;
+    for i in &infos {
+        if i.px.1 < h_max {
+            bad += 1;
+            o.push_str(&format!(
+                "  [!] 竖向像素偏少：{} = {}（虚拟屏高取 {}）→ 跨屏时它**底部会被切掉 {:.0}%** 的画面\n",
+                i.name, i.px.1, h_max,
+                100.0 * (1.0 - i.px.1 as f64 / h_max as f64)
+            ));
+        }
+    }
+    if bad == 0 {
+        o.push_str("  [正常] 各屏竖向像素一致 → 跨屏不会丢画面\n");
+    }
+    if ppis.len() >= 2 {
+        let pmax = ppis.iter().cloned().fold(0.0f64, f64::max);
+        let pmin = ppis.iter().cloned().fold(f64::MAX, f64::min);
+        let diff = (pmax / pmin - 1.0) * 100.0;
+        if diff > 3.0 {
+            o.push_str(&format!(
+                "  [!] 像素密度差 {:.0}%（{:.0} vs {:.0} 像素/英寸）→ 同一条横线在两屏的物理高度不同，画面比例对不齐\n",
+                diff, pmin, pmax
+            ));
+        } else {
+            o.push_str(&format!("  [正常] 像素密度差仅 {:.1}% → 对齐基本无感\n", diff));
+        }
+    }
+    if infos.iter().any(|i| i.phys_h <= 0.0) {
+        o.push_str("  [i] 有屏 EDID 没上报物理尺寸，已尽量用「手动填英寸」兜底；没填就只给出像素层面的结论\n");
+    }
+    o.push_str("  [i] Windows 的「缩放 100%/150%」不影响这件事：跨屏窗口走的是物理像素，只有「分辨率组合」能改\n");
+
+    // ---- 候选组合：两屏都能取到的共同竖向高度 ----
+    o.push_str("\n【推荐组合（按“对得齐”排序）】\n");
+    let mut cands: Vec<(u32, Vec<(u32, u32)>, f64, f64, f64)> = Vec::new(); // (H, 每屏模式, 高度误差, 变形, PPI差)
+    let mut seen_h: Vec<u32> = Vec::new();
+    for (idx, i) in infos.iter().enumerate() {
+        if idx > 0 {
+            break;
+        }
+        for m in &i.modes {
+            if seen_h.iter().any(|x| (*x as f64 - m.1 as f64).abs() / m.1 as f64 <= 0.02) {
+                continue;
+            }
+            let mut picks: Vec<(u32, u32)> = Vec::new();
+            let mut ok = true;
+            for j in &infos {
+                // 在该屏模式里挑高度最接近 H、其次最接近原生比例、再次面积最大的
+                let best = j.modes.iter().cloned().min_by(|a, b| {
+                    let ka = ((a.1 as f64 - m.1 as f64).abs(), ((a.0 as f64 / a.1 as f64) - j.nat).abs(), -((a.0 as u64 * a.1 as u64) as f64));
+                    let kb = ((b.1 as f64 - m.1 as f64).abs(), ((b.0 as f64 / b.1 as f64) - j.nat).abs(), -((b.0 as u64 * b.1 as u64) as f64));
+                    ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                match best {
+                    Some(b) => {
+                        if (b.1 as f64 - m.1 as f64).abs() / m.1 as f64 > 0.02 {
+                            ok = false;
+                        }
+                        picks.push(b);
+                    }
+                    None => ok = false,
+                }
+            }
+            if !ok {
+                continue;
+            }
+            let herr = picks
+                .iter()
+                .map(|p| (p.1 as f64 - m.1 as f64).abs() / m.1 as f64)
+                .fold(0.0f64, f64::max);
+            let dist = picks
+                .iter()
+                .zip(infos.iter())
+                .map(|(p, i)| ((p.0 as f64 / p.1 as f64) - i.nat).abs() / i.nat)
+                .fold(0.0f64, f64::max);
+            let p2: Vec<f64> = picks
+                .iter()
+                .zip(infos.iter())
+                .filter(|(_, i)| i.phys_h > 0.0)
+                .map(|(p, i)| p.1 as f64 / i.phys_h)
+                .collect();
+            let pdiff = if p2.len() >= 2 {
+                p2.iter().cloned().fold(0.0f64, f64::max) / p2.iter().cloned().fold(f64::MAX, f64::min) - 1.0
+            } else {
+                0.0
+            };
+            seen_h.push(m.1);
+            cands.push((m.1, picks, herr, dist, pdiff));
+        }
+    }
+    cands.sort_by(|a, b| {
+        let sa = a.3 * 12.0 + a.2 * 3.0 + a.4;
+        let sb = b.3 * 12.0 + b.2 * 3.0 + b.4;
+        sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    if cands.is_empty() {
+        o.push_str("  两屏的可用分辨率里**没有竖向高度能对上的组合** → 想对齐就必须有一屏用「自定义分辨率」\n");
+    }
+    for (n, (h, picks, herr, dist, pdiff)) in cands.iter().take(4).enumerate() {
+        let mut line = format!("  {}) 共同高度 {}：", (b'A' + n as u8) as char, h);
+        for (k, p) in picks.iter().enumerate() {
+            line.push_str(&format!("{} {}x{}", if k == 0 { "" } else { " +" }, p.0, p.1));
+        }
+        o.push_str(&line);
+        o.push_str("\n");
+        o.push_str(&format!(
+            "     高度误差 {:.1}% · 宽高比偏离原生 {:.1}%{} · PPI 差 {:.1}%{}\n",
+            herr * 100.0,
+            dist * 100.0,
+            if *dist > 0.02 { "（会拉伸/留边）" } else { "（不变形）" },
+            pdiff * 100.0,
+            if *pdiff < 0.03 { " ✅ 对齐良好" } else { "" }
+        ));
+    }
+
+    // ---- 理想方案：保留最高分辨率，给需要的一屏用自定义分辨率 ----
+    o.push_str("\n【理想方案（保留高分辨率）】\n");
+    let h_native_max = infos.iter().map(|i| i.px.1.max(i.modes.iter().map(|m| m.1).max().unwrap_or(0))).max().unwrap_or(0);
+    for h_try in [h_native_max, 1440u32] {
+        if h_try < 600 {
+            continue;
+        }
+        let mut plan: Vec<String> = Vec::new();
+        let mut need_custom = false;
+        for i in &infos {
+            let ideal_w = (((h_try as f64) * i.nat).round() as u32) & !1;
+            let exist = i
+                .modes
+                .iter()
+                .any(|m| m.1 == h_try && (m.0 as f64 / ideal_w as f64 - 1.0).abs() < 0.03);
+            if exist {
+                plan.push(format!("{} {:.0}×{}（已有此模式）", i.name, ideal_w as f64, h_try));
+                let _ = ideal_w;
+            } else {
+                need_custom = true;
+                plan.push(format!("{} **{}×{}**（需自定义分辨率）", i.name, ideal_w, h_try));
+            }
+        }
+        o.push_str(&format!("  共同高度 {}：{}\n", h_try, plan.join("　+　")));
+        if need_custom {
+            o.push_str("     ↳ 自定义分辨率位置：NVIDIA 控制面板 →「更改分辨率 → 自定义」，或 Intel 显卡命令中心 →「显示 → 自定义分辨率」。\n");
+            o.push_str("       建议只「添加」、先不应用；设错一般 15 秒内会自动回滚到原模式。\n");
+        } else {
+            o.push_str("     ↳ 两屏都有现成模式，直接在系统显示设置里选即可，不需要自定义分辨率。\n");
+        }
+    }
+    o.push_str("\n【结论】\n");
+    let has_good = cands.iter().any(|c| c.3 < 0.02 && c.4 < 0.03 && c.2 < 0.02);
+    if has_good {
+        o.push_str("  上面的 A 组就能做到「高度一致 + 不变形 + PPI 接近」→ 在系统显示设置里改成这组分辨率，跨屏画面即可对得齐。\n");
+    } else {
+        o.push_str("  现有模式组合都会牺牲一点（变形或对齐），**推荐用自定义分辨率**：让两屏竖向像素数相同、各自保持原生比例，即可完全对得齐。\n");
+    }
+    o.push_str("  提示：两块屏物理高度越接近，越容易对齐；竖向像素数相同是「不丢画面」的关键。\n");
     Ok(o)
 }
