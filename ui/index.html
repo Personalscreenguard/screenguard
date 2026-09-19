@@ -149,7 +149,11 @@
         <span class="hint">只读分析 · 不改任何显示设置</span>
       </div>
       <div class="btn-row">
-        <button class="primary" id="align-run">开始体检</button>
+        <button class="primary" id="align-apply">⚡ 应用对齐组合</button>
+        <button class="ghost" id="align-restore">↩ 还原两块屏原始清晰度（4K）</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" id="align-run">🩺 开始体检</button>
         <button class="ghost" id="align-copy">📋 复制结论</button>
       </div>
       <pre id="align-out" style="max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:Consolas,ui-monospace,monospace;font-size:12px;line-height:1.55;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:10px;padding:10px;margin:10px 0 6px;color:var(--foreground);">两块屏跨屏拼画面要对得齐，唯一的条件是「竖向像素高度 ≈ 与各自物理高度成正比」（即竖向像素密度一致）。点「开始体检」会读取每块屏的物理尺寸、当前分辨率、全部可用分辨率，算出：谁会被切掉多少画面、PPI 差多少、哪些分辨率组合能对上、以及推荐方案。</pre>

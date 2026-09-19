@@ -263,9 +263,12 @@ async fn span_foreground(mode: Option<u32>) -> Result<String, String> {
 /// 还原上一次被铺满的窗口
 #[tauri::command]
 async fn restore_foreground() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(platform::restore_foreground)
+    // 关闭「双屏铺满」时把两块屏的分辨率也还原回原始 4K（用户要求：关了双屏拓展就自动恢复）
+    let r = tauri::async_runtime::spawn_blocking(platform::restore_foreground)
         .await
-        .map_err(|e| format!("后台任务失败：{}", e))?
+        .map_err(|e| format!("后台任务失败：{}", e))?;
+    let _ = tauri::async_runtime::spawn_blocking(platform::align_restore_modes).await;
+    r
 }
 
 /// 注册全局快捷键（Ctrl+Alt+L：全部屏幕待机/唤醒 切换）
@@ -333,9 +336,12 @@ async fn set_audio_device(id: String) -> Result<(), String> {
 /// 一键恢复默认：把所有「软件层面」的改动还原成基线快照
 #[tauri::command]
 async fn restore_defaults() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(platform::restore_defaults)
+    let r = tauri::async_runtime::spawn_blocking(platform::restore_defaults)
         .await
-        .map_err(|e| format!("后台任务失败：{}", e))?
+        .map_err(|e| format!("后台任务失败：{}", e))?;
+    // 分辨率也回到原始（用户要求：一键恢复默认要能恢复所有软件层改动）
+    let _ = tauri::async_runtime::spawn_blocking(platform::align_restore_modes).await;
+    r
 }
 
 /// 应用状态（是否退出还原 / 选定的音频端点 / 基线摘要）
@@ -390,6 +396,22 @@ async fn align_report() -> Result<String, String> {
 #[tauri::command]
 fn set_screen_inches(manuf: String, inches: f64) -> Result<(), String> {
     platform::set_screen_inches(&manuf, inches)
+}
+
+/// 应用「双屏对齐」：自动挑可行的模式组合并切换（应用前自动记录原始分辨率）
+#[tauri::command]
+async fn align_apply() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(platform::align_apply)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 还原两块屏的原始分辨率（4K）
+#[tauri::command]
+async fn align_restore() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(platform::align_restore_modes)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
 }
 
 /// 小米显示器（REDMI G Pro 27U）当前音量：走它自己的 MiTV 接口（DDC 不通）
@@ -506,6 +528,8 @@ fn revert_before_exit() {
         .unwrap_or(true);
     if on {
         let _ = platform::restore_defaults();
+        // 退出软件 → 两块屏分辨率也回到原始 4K
+        let _ = platform::align_restore_modes();
     }
 }
 
@@ -921,6 +945,8 @@ pub fn run() {
             diag_log_path,
             align_report,
             set_screen_inches,
+            align_apply,
+            align_restore,
             adb_status,
             adb_connect,
             adb_power,

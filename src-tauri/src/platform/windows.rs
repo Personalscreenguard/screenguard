@@ -3218,6 +3218,9 @@ pub struct AppState {
     /// 手动填写的屏幕物理尺寸（"厂商代码|对角线英寸"）——EDID 没上报物理尺寸时用
     #[serde(default)]
     pub screen_in: Vec<String>,
+    /// 原始分辨率基线（"设备|宽x高|刷新率"），用于「还原两块屏原始清晰度」
+    #[serde(default)]
+    pub base_mode: Vec<String>,
     /// 小米显示器 MiTV Assistant 的地址（空 = 用默认）
     #[serde(default)]
     pub mitv_ip: String,
@@ -4149,6 +4152,217 @@ pub fn set_screen_inches(manuf: &str, inches: f64) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 extern "system" {
     fn EnumDisplaySettingsW(dev: *const u16, mode: u32, dm: *mut u8) -> i32;
+    fn ChangeDisplaySettingsExW(dev: *const u16, dm: *mut u8, hwnd: *mut core::ffi::c_void, flags: u32, param: *mut core::ffi::c_void) -> i32;
+}
+
+const DM_BITSPERPEL: u32 = 0x0004_0000;
+const DM_PELSWIDTH: u32 = 0x0008_0000;
+const DM_PELSHEIGHT: u32 = 0x0010_0000;
+const DM_DISPLAYFREQUENCY: u32 = 0x0040_0000;
+const CDS_TEST: u32 = 2;
+
+/// 构造 DEVMODEW 缓冲区（显式字节偏移，见 display_modes_ffi 的说明）
+fn devmode_buf(w: u32, h: u32, hz: u32) -> [u8; 220] {
+    let mut b = [0u8; 220];
+    b[68] = 220;
+    let fields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+    b[72..76].copy_from_slice(&fields.to_le_bytes());
+    b[168..172].copy_from_slice(&32u32.to_le_bytes());
+    b[172..176].copy_from_slice(&w.to_le_bytes());
+    b[176..180].copy_from_slice(&h.to_le_bytes());
+    b[184..188].copy_from_slice(&hz.to_le_bytes());
+    b
+}
+
+fn dev_name_ptr(dev: &str) -> Vec<u16> {
+    let mut n: Vec<u16> = dev.encode_utf16().collect();
+    n.push(0);
+    n
+}
+
+/// 切某块屏的分辨率。`apply=false` 只"试算"（CDS_TEST，不改任何东西）。
+/// 只接受**驱动已支持**的模式 —— 自定义分辨率必须先在显卡控制面板里添加
+/// （实测：程序直接试算自定义值一律返回 -2 BADFLAGS，现有模式则返回 0）。
+/// 应用时用 flags=0（**不写注册表**），所以重启/崩溃后会自动回到原模式，天然安全。
+pub fn set_mode(dev: &str, w: u32, h: u32, hz: u32, apply: bool) -> Result<String, String> {
+    let name = dev_name_ptr(dev);
+    let mut b = devmode_buf(w, h, hz);
+    let t = unsafe { ChangeDisplaySettingsExW(name.as_ptr(), b.as_mut_ptr(), std::ptr::null_mut(), CDS_TEST, std::ptr::null_mut()) };
+    if t != 0 {
+        return Err(format!("{}x{}@{} 驱动不支持（试算码 {}）", w, h, hz, t));
+    }
+    if !apply {
+        return Ok(format!("{}x{}@{} 可用", w, h, hz));
+    }
+    let mut b2 = devmode_buf(w, h, hz);
+    let r = unsafe { ChangeDisplaySettingsExW(name.as_ptr(), b2.as_mut_ptr(), std::ptr::null_mut(), 0, std::ptr::null_mut()) };
+    if r != 0 {
+        return Err(format!("切到 {}x{}@{} 失败（码 {}）", w, h, hz, r));
+    }
+    Ok(format!("{}x{}@{}", w, h, hz))
+}
+
+/// 读某块屏当前模式
+fn cur_mode(dev: &str) -> (u32, u32, u32) {
+    let name = dev_name_ptr(dev);
+    let mut b = [0u8; 220];
+    b[68] = 220;
+    let ok = unsafe { EnumDisplaySettingsW(name.as_ptr(), 0xFFFF_FFFF, b.as_mut_ptr()) };
+    if ok == 0 {
+        return (0, 0, 0);
+    }
+    let w = u32::from_le_bytes([b[172], b[173], b[174], b[175]]);
+    let h = u32::from_le_bytes([b[176], b[177], b[178], b[179]]);
+    let f = u32::from_le_bytes([b[184], b[185], b[186], b[187]]);
+    (w, h, f)
+}
+
+/// 收集两屏的对齐信息（dev / 名称 / 可用分辨率 / 当前模式 / 物理高度 / 原生比例）
+fn align_gather() -> Vec<(String, String, Vec<(u32, u32)>, (u32, u32, u32), f64, f64)> {
+    let edid = edid_sizes();
+    let st = app_state();
+    let md = mode_detail();
+    let mut out = Vec::new();
+    for d in get_displays().into_iter().filter(|d| d.connected) {
+        let manuf = d.id.split('\\').nth(1).unwrap_or("").to_string();
+        let dev = resolve_dev(&d.id).unwrap_or_default();
+        if dev.is_empty() {
+            continue;
+        }
+        let cur = cur_mode(&dev);
+        if cur.0 == 0 {
+            continue;
+        }
+        let mut modes = display_modes_ffi(&dev);
+        if modes.is_empty() {
+            modes.push((cur.0, cur.1));
+        }
+        let nat_mode = modes.iter().cloned().max_by_key(|m| (m.0 as u64) * (m.1 as u64)).unwrap_or((cur.0, cur.1));
+        let nat = nat_mode.0 as f64 / nat_mode.1 as f64;
+        // 物理高度（英寸）
+        let mut ph = 0.0f64;
+        if let Some((_, ch, cv)) = edid.iter().find(|(m, a, b)| *m == manuf && *a > 0 && *b > 0).cloned() {
+            ph = cv as f64 / 2.54;
+            let _ = ch;
+        }
+        if ph <= 0.0 {
+            if let Some(ent) = st.screen_in.iter().find(|e| e.split('|').next() == Some(manuf.as_str())) {
+                let p: Vec<&str> = ent.split('|').collect();
+                if p.len() >= 2 {
+                    if let Ok(di) = p[1].trim().parse::<f64>() {
+                        if di > 5.0 {
+                            let nh = di / (nat * nat + 1.0).sqrt();
+                            ph = if cur.1 > cur.0 { nh } else { nh * nat };
+                        }
+                    }
+                }
+            }
+        }
+        let _ = &md;
+        out.push((dev, d.name.clone(), modes, cur, ph, nat));
+    }
+    out
+}
+
+/// 记录两块屏的原始模式（只在基线为空时写一次）
+fn snapshot_modes(infos: &[(String, String, Vec<(u32, u32)>, (u32, u32, u32), f64, f64)]) -> Result<(), String> {
+    let mut st = app_state();
+    if !st.base_mode.is_empty() {
+        return Ok(());
+    }
+    st.base_mode = infos
+        .iter()
+        .map(|(dev, _, _, cur, _, _)| format!("{}|{}x{}|{}", dev, cur.0, cur.1, cur.2))
+        .collect();
+    save_app_state(&st)
+}
+
+/// 还原两块屏的原始模式（退出软件 / 关闭双屏铺满 / 一键恢复默认都会调它）
+pub fn align_restore_modes() -> Result<String, String> {
+    let st = app_state();
+    if st.base_mode.is_empty() {
+        return Ok("没有记录过原始分辨率，无需还原".to_string());
+    }
+    let mut done = Vec::new();
+    for e in st.base_mode.iter() {
+        let p: Vec<&str> = e.split('|').collect();
+        if p.len() >= 3 {
+            let dev = p[0];
+            let wh: Vec<&str> = p[1].split('x').collect();
+            if wh.len() == 2 {
+                let w: u32 = wh[0].parse().unwrap_or(0);
+                let h: u32 = wh[1].parse().unwrap_or(0);
+                let hz: u32 = p[2].parse().unwrap_or(60);
+                match set_mode(dev, w, h, hz, true) {
+                    Ok(s) => done.push(format!("{} → {}", dev, s)),
+                    Err(e2) => done.push(format!("{} 还原失败：{}", dev, e2)),
+                }
+            }
+        }
+    }
+    Ok(format!("已还原原始分辨率：{}", done.join("；")))
+}
+
+/// 双屏对齐：从**两屏都支持**的模式里挑出"竖向高度相同、各自最接近原生比例、分辨率尽量高"的组合，
+/// 逐个试算，第一个两块屏都接受的直接应用。应用前自动记录原始模式以便还原。
+pub fn align_apply() -> Result<String, String> {
+    let infos = align_gather();
+    if infos.len() < 2 {
+        return Err("需要两块以上已连接的屏才能对齐".to_string());
+    }
+    snapshot_modes(&infos)?;
+    let a = infos[0].clone();
+    let b = infos[1].clone();
+    // 候选：两屏竖向像素数相同（±2%），优先"宽高比接近原生"，再比分辨率
+    let mut cands: Vec<(f64, (u32, u32), (u32, u32))> = Vec::new();
+    for m1 in a.2.iter() {
+        for m2 in b.2.iter() {
+            let dh = (m1.1 as f64 - m2.1 as f64).abs() / m1.1.max(m2.1) as f64;
+            if dh > 0.02 {
+                continue;
+            }
+            let d1 = ((m1.0 as f64 / m1.1 as f64) - a.5).abs() / a.5;
+            let d2 = ((m2.0 as f64 / m2.1 as f64) - b.5).abs() / b.5;
+            // 评分：变形权重高（会拉伸/留边），其次高度差，再其次损失分辨率
+            let area_pen = 1.0 - ((m1.0 as f64 * m1.1 as f64) / (3840.0 * 2160.0)).min(1.0) * 0.15;
+            let score = (d1 + d2) * 10.0 + dh * 5.0 + area_pen;
+            cands.push((score, *m1, *m2));
+        }
+    }
+    cands.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+    if cands.is_empty() {
+        return Err("两块屏没有任何竖向高度相同的模式组合 —— 需要在显卡控制面板里给其中一块屏添加自定义分辨率（见「对齐体检」里的理想方案）".to_string());
+    }
+    let mut tried: Vec<String> = Vec::new();
+    for (_, m1, m2) in cands.iter().take(12) {
+        let hz1 = 60u32;
+        let hz2 = 60u32;
+        if set_mode(&a.0, m1.0, m1.1, hz1, false).is_err() || set_mode(&b.0, m2.0, m2.1, hz2, false).is_err() {
+            continue;
+        }
+        let r1 = set_mode(&a.0, m1.0, m1.1, hz1, true);
+        if r1.is_err() {
+            tried.push(format!("{}x{} 失败", m1.0, m1.1));
+            continue;
+        }
+        let r2 = set_mode(&b.0, m2.0, m2.1, hz2, true);
+        if r2.is_err() {
+            let _ = align_restore_modes();
+            tried.push(format!("{}x{} 失败（已回滚）", m2.0, m2.1));
+            continue;
+        }
+        let ca = cur_mode(&a.0);
+        let cb = cur_mode(&b.0);
+        if ca.1 == cb.1 && ca.1 > 0 {
+            return Ok(format!(
+                "已对齐：{} {} → {}x{}@{}；{} {} → {}x{}@{}\n两屏竖向像素高度一致（{}），跨屏不丢画面",
+                a.1, a.0, ca.0, ca.1, ca.2, b.1, b.0, cb.0, cb.1, cb.2, ca.1
+            ));
+        }
+        let _ = align_restore_modes();
+        tried.push(format!("{}x{}+{}x{} 应用后高度仍不一致（已回滚）", m1.0, m1.1, m2.0, m2.1));
+    }
+    Err(format!("试了 {} 组都不行：{}", tried.len(), tried.join("；")))
 }
 
 /// 枚举某块屏支持的所有分辨率 —— **Rust 原生直接调 user32**，不经过 PowerShell/C#。

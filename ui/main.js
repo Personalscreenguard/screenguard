@@ -642,6 +642,38 @@ async function loadMitvVolume() {
     } finally { btn.disabled = false; }
   };
 })();
+// ===== 双屏对齐：应用 / 还原 =====
+// 应用=把两屏切到"竖向高度一致"的可行组合；还原=回到原始 4K。
+// 关闭双屏铺满 / 退出软件 / 一键恢复默认 都会自动触发还原（后端已接好）。
+(function () {
+  const ap = document.getElementById('align-apply');
+  const rs = document.getElementById('align-restore');
+  const out = document.getElementById('align-out');
+  if (ap) ap.onclick = async () => {
+    const ok = confirm('把两块屏切到「竖向高度一致」的分辨率组合？\n\n· 切换时屏幕会黑一下（正常）\n· 已自动记录原始分辨率：关闭双屏铺满 / 退出软件 / 一键恢复默认 都会自动还原成 4K\n· 若切换失败会自动回滚\n\n继续吗？');
+    if (!ok) return;
+    ap.disabled = true;
+    if (out) out.textContent = '正在试算并切换…（屏幕可能短暂黑屏）';
+    try {
+      const r = await invoke('align_apply');
+      if (out) out.textContent = String(r);
+      setStatus('双屏已对齐（关闭双屏铺满或退出软件会自动还原 4K）');
+    } catch (e) {
+      if (out) out.textContent = '对齐失败：' + errText(e);
+      setStatus('对齐失败', false);
+    } finally { ap.disabled = false; }
+  };
+  if (rs) rs.onclick = async () => {
+    rs.disabled = true;
+    try {
+      const r = await invoke('align_restore');
+      if (out) out.textContent = String(r);
+      setStatus(String(r).slice(0, 90));
+    } catch (e) { setStatus('还原失败：' + errText(e), false); }
+    finally { rs.disabled = false; }
+  };
+})();
+
 // ===== 双屏对齐体检 =====
 (function () {
   const btn = document.getElementById('align-run');

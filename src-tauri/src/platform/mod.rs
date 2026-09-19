@@ -305,6 +305,16 @@ pub fn align_report() -> Result<String, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn align_apply() -> Result<String, String> {
+    Err("双屏对齐仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn align_restore_modes() -> Result<String, String> {
+    Err("仅支持 Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn set_screen_inches(_manuf: &str, _inches: f64) -> Result<(), String> {
     Err("仅支持 Windows".to_string())
 }
