@@ -574,22 +574,40 @@ fn show_notify(app: &tauri::AppHandle, icon: &str, title: &str, body: &str) {
         *g = p.clone();
     }
     if let Some(w) = app.get_webview_window("notify") {
-        // 定位到主屏右下角（避开任务栏）
-        if let Ok(Some(mon)) = w.primary_monitor() {
-            let scale = mon.scale_factor();
-            let sw = mon.size().width as f64;
-            let sh = mon.size().height as f64;
-            let ww = 360.0 * scale;
-            let wh = 104.0 * scale;
-            let x = (sw - ww - 18.0 * scale) as i32;
-            let y = (sh - wh - 60.0 * scale) as i32;
-            let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
-        }
+        // 紧贴主屏工作区右下角。
+        // 关键：必须带上显示器自己的**原点**（position）—— 多屏布局里主屏原点常不是 (0,0)，
+        // 旧代码只拿 size() 硬算「屏宽-窗宽」，结果算到别的屏/别处去（实测气泡跑到左上角）。
+        // 用 Tauri 的显示器信息而不是 PowerShell 的 SPI_GETWORKAREA：
+        // PowerShell 进程不是 DPI 感知的，取回的坐标会被虚拟化，反而对不上。
+        let scale = w.scale_factor().unwrap_or(1.0);
+        let place = |w: &tauri::WebviewWindow| {
+            if let Ok(Some(mon)) = w.primary_monitor() {
+                let pos = mon.position();
+                let size = mon.size();
+                let ww = (360.0 * scale) as i32;
+                let wh = (104.0 * scale) as i32;
+                let pad = (10.0 * scale) as i32;
+                let taskbar = (48.0 * scale) as i32; // 主屏任务栏
+                let x = pos.x + size.width as i32 - ww - pad;
+                let y = pos.y + size.height as i32 - wh - pad - taskbar;
+                let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+            } else if let Ok((l, t, r, b)) = platform::primary_work_area() {
+                let ww = (360.0 * scale) as i32;
+                let wh = (104.0 * scale) as i32;
+                let pad = (10.0 * scale) as i32;
+                let _ = w.set_position(tauri::PhysicalPosition::new(
+                    (r - ww - pad).max(l),
+                    (b - wh - pad).max(t),
+                ));
+            }
+        };
+        place(&w);
         let _ = w.emit("notify", p.clone());
         let _ = w.show();
         // 窗口首次创建时页面还没加载完（收不到上面那次 emit），
-        // 稍后再补发一次，保证气泡里一定有内容
+        // 稍后再补发一次，保证气泡里一定有内容；位置也再确认一次。
         std::thread::sleep(std::time::Duration::from_millis(260));
+        place(&w);
         let _ = w.emit("notify", p);
     }
 }

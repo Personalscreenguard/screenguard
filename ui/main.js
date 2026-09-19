@@ -550,29 +550,25 @@ async function loadMitvVolume() {
     if (hint) hint.style.display = 'none';
   }
 }
-const mitv = { latest: null, busy: false };
-function sendMitv(v) {
-  mitv.latest = v;
-  if (mitv.busy) return;
-  mitv.busy = true;
-  (async () => {
-    while (mitv.latest !== null) {
-      const t = mitv.latest; mitv.latest = null;
-      try {
-        const got = await invoke('mitv_volume_set', { target: Number(t) });
-        document.getElementById('mitv-vol-val').textContent = got + '%';
-        document.getElementById('mitv-vol').value = got;
-      } catch (e) { setStatus('小米音量设置失败：' + errText(e), false); }
-    }
-    mitv.busy = false;
-  })();
-}
 (function () {
   const sl = document.getElementById('mitv-vol');
   if (!sl) return;
+  let deb = null;
   sl.addEventListener('input', (ev) => {
-    document.getElementById('mitv-vol-val').textContent = ev.target.value + '%';
-    sendMitv(ev.target.value);
+    const v = Number(ev.target.value);
+    document.getElementById('mitv-vol-val').textContent = v + '%';
+    // 只更新「目标」，不等待：后端拿到最新目标后自己逐步追赶。
+    // 这样「拖回 20%」会立刻反向，不会先把旧目标走完再降（用户实测的痛点）。
+    invoke('mitv_volume_set', { target: v }).catch(() => {});
+    if (deb) clearTimeout(deb);
+    // 停下来后按真实值回正显示（步进是显示器固件限制，1% 一步，追赶需要一点时间）
+    deb = setTimeout(async () => {
+      try {
+        const now = await invoke('mitv_volume_get');
+        sl.value = now;
+        document.getElementById('mitv-vol-val').textContent = now + '%';
+      } catch (e) {}
+    }, 1000);
   });
   loadMitvVolume();
 })();

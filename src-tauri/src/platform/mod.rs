@@ -264,6 +264,11 @@ pub fn mitv_available() -> bool {
     false
 }
 
+#[cfg(not(target_os = "windows"))]
+pub fn primary_work_area() -> Result<(i32, i32, i32, i32), String> {
+    Err("仅支持 Windows".to_string())
+}
+
 // ---------- 屏幕电源控制（方案A）：非 Windows 平台存根 ----------
 // macOS/Linux 可分别用 pmset displaysleepnow / xset dpms force off 实现，
 // 属后续版本；当前先明确告知，避免 UI 误以为可用。

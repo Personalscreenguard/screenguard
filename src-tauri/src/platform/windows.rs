@@ -1171,15 +1171,37 @@ public class SGAudio {
   /// 列出所有「活动的输出端点」，每行：A|端点id|名称|音量|静音|可调|形态
   /// 为什么需要：部分 HDMI/DP 显示器音频端点是**固定音量**，Windows 自己的音量条
   /// 也调不动。此时不该让滑块假装能用，而应让用户从列表里挑一个真正能调的设备。
+  struct SGWA { public int l; public int t; public int r; public int b; }
+  [DllImport("user32.dll", CharSet = CharSet.Auto)]
+  static extern bool SystemParametersInfo(uint act, uint u, ref SGWA p, uint f);
+
+  /// 主屏「工作区」右下角（已排除任务栏）——通知气泡要贴这个角
+  /// 用 SPI_GETWORKAREA(0x30) 而不是自己算：它带正确的原点偏移且自动避开任务栏
+  public static string PrimaryWorkArea() {
+    try {
+      SGWA w = new SGWA();
+      if (SystemParametersInfo(0x0030, 0, ref w, 0) && w.r > w.l && w.b > w.t) {
+        return "WA|" + w.l + "|" + w.t + "|" + w.r + "|" + w.b;
+      }
+    } catch { }
+    return "WA|0|0|0|0";
+  }
+
   public static string AudioList() {
     var sb = new StringBuilder();
     try {
       var en = (SGIMMEnum)(object)new SGMMEnumerator();
       SGIMMColl coll;
-      if (en.EnumAudioEndpoints(0, 1, out coll) != 0 || coll == null) return "ERR:枚举输出端点失败";
+      // mask = 0x0F(DEVICE_STATEMASK_ALL)：把「未插入/未激活/已禁用」的端点也列出来，
+      // 否则用户会问「我的副屏音频设备去哪了」——副屏的 HDMI/DP 音频常常处于未激活态。
+      if (en.EnumAudioEndpoints(0, 15, out coll) != 0 || coll == null) return "ERR:枚举输出端点失败";
       int cnt;
       if (coll.GetCount(out cnt) != 0) return "ERR:读取端点数量失败";
       for (int i = 0; i < cnt; i++) {
+        // 注意：这次特意连「未激活/未插入」的端点一起枚举（用户要看到副屏设备），
+        // 而对这类端点做 Activate 会抛 0x80070003「系统找不到指定的路径」。
+        // 所以逐个用 try 包住：某个端点坏掉只是跳过它，不能让整个列表打不开。
+        try {
         SGIMMDev dev;
         if (coll.Item(i, out dev) != 0 || dev == null) continue;
         string id = "";
@@ -1209,6 +1231,7 @@ public class SGAudio {
           .Append(Math.Round(lvl * 100)).Append("|").Append(mute != 0 ? 1 : 0).Append("|")
           .Append((mask & 1) != 0 ? 1 : 0).Append("|").Append(ff).Append("|")
           .Append(IsDefaultId(id) ? 1 : 0).Append((char)10);
+        } catch { }
       }
       return sb.ToString();
     } catch (Exception e) { return "ERR:" + Esc(e.Message); }
@@ -3371,30 +3394,82 @@ pub fn mitv_volume_get() -> Result<u32, String> {
     })
 }
 
-/// 把小米屏音量调到 target。
-/// 说明：MiTV 没有 setvolume，只能按键步进（每次 ±1），所以这里「读-步进-回读」逼近。
-/// 实测：把整个循环塞进一个 PowerShell 脚本里反而容易因为引号/转义出问题，
-/// 因此改回 Rust 循环调用已经验证可用的 `mitv_get`（每步一次进程开销，可接受）。
+/// 小米音量的「目标值」：前端每次拖动只更新这个值，由追赶循环读最新值决定方向。
+/// 这样「拖回 20%」会立刻反向降，不会先把旧目标（30%）走完再降 —— 用户实测反馈的痛点。
+static MITV_TARGET: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+static MITV_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 把小米屏音量调到 target；本函数会朝**最新目标**逐步逼近后返回最终值。
+/// 并发调用时立即返回当前值（不阻塞界面），方向由最后一次设定的目标决定。
 pub fn mitv_volume_set(target: u32) -> Result<u32, String> {
-    let target = target.min(100);
-    let mut now = mitv_volume_get()?;
-    let mut guard = 0;
-    while now != target && guard < 120 {
-        let act = if target > now {
-            "keyevent&keycode=volumeup"
-        } else {
-            "keyevent&keycode=volumedown"
-        };
-        mitv_get(act)?;
-        std::thread::sleep(std::time::Duration::from_millis(90));
-        let nv = mitv_volume_get()?;
-        if nv == now {
-            break; // 到顶/到底或没生效，避免死循环
-        }
-        now = nv;
-        guard += 1;
+    use std::sync::atomic::Ordering;
+    MITV_TARGET.store(target.min(100) as i32, Ordering::SeqCst);
+    if MITV_BUSY.swap(true, Ordering::SeqCst) {
+        return mitv_volume_get();
     }
-    Ok(now)
+    let r = (|| -> Result<u32, String> {
+        let mut now = mitv_volume_get()?;
+        let mut guard = 0;
+        loop {
+            let t = MITV_TARGET.load(Ordering::SeqCst);
+            if t < 0 || t == now as i32 || guard > 150 {
+                break;
+            }
+            let up = t > now as i32;
+            // 步进间隔取 220ms：之前用 70ms 高频连打，实测把显示器的 MiTV 服务打到
+            // 不应答（ping 通但 6095 端口超时）——1% 一步是固件限制，别把它逼到限流。
+            // 失败时等 2 秒重试一次（限流通常是短时的），再失败才向上报错。
+            if mitv_get(if up {
+                "keyevent&keycode=volumeup"
+            } else {
+                "keyevent&keycode=volumedown"
+            })
+            .is_err()
+            {
+                std::thread::sleep(std::time::Duration::from_millis(2000));
+                mitv_get(if up {
+                    "keyevent&keycode=volumeup"
+                } else {
+                    "keyevent&keycode=volumedown"
+                })?;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(220));
+            let nv = match mitv_volume_get() {
+                Ok(v) => v,
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_millis(1200));
+                    match mitv_volume_get() {
+                        Ok(v) => v,
+                        Err(e) => return Err(e),
+                    }
+                }
+            };
+            if nv == now {
+                break; // 到顶/到底或没生效
+            }
+            now = nv;
+            guard += 1;
+        }
+        Ok(now)
+    })();
+    MITV_BUSY.store(false, Ordering::SeqCst);
+    r
+}
+
+/// 主屏工作区（已排除任务栏）：(left, top, right, bottom)，物理像素
+pub fn primary_work_area() -> Result<(i32, i32, i32, i32), String> {
+    let out = ps_core("[SGAudio]::PrimaryWorkArea()")?;
+    let t = out.trim();
+    let body = t.strip_prefix("WA|").unwrap_or(t);
+    let p: Vec<&str> = body.split('|').collect();
+    if p.len() >= 4 {
+        let n = |i: usize| p[i].trim().parse::<i32>().unwrap_or(0);
+        let (l, tp, r, b) = (n(0), n(1), n(2), n(3));
+        if r > l && b > tp {
+            return Ok((l, tp, r, b));
+        }
+    }
+    Err(format!("工作区解析失败：{}", t.chars().take(60).collect::<String>()))
 }
 
 /// 小米屏音量接口是否可用（界面据此决定是否显示这一项）
