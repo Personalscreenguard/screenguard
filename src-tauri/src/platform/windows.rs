@@ -4827,9 +4827,12 @@ pub fn align_apply() -> Result<String, String> {
         } else {
             (None, None)
         };
+        // Equal DEVMODE desktop heights alone are insufficient: a GPU or display
+        // can scan out a different active signal height. Do not report alignment
+        // as successful unless both active target signals were read and match.
         let signal_heights_match = match (signal_a, signal_b) {
             (Some((_, ah)), Some((_, bh))) => ah == bh,
-            _ => true,
+            _ => false,
         };
         if source_modes_match && signal_heights_match {
             // 分辨率高度一致了，再把两块屏的**顶边拉齐**（否则虚拟桌面高度会翻倍、画面被竖切）
@@ -4860,6 +4863,15 @@ pub fn align_apply() -> Result<String, String> {
                 tried.push(format!("桌面模式 {}px 高但活动输出信号为 {}px / {}px（已回滚）", ca.1, ah, bh));
                 continue;
             }
+        } else {
+            let signal_label = |signal: Option<(u32, u32)>| {
+                signal.map(|(w, h)| format!("{}x{}", w, h)).unwrap_or_else(|| "不可读".to_string())
+            };
+            tried.push(format!(
+                "桌面模式 {}px 高，但活动输出信号无法在两屏同时核验（{} / {}，已回滚）",
+                ca.1, signal_label(signal_a), signal_label(signal_b)
+            ));
+            continue;
         }
         tried.push(format!("{}x{}+{}x{} 应用后模式与目标不一致（已回滚）", m1.0, m1.1, m2.0, m2.1));
     }

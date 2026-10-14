@@ -992,8 +992,10 @@ pub fn align_apply() -> Result<String, String> {
             let ha = mode_height(a);
             let hb = mode_height(b);
             if ha != hb { continue; }
-            let cur_a = main.active_mode().map(|m| (m.w, m.h, m.hz, m.depth, m.scaling)) == Some((a.w, a.h, a.hz, a.depth, a.scaling));
-            let cur_b = sec.active_mode().map(|m| (m.w, m.h, m.hz, m.depth, m.scaling)) == Some((b.w, b.h, b.hz, b.depth, b.scaling));
+            let cur_a = main.active_mode().map(|m| (m.index, m.w, m.h, m.hz, m.depth, m.scaling))
+                == Some((a.index, a.w, a.h, a.hz, a.depth, a.scaling));
+            let cur_b = sec.active_mode().map(|m| (m.index, m.w, m.h, m.hz, m.depth, m.scaling))
+                == Some((b.index, b.w, b.h, b.hz, b.depth, b.scaling));
             let aspect_delta = ((a.w as f64 / a.h as f64) - (main.frame_w() as f64 / main.frame_h().max(1) as f64)).abs()
                 + ((b.w as f64 / b.h as f64) - (sec.frame_w() as f64 / sec.frame_h().max(1) as f64)).abs();
             let refresh_delta = option_delta(a.hz, main.hz) + option_delta(b.hz, sec.hz);
