@@ -212,7 +212,7 @@ public class SGCore {
 
   const int GWL_STYLE = -16;
   const uint WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_POPUP = 0x80000000;
-  const uint SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
+  const uint SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040, SWP_NOSENDCHANGING = 0x0400;
   const uint DM_DISPLAYORIENTATION = 0x00000080;
   const uint DM_PELSWIDTH = 0x00080000, DM_PELSHEIGHT = 0x00100000, DM_DISPLAYFREQUENCY = 0x00400000;
   const uint CDS_UPDATEREGISTRY = 0x0001, CDS_GLOBAL = 0x0008;
@@ -757,7 +757,10 @@ public class SGCore {
         vy = 0;
       }
     }
-    if (!SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW)) {
+    // Some application windows clamp cross-monitor dimensions in WM_WINDOWPOSCHANGING.
+    // Skip that pre-change hook for the requested span; keep the GetWindowRect readback
+    // below as the authoritative check that the requested physical-pixel bounds stuck.
+    if (!SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOSENDCHANGING)) {
       RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
       return "ERR:SetWindowPos 失败（" + Marshal.GetLastWin32Error() + "），目标矩形=" + vx + "," + vy + " " + vw + "x" + vh;
     }
