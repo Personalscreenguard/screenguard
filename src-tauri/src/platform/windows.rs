@@ -1088,8 +1088,8 @@ public class SGCore {
   /// Map format: GDI device|x|y;GDI device|x|y. Validate the supplied config before applying it.
   public static string SetDisplayPositions(string mapping, bool apply) {
     var requested = new System.Collections.Generic.Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
-    foreach (string row in (mapping ?? "").Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries)) {
-      string[] fields = row.Split('|');
+    foreach (string row in (mapping ?? "").Split(new char[] { (char)59 }, StringSplitOptions.RemoveEmptyEntries)) {
+      string[] fields = row.Split((char)124);
       int x, y;
       if (fields.Length != 3 || !int.TryParse(fields[1], out x) || !int.TryParse(fields[2], out y))
         return "ERR:显示器位置参数无效";
