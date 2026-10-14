@@ -148,14 +148,14 @@ pub fn hdr_set(_on: bool) -> Result<String, String> {
     Err("HDR 同步仅支持 Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn span_foreground(_mode: u32) -> Result<String, String> {
-    Err("窗口铺满仅支持 Windows".to_string())
+    Err("窗口铺满仅支持 Windows/macOS".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn restore_foreground() -> Result<(), String> {
-    Err("窗口铺满仅支持 Windows".to_string())
+    Err("窗口铺满仅支持 Windows/macOS".to_string())
 }
 
 /// 全局快捷键：仅 Windows 用原生 RegisterHotKey 注册
@@ -194,14 +194,14 @@ pub struct AudioEndpoint {
     pub is_default: bool,
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn list_windows() -> Result<String, String> {
-    Err("窗口列表仅支持 Windows".to_string())
+    Err("窗口列表仅支持 Windows/macOS".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn span_window(_hwnd: i64, _mode: u32) -> Result<String, String> {
-    Err("窗口铺满仅支持 Windows".to_string())
+    Err("窗口铺满仅支持 Windows/macOS".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -299,24 +299,24 @@ pub fn diag_log_path() -> String {
     String::new()
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn align_report() -> Result<String, String> {
-    Err("双屏对齐体检仅支持 Windows".to_string())
+    Err("双屏对齐体检仅支持 Windows/macOS".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn align_apply() -> Result<String, String> {
-    Err("双屏对齐仅支持 Windows".to_string())
+    Err("双屏对齐仅支持 Windows/macOS".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn align_restore_modes() -> Result<String, String> {
-    Err("仅支持 Windows".to_string())
+    Err("显示布局还原仅支持 Windows/macOS".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_screen_inches(_manuf: &str, _inches: f64) -> Result<(), String> {
-    Err("仅支持 Windows".to_string())
+    Err("手动显示器物理尺寸设置暂不支持 Linux".to_string())
 }
 
 // ---------- 屏幕电源控制（方案A）：非 Windows 平台存根 ----------

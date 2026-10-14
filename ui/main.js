@@ -405,10 +405,11 @@ loadGamma();
 })();
 
 // 铺满任意前台窗口
-// 铺满方式：1 = 以主屏为基准（默认，主屏不会被裁）；0 = 铺满整块桌面包围盒
+// 铺满方式：2 = 先对齐两屏再铺满；1 = 以主屏高度为基准；0 = 铺满桌面包围盒
 function spanMode() {
   const el = document.getElementById('span-mode');
-  return el && el.value === '0' ? 0 : 1;
+  const mode = el ? Number(el.value) : 1;
+  return Number.isInteger(mode) && mode >= 0 && mode <= 2 ? mode : 1;
 }
 
 document.getElementById('span-fg').onclick = async () => {

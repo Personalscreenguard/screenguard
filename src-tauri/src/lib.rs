@@ -264,11 +264,18 @@ async fn span_foreground(mode: Option<u32>) -> Result<String, String> {
 #[tauri::command]
 async fn restore_foreground() -> Result<(), String> {
     // 关闭「双屏铺满」时把两块屏的分辨率也还原回原始 4K（用户要求：关了双屏拓展就自动恢复）
-    let r = tauri::async_runtime::spawn_blocking(platform::restore_foreground)
+    let window_restore = tauri::async_runtime::spawn_blocking(platform::restore_foreground)
         .await
         .map_err(|e| format!("后台任务失败：{}", e))?;
-    let _ = tauri::async_runtime::spawn_blocking(platform::align_restore_modes).await;
-    r
+    let display_restore = tauri::async_runtime::spawn_blocking(platform::align_restore_modes)
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?;
+    match (window_restore, display_restore) {
+        (Ok(()), Ok(_)) => Ok(()),
+        (Err(window), Err(display)) => Err(format!("窗口还原失败：{}；显示器还原失败：{}", window, display)),
+        (Err(window), Ok(_)) => Err(window),
+        (Ok(()), Err(display)) => Err(display),
+    }
 }
 
 /// 注册全局快捷键（Ctrl+Alt+L：全部屏幕待机/唤醒 切换）
