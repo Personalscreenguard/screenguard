@@ -1084,6 +1084,79 @@ public class SGCore {
     } finally { Marshal.FreeHGlobal(pa); Marshal.FreeHGlobal(ma); }
   }
 
+  /// Update only active source origins while preserving the queried source and target modes.
+  /// Map format: GDI device|x|y;GDI device|x|y. Validate the supplied config before applying it.
+  public static string SetDisplayPositions(string mapping, bool apply) {
+    var requested = new System.Collections.Generic.Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+    foreach (string row in (mapping ?? "").Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries)) {
+      string[] fields = row.Split('|');
+      int x, y;
+      if (fields.Length != 3 || !int.TryParse(fields[1], out x) || !int.TryParse(fields[2], out y))
+        return "ERR:显示器位置参数无效";
+      requested[fields[0]] = new int[] { x, y };
+    }
+    if (requested.Count == 0) return "ERR:没有需要设置的显示器位置";
+
+    uint nPaths, nModes;
+    int sizeResult = GetDisplayConfigBufferSizes(2, out nPaths, out nModes);
+    if (sizeResult != 0 || nPaths == 0 || nModes == 0)
+      return "ERR:GetDisplayConfigBufferSizes 失败（" + sizeResult + "）";
+    IntPtr paths = Marshal.AllocHGlobal(checked((int)nPaths * 72));
+    IntPtr modes = Marshal.AllocHGlobal(checked((int)nModes * 64));
+    try {
+      uint pathCount = nPaths, modeCount = nModes;
+      int queryResult = QueryDisplayConfigRaw(2, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero);
+      if (queryResult != 0)
+        return "ERR:QueryDisplayConfig 读取活动路径失败（" + queryResult + "）";
+
+      var found = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+      for (int i = 0; i < pathCount; i++) {
+        int pathOffset = i * 72;
+        int sourceModeIndex = Marshal.ReadInt32(paths, pathOffset + 12);
+        if (sourceModeIndex == -1 || sourceModeIndex < 0 || (uint)sourceModeIndex >= modeCount)
+          return "ERR:活动显示路径缺少可编辑的源模式";
+        int modeOffset = sourceModeIndex * 64;
+        if (Marshal.ReadInt32(modes, modeOffset) != 1)
+          return "ERR:活动显示路径引用的模式不是源模式";
+
+        var sourceName = new SGDC_SRC_NAME();
+        sourceName.header.type = 1;
+        sourceName.header.size = (uint)Marshal.SizeOf(typeof(SGDC_SRC_NAME));
+        sourceName.header.adapterId.LowPart = (uint)Marshal.ReadInt32(paths, pathOffset);
+        sourceName.header.adapterId.HighPart = Marshal.ReadInt32(paths, pathOffset + 4);
+        sourceName.header.id = (uint)Marshal.ReadInt32(paths, pathOffset + 8);
+        int nameResult = DisplayConfigGetDeviceInfo(ref sourceName);
+        if (nameResult != 0 || string.IsNullOrEmpty(sourceName.viewGdiDeviceName))
+          return "ERR:无法读取活动显示源设备名（" + nameResult + "）";
+
+        int[] position;
+        if (!requested.TryGetValue(sourceName.viewGdiDeviceName, out position)) continue;
+        // DISPLAYCONFIG_SOURCE_MODE starts at modeInfo + 16; position is after width,
+        // height, and pixelFormat (x at +28, y at +32 from the modeInfo base).
+        Marshal.WriteInt32(modes, modeOffset + 28, position[0]);
+        Marshal.WriteInt32(modes, modeOffset + 32, position[1]);
+        found.Add(sourceName.viewGdiDeviceName);
+      }
+      if (found.Count != requested.Count)
+        return "ERR:部分设备不在当前活动显示路径中（命中 " + found.Count + "/" + requested.Count + "）";
+
+      int validateResult = SetDisplayConfigApply(pathCount, paths, modeCount, modes, 0x40 | 0x20);
+      if (validateResult != 0)
+        return "ERR:SetDisplayConfig 校验位置布局失败（" + validateResult + "）";
+      if (!apply) return "OK|活动显示位置配置校验通过";
+
+      int applyResult = SetDisplayConfigApply(pathCount, paths, modeCount, modes, 0x80 | 0x20 | 0x200);
+      if (applyResult != 0)
+        return "ERR:SetDisplayConfig 应用位置布局失败（" + applyResult + "）";
+      return "OK|SetDisplayConfig 已保留显示模式并更新桌面位置";
+    } catch (Exception e) {
+      return "ERR:SetDisplayConfig 位置调整异常：" + e.Message;
+    } finally {
+      Marshal.FreeHGlobal(paths);
+      Marshal.FreeHGlobal(modes);
+    }
+  }
+
   /// 每台在用的屏的当前模式：M|设备名|宽|高|刷新率|方向|活动输出宽x高
   public static string ModeDetail() {
     var sb = new System.Text.StringBuilder();
@@ -4473,18 +4546,63 @@ pub fn align_positions() -> Result<String, String> {
             cursor_right += cur.0 as i32;
         }
         if px != tx || py != my {
-            set_pos_norset(dev, tx, my)?;
             changed = true;
         }
         expected.push((dev.clone(), tx, my));
         done.push(format!("{} 从 y={} 拉到 y={}、x={}", dev, py, my, tx));
     }
+    let mut apply_method = "位置未变化".to_string();
     if changed {
-        let r = unsafe {
-            ChangeDisplaySettingsExW(std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), 0, std::ptr::null_mut())
-        };
-        if r != 0 {
-            return Err(format!("应用显示器位置失败（码 {}）", r));
+        let mapping = expected
+            .iter()
+            .map(|(dev, x, y)| format!("{}|{}|{}", dev, x, y))
+            .collect::<Vec<_>>()
+            .join(";");
+        let result = ps_core(&format!(
+            "$r=[SGCore]::SetDisplayPositions('{}',$true); Write-Output $r",
+            mapping
+        ));
+        match result {
+            Ok(output) if output.trim().starts_with("OK|") => {
+                apply_method = "SetDisplayConfig 保留当前显示模式".to_string();
+            }
+            mode_preserving_error => {
+                let mode_preserving_error = match mode_preserving_error {
+                    Ok(output) => output.trim().to_string(),
+                    Err(error) => error,
+                };
+                // 兼容拒绝 supplied-config 的旧驱动。旧 DEVMODE 路径仍可用，
+                // 但它会重新提交当前宽高，明确标记回退以便诊断模式变化问题。
+                for (dev, x, y) in &expected {
+                    if dev == &mdev && *x == mx && *y == my {
+                        continue;
+                    }
+                    let (px, py) = cur_pos(dev);
+                    if px != *x || py != *y {
+                        set_pos_norset(dev, *x, *y)?;
+                    }
+                }
+                let r = unsafe {
+                    ChangeDisplaySettingsExW(
+                        std::ptr::null(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        0,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if r != 0 {
+                    return Err(format!(
+                        "SetDisplayConfig 失败（{}）；DEVMODE 回退应用位置失败（码 {}）",
+                        mode_preserving_error,
+                        r
+                    ));
+                }
+                apply_method = format!(
+                    "DEVMODE 兼容回退（SetDisplayConfig 未成功：{}）",
+                    mode_preserving_error
+                );
+            }
         }
         std::thread::sleep(std::time::Duration::from_millis(1200));
     }
@@ -4497,7 +4615,11 @@ pub fn align_positions() -> Result<String, String> {
             ));
         }
     }
-    Ok(format!("已把两屏顶边对齐：{}", done.join("；")))
+    Ok(format!(
+        "已把两屏顶边对齐（{}）：{}",
+        apply_method,
+        done.join("；")
+    ))
 }
 
 /// 从当前完整 DEVMODEW 出发，仅改分辨率和刷新率，保留旋转、位置及驱动字段。
