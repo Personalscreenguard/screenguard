@@ -1019,8 +1019,44 @@ public class SGCore {
   }
 
   /// 每台在用的屏的当前模式：M|设备名|宽|高|刷新率|方向
+  /// 末尾追加活动输出信号分辨率（GetDisplayConfig 的 target mode），取不到时为 ?。
+  static System.Collections.Generic.Dictionary<string, string> ActiveSignalSizes() {
+    var result = new System.Collections.Generic.Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    uint nPaths, nModes;
+    if (GetDisplayConfigBufferSizes(2, out nPaths, out nModes) != 0 || nPaths == 0 || nModes == 0) return result;
+    IntPtr pa = Marshal.AllocHGlobal((int)(nPaths * 72));
+    IntPtr ma = Marshal.AllocHGlobal((int)(nModes * 64));
+    try {
+      uint p = nPaths, m = nModes;
+      if (QueryDisplayConfigRaw(2, ref p, pa, ref m, ma, IntPtr.Zero) != 0) return result;
+      for (int i = 0; i < p; i++) {
+        int pathOff = i * 72;
+        int modeIndex = Marshal.ReadInt32(pa, pathOff + 32);
+        if (modeIndex == 0xffff || (uint)modeIndex >= m) continue;
+        int modeOff = modeIndex * 64;
+        if (Marshal.ReadInt32(ma, modeOff) != 2) continue;
+        int w = Marshal.ReadInt32(ma, modeOff + 40);
+        int h = Marshal.ReadInt32(ma, modeOff + 44);
+        if (w <= 0 || h <= 0) continue;
+        int rotation = Marshal.ReadInt32(pa, pathOff + 40);
+        if (rotation == 2 || rotation == 4) { int swap = w; w = h; h = swap; }
+        var src = new SGDC_SRC_NAME();
+        src.header.type = 1;
+        src.header.size = (uint)Marshal.SizeOf(typeof(SGDC_SRC_NAME));
+        src.header.adapterId.LowPart = (uint)Marshal.ReadInt32(pa, pathOff);
+        src.header.adapterId.HighPart = Marshal.ReadInt32(pa, pathOff + 4);
+        src.header.id = (uint)Marshal.ReadInt32(pa, pathOff + 8);
+        if (DisplayConfigGetDeviceInfo(ref src) != 0 || string.IsNullOrEmpty(src.viewGdiDeviceName)) continue;
+        result[src.viewGdiDeviceName] = w + "x" + h;
+      }
+      return result;
+    } finally { Marshal.FreeHGlobal(pa); Marshal.FreeHGlobal(ma); }
+  }
+
+  /// 每台在用的屏的当前模式：M|设备名|宽|高|刷新率|方向|活动输出宽x高
   public static string ModeDetail() {
     var sb = new System.Text.StringBuilder();
+    var signals = ActiveSignalSizes();
     for (int i = 1; i <= 12; i++) {
       string dev = "\\\\.\\DISPLAY" + i;
       var dm = AllocDevMode();
@@ -1031,7 +1067,7 @@ public class SGCore {
           int hz = Marshal.ReadInt32(dm, OFF_FREQUENCY);
           int ori = Marshal.ReadInt32(dm, OFF_ORIENTATION);
           if (w > 0 && h > 0)
-            sb.Append("M|").Append(dev).Append("|").Append(w).Append("|").Append(h).Append("|").Append(hz).Append("|").Append(ori).Append((char)10);
+            sb.Append("M|").Append(dev).Append("|").Append(w).Append("|").Append(h).Append("|").Append(hz).Append("|").Append(ori).Append("|").Append(signals.ContainsKey(dev) ? signals[dev] : "?").Append((char)10);
         }
       } finally { Marshal.FreeHGlobal(dm); }
     }
@@ -4256,6 +4292,7 @@ struct AlignInfo {
     name: String,
     is_main: bool,
     px: (u32, u32),
+    signal_px: Option<(u32, u32)>,
     modes: Vec<(u32, u32)>,
     phys_w: f64,
     phys_h: f64,
@@ -4752,9 +4789,20 @@ pub fn align_apply() -> Result<String, String> {
         let ca = cur_mode(&a.0);
         let cb = cur_mode(&b.0);
         let rate_matches = |actual: u32, requested: u32| actual == requested || (actual <= 1 && requested <= 1);
-        if ca.0 == m1.0 && ca.1 == m1.1 && rate_matches(ca.2, *hz1)
+        let source_modes_match = ca.0 == m1.0 && ca.1 == m1.1 && rate_matches(ca.2, *hz1)
             && cb.0 == m2.0 && cb.1 == m2.1 && rate_matches(cb.2, *hz2)
-            && ca.1 == cb.1 && ca.1 > 0 {
+            && ca.1 == cb.1 && ca.1 > 0;
+        let (signal_a, signal_b) = if source_modes_match {
+            let actual_detail = mode_detail();
+            (active_signal_size(&actual_detail, &a.0), active_signal_size(&actual_detail, &b.0))
+        } else {
+            (None, None)
+        };
+        let signal_heights_match = match (signal_a, signal_b) {
+            (Some((_, ah)), Some((_, bh))) => ah == bh,
+            _ => true,
+        };
+        if source_modes_match && signal_heights_match {
             // 分辨率高度一致了，再把两块屏的**顶边拉齐**（否则虚拟桌面高度会翻倍、画面被竖切）
             let posmsg = match align_positions() {
                 Ok(p) => p,
@@ -4765,14 +4813,25 @@ pub fn align_apply() -> Result<String, String> {
                     return Err(format!("模式已对齐，但屏幕位置校验失败，未报告铺满成功：{}{}", e, rollback));
                 }
             };
+            let signal_msg = match (signal_a, signal_b) {
+                (Some((_, ah)), Some((_, bh))) => format!("；活动输出信号高度均为 {}px", ah.max(bh)),
+                _ => String::from("；活动输出信号暂不可读，已按桌面分辨率校验"),
+            };
             return Ok(format!(
-                "已对齐：{} {} → {}x{}@{}；{} {} → {}x{}@{}\n两屏竖向像素高度一致（{}）{}\n{}",
+                "已对齐：{} {} → {}x{}@{}；{} {} → {}x{}@{}\n两屏桌面竖向像素高度一致（{}）{}{}\n{}",
                 a.1, a.0, ca.0, ca.1, ca.2, b.1, b.0, cb.0, cb.1, cb.2, ca.1,
                 if *pdiff > 0.0 { format!("；估算竖向像素密度差 {:.1}%", pdiff * 100.0) } else { String::new() },
+                signal_msg,
                 posmsg
             ));
         }
         let _ = align_restore_modes();
+        if let (Some((_, ah)), Some((_, bh))) = (signal_a, signal_b) {
+            if ah != bh {
+                tried.push(format!("桌面模式 {}px 高但活动输出信号为 {}px / {}px（已回滚）", ca.1, ah, bh));
+                continue;
+            }
+        }
         tried.push(format!("{}x{}+{}x{} 应用后模式与目标不一致（已回滚）", m1.0, m1.1, m2.0, m2.1));
     }
     Err(format!("试了 {} 组都不行：{}", tried.len(), tried.join("；")))
@@ -4802,6 +4861,18 @@ fn display_modes_ffi(dev: &str) -> Vec<(u32, u32)> {
         }
     }
     out
+}
+
+fn active_signal_size(mode_detail: &str, dev: &str) -> Option<(u32, u32)> {
+    mode_detail.lines().find_map(|line| {
+        let p: Vec<&str> = line.split('|').collect();
+        if p.len() < 7 || p[0] != "M" || !p[1].eq_ignore_ascii_case(dev) {
+            return None;
+        }
+        let (w, h) = p[6].split_once('x')?;
+        let size = (w.parse().ok()?, h.parse().ok()?);
+        if size.0 > 0 && size.1 > 0 { Some(size) } else { None }
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -4894,7 +4965,8 @@ pub fn align_report() -> Result<String, String> {
                 }
             }
         }
-        infos.push(AlignInfo { manuf, dev, name: d.name.clone(), is_main: d.main, px, modes, phys_w: pw, phys_h: ph, src, nat });
+        let signal_px = active_signal_size(&md, &dev);
+        infos.push(AlignInfo { manuf, dev, name: d.name.clone(), is_main: d.main, px, signal_px, modes, phys_w: pw, phys_h: ph, src, nat });
     }
 
     let mut o = String::new();
@@ -4916,7 +4988,8 @@ pub fn align_report() -> Result<String, String> {
             i.dev
         ));
         o.push_str(&format!(
-            "     物理 {} · 画布高 {:.1} 英寸 · 竖向 {:.0} 像素/英寸 · 原生比例 {:.3} · 可用分辨率 {} 种（最大 {}x{}）\n",
+            "     活动输出信号 {} · 物理 {} · 画布高 {:.1} 英寸 · 竖向 {:.0} 像素/英寸 · 原生比例 {:.3} · 可用分辨率 {} 种（最大 {}x{}）\n",
+            i.signal_px.map(|(w,h)| format!("{}x{}",w,h)).unwrap_or_else(|| "无法读取".to_string()),
             i.src,
             i.phys_h,
             ppi,
@@ -4948,6 +5021,21 @@ pub fn align_report() -> Result<String, String> {
     }
     if bad == 0 {
         o.push_str("  [正常] 各屏竖向像素一致 → 跨屏不会丢画面\n");
+    }
+    let signal_heights: Vec<(String, u32)> = infos.iter().filter_map(|i| {
+        i.signal_px.map(|(_, h)| (i.name.clone(), h))
+    }).collect();
+    if signal_heights.len() >= 2 {
+        let min = signal_heights.iter().map(|(_, h)| *h).min().unwrap_or(0);
+        let max = signal_heights.iter().map(|(_, h)| *h).max().unwrap_or(0);
+        if min != max {
+            o.push_str(&format!(
+                "  [!] Windows 桌面分辨率相同，但活动输出信号高度不同（{}）→ GPU/显示器可能正在缩放或裁切，自动对齐会按实际输出信号复核候选模式\n",
+                signal_heights.iter().map(|(name,h)| format!("{} {}px", name, h)).collect::<Vec<_>>().join("；")
+            ));
+        } else {
+            o.push_str(&format!("  [正常] 各屏活动输出信号高度相同（{}px）\n", max));
+        }
     }
     if ppis.len() >= 2 {
         let pmax = ppis.iter().cloned().fold(0.0f64, f64::max);
