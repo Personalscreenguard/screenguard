@@ -12,6 +12,7 @@ extern "C" {
 }
 
 const BETTERDISPLAY: &str = "/Applications/BetterDisplay.app/Contents/MacOS/BetterDisplay";
+const K_CG_CONFIGURE_PERMANENTLY: u32 = 2;
 
 pub fn platform_name() -> &'static str {
     "macos"
@@ -823,7 +824,7 @@ fn apply_screen_layout(screens: &[Screen]) -> Result<(), String> {
 /// current signal/scaling configuration intact.
 fn apply_screen_origins_only(screens: &[Screen]) -> Result<(), String> {
     let current = parse_screens();
-    let mut changed: Vec<&Screen> = Vec::new();
+    let mut changed: Vec<(&Screen, u32)> = Vec::new();
     for wanted in screens.iter().filter(|s| s.enabled) {
         let actual = current
             .iter()
@@ -850,11 +851,27 @@ fn apply_screen_origins_only(screens: &[Screen]) -> Result<(), String> {
             return Err(format!("显示器 {} 的当前模式已变化，取消仅位置调整", wanted.id));
         }
         if actual.ox != wanted.ox || actual.oy != wanted.oy {
-            changed.push(wanted);
+            let display_id = actual
+                .ctx
+                .ok_or_else(|| format!("显示器 {} 缺少本次枚举的 Core Graphics ID", wanted.id))?;
+            changed.push((wanted, display_id));
         }
     }
     if changed.is_empty() {
         return Ok(());
+    }
+
+    let latest = parse_screens();
+    for (wanted, display_id) in &changed {
+        let still_same_display = latest.iter().any(|screen| {
+            screen.id == wanted.id && screen.enabled && screen.ctx == Some(*display_id)
+        });
+        if !still_same_display {
+            return Err(format!(
+                "显示器 {} 在位置事务开始前已重新枚举，取消原点更新",
+                wanted.id
+            ));
+        }
     }
 
     let mut config = std::ptr::null_mut();
@@ -862,13 +879,11 @@ fn apply_screen_origins_only(screens: &[Screen]) -> Result<(), String> {
     if begin != 0 || config.is_null() {
         return Err(format!("创建 Core Graphics 显示布局事务失败（码 {}）", begin));
     }
-    for wanted in &changed {
-        let Some(display_id) = wanted.ctx else {
-            unsafe { CGCancelDisplayConfiguration(config) };
-            return Err(format!("显示器 {} 缺少 Core Graphics ID，未提交位置", wanted.id));
-        };
+    // Contextual display IDs can change when macOS re-enumerates displays.
+    // Bind each persistent ID to the contextual ID from the same fresh snapshot.
+    for (wanted, display_id) in &changed {
         let result = unsafe {
-            CGConfigureDisplayOrigin(config, display_id, wanted.ox, wanted.oy)
+            CGConfigureDisplayOrigin(config, *display_id, wanted.ox, wanted.oy)
         };
         if result != 0 {
             unsafe { CGCancelDisplayConfiguration(config) };
@@ -878,7 +893,9 @@ fn apply_screen_origins_only(screens: &[Screen]) -> Result<(), String> {
             ));
         }
     }
-    let result = unsafe { CGCompleteDisplayConfiguration(config, 2) };
+    // Keep the existing permanent-layout behavior explicit. Saved-layout restore
+    // remains responsible for returning the original origins on exit/rollback.
+    let result = unsafe { CGCompleteDisplayConfiguration(config, K_CG_CONFIGURE_PERMANENTLY) };
     if result != 0 {
         return Err(format!("提交 Core Graphics 显示布局事务失败（码 {}）", result));
     }
