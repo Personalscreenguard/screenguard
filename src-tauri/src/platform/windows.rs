@@ -4845,9 +4845,32 @@ pub fn align_apply() -> Result<String, String> {
                     return Err(format!("模式已对齐，但屏幕位置校验失败，未报告铺满成功：{}{}", e, rollback));
                 }
             };
-            let signal_msg = match (signal_a, signal_b) {
+            // Applying the new virtual-desktop positions can make some drivers
+            // renegotiate their output modes. Re-read the target signals after
+            // that operation so success describes the final layout, not an
+            // intermediate mode state.
+            let final_detail = mode_detail();
+            let final_signal_a = active_signal_size(&final_detail, &a.0);
+            let final_signal_b = active_signal_size(&final_detail, &b.0);
+            let final_signals_match = matches!(
+                (final_signal_a, final_signal_b),
+                (Some((_, ah)), Some((_, bh))) if ah == bh
+            );
+            if !final_signals_match {
+                let signal_label = |signal: Option<(u32, u32)>| {
+                    signal.map(|(w, h)| format!("{}x{}", w, h)).unwrap_or_else(|| "不可读".to_string())
+                };
+                let rollback = align_restore_modes()
+                    .map(|s| format!("；已尝试回滚：{}", s))
+                    .unwrap_or_else(|e| format!("；自动回滚失败：{}", e));
+                return Err(format!(
+                    "屏幕位置调整后，两块屏的活动输出信号高度不一致或无法核验（{} / {}），未报告对齐成功{}",
+                    signal_label(final_signal_a), signal_label(final_signal_b), rollback
+                ));
+            }
+            let signal_msg = match (final_signal_a, final_signal_b) {
                 (Some((_, ah)), Some((_, bh))) => format!("；活动输出信号高度均为 {}px", ah.max(bh)),
-                _ => String::from("；活动输出信号暂不可读，已按桌面分辨率校验"),
+                _ => unreachable!("final_signals_match requires both active signal sizes"),
             };
             return Ok(format!(
                 "已对齐：{} {} → {}x{}@{}；{} {} → {}x{}@{}\n两屏桌面竖向像素高度一致（{}）{}{}\n{}",
