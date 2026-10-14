@@ -1062,14 +1062,18 @@ public class SGCore {
       if (QueryDisplayConfigRaw(2, ref p, pa, ref m, ma, IntPtr.Zero) != 0) return result;
       for (int i = 0; i < p; i++) {
         int pathOff = i * 72;
-        int modeIndex = Marshal.ReadInt32(pa, pathOff + 32);
+        // DISPLAYCONFIG_PATH_INFO.targetInfo.modeInfoIdx is at +28. +32 is
+        // outputTechnology (HDMI / DisplayPort / etc.), not a mode index. Using
+        // +32 can accidentally read an unrelated mode and report bogus timings.
+        int modeIndex = Marshal.ReadInt32(pa, pathOff + 28);
         if (modeIndex == 0xffff || (uint)modeIndex >= m) continue;
         int modeOff = modeIndex * 64;
         if (Marshal.ReadInt32(ma, modeOff) != 2) continue;
         int w = Marshal.ReadInt32(ma, modeOff + 40);
         int h = Marshal.ReadInt32(ma, modeOff + 44);
         if (w <= 0 || h <= 0) continue;
-        int rotation = Marshal.ReadInt32(pa, pathOff + 40);
+        // targetInfo.rotation is at +36; +40 is scaling.
+        int rotation = Marshal.ReadInt32(pa, pathOff + 36);
         if (rotation == 2 || rotation == 4) { int swap = w; w = h; h = swap; }
         var src = new SGDC_SRC_NAME();
         src.header.type = 1;
@@ -4952,20 +4956,7 @@ pub fn align_apply() -> Result<String, String> {
         let source_modes_match = ca.0 == m1.0 && ca.1 == m1.1 && rate_matches(ca.2, *hz1)
             && cb.0 == m2.0 && cb.1 == m2.1 && rate_matches(cb.2, *hz2)
             && ca.1 == cb.1 && ca.1 > 0;
-        let (signal_a, signal_b) = if source_modes_match {
-            let actual_detail = mode_detail();
-            (active_signal_size(&actual_detail, &a.0), active_signal_size(&actual_detail, &b.0))
-        } else {
-            (None, None)
-        };
-        // Equal DEVMODE desktop heights alone are insufficient: a GPU or display
-        // can scan out a different active signal height. Do not report alignment
-        // as successful unless both active target signals were read and match.
-        let signal_heights_match = match (signal_a, signal_b) {
-            (Some((_, ah)), Some((_, bh))) => ah == bh,
-            _ => false,
-        };
-        if source_modes_match && signal_heights_match {
+        if source_modes_match {
             // 分辨率高度一致了，再把两块屏的**顶边拉齐**（否则虚拟桌面高度会翻倍、画面被竖切）
             let posmsg = match align_positions() {
                 Ok(p) => p,
@@ -4976,33 +4967,32 @@ pub fn align_apply() -> Result<String, String> {
                     return Err(format!("模式已对齐，但屏幕位置校验失败，未报告铺满成功：{}{}", e, rollback));
                 }
             };
-            // Applying the new virtual-desktop positions can make some drivers
-            // renegotiate their output modes. Re-read the target signals after
-            // that operation so success describes the final layout, not an
-            // intermediate mode state.
-            let final_detail = mode_detail();
-            let final_signal_a = active_signal_size(&final_detail, &a.0);
-            let final_signal_b = active_signal_size(&final_detail, &b.0);
-            let final_signals_match = matches!(
-                (final_signal_a, final_signal_b),
-                (Some((_, ah)), Some((_, bh))) if ah == bh
-            );
-            if !final_signals_match {
-                let signal_label = |signal: Option<(u32, u32)>| {
-                    signal.map(|(w, h)| format!("{}x{}", w, h)).unwrap_or_else(|| "不可读".to_string())
-                };
+            // Position updates must preserve the selected desktop modes. The
+            // target signal can legitimately be a different native timing on
+            // each display, so it is diagnostic only and must not block an
+            // otherwise valid equal-height desktop layout.
+            let final_a = cur_mode(&a.0);
+            let final_b = cur_mode(&b.0);
+            if final_a.0 != m1.0 || final_a.1 != m1.1 || final_b.0 != m2.0
+                || final_b.1 != m2.1 || final_a.1 != final_b.1
+            {
                 let rollback = align_restore_modes()
                     .map(|s| format!("；已尝试回滚：{}", s))
                     .unwrap_or_else(|e| format!("；自动回滚失败：{}", e));
                 return Err(format!(
-                    "屏幕位置调整后，两块屏的活动输出信号高度不一致或无法核验（{} / {}），未报告对齐成功{}",
-                    signal_label(final_signal_a), signal_label(final_signal_b), rollback
+                    "屏幕位置调整后桌面模式发生变化（{}x{} / {}x{}），未报告对齐成功{}",
+                    final_a.0, final_a.1, final_b.0, final_b.1, rollback
                 ));
             }
-            let signal_msg = match (final_signal_a, final_signal_b) {
-                (Some((_, ah)), Some((_, bh))) => format!("；活动输出信号高度均为 {}px", ah.max(bh)),
-                _ => unreachable!("final_signals_match requires both active signal sizes"),
+            let final_detail = mode_detail();
+            let signal_label = |signal: Option<(u32, u32)>| {
+                signal.map(|(w, h)| format!("{}x{}", w, h)).unwrap_or_else(|| "无法读取".to_string())
             };
+            let signal_msg = format!(
+                "；活动输出信号（诊断信息，不作对齐门槛）：{} / {}",
+                signal_label(active_signal_size(&final_detail, &a.0)),
+                signal_label(active_signal_size(&final_detail, &b.0))
+            );
             return Ok(format!(
                 "已对齐：{} {} → {}x{}@{}；{} {} → {}x{}@{}\n两屏桌面竖向像素高度一致（{}）{}{}\n{}",
                 a.1, a.0, ca.0, ca.1, ca.2, b.1, b.0, cb.0, cb.1, cb.2, ca.1,
@@ -5012,21 +5002,6 @@ pub fn align_apply() -> Result<String, String> {
             ));
         }
         let _ = align_restore_modes();
-        if let (Some((_, ah)), Some((_, bh))) = (signal_a, signal_b) {
-            if ah != bh {
-                tried.push(format!("桌面模式 {}px 高但活动输出信号为 {}px / {}px（已回滚）", ca.1, ah, bh));
-                continue;
-            }
-        } else {
-            let signal_label = |signal: Option<(u32, u32)>| {
-                signal.map(|(w, h)| format!("{}x{}", w, h)).unwrap_or_else(|| "不可读".to_string())
-            };
-            tried.push(format!(
-                "桌面模式 {}px 高，但活动输出信号无法在两屏同时核验（{} / {}，已回滚）",
-                ca.1, signal_label(signal_a), signal_label(signal_b)
-            ));
-            continue;
-        }
         tried.push(format!("{}x{}+{}x{} 应用后模式与目标不一致（已回滚）", m1.0, m1.1, m2.0, m2.1));
     }
     Err(format!("试了 {} 组都不行：{}", tried.len(), tried.join("；")))
@@ -5225,11 +5200,11 @@ pub fn align_report() -> Result<String, String> {
         let max = signal_heights.iter().map(|(_, h)| *h).max().unwrap_or(0);
         if min != max {
             o.push_str(&format!(
-                "  [!] Windows 桌面分辨率相同，但活动输出信号高度不同（{}）→ GPU/显示器可能正在缩放或裁切，自动对齐会按实际输出信号复核候选模式\n",
+                "  [i] 活动输出信号高度不同（{}）；这是各屏实际扫描时序，不等同 Windows 桌面画布高度，不能单独据此判定黑边或裁切。自动对齐按桌面模式高度与屏幕位置核验\n",
                 signal_heights.iter().map(|(name,h)| format!("{} {}px", name, h)).collect::<Vec<_>>().join("；")
             ));
         } else {
-            o.push_str(&format!("  [正常] 各屏活动输出信号高度相同（{}px）\n", max));
+            o.push_str(&format!("  [i] 各屏当前活动输出信号高度均为 {}px（仅供诊断）\n", max));
         }
     }
     if ppis.len() >= 2 {
