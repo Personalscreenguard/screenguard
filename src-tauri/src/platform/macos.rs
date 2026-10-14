@@ -779,8 +779,12 @@ fn screen_layout_matches(actual: &Screen, wanted: &Screen) -> bool {
     if !wanted.enabled {
         return true;
     }
-    actual.layout_mode().map(|m| (m.w, m.h, m.hz, m.depth, m.scaling))
-        == wanted.layout_mode().map(|m| (m.w, m.h, m.hz, m.depth, m.scaling))
+    let mode_matches = match &wanted.requested_mode {
+        Some(requested) => actual.active_mode().map(|m| m.index) == Some(requested.index),
+        None => actual.layout_mode().map(|m| (m.w, m.h, m.hz, m.depth, m.scaling))
+            == wanted.layout_mode().map(|m| (m.w, m.h, m.hz, m.depth, m.scaling)),
+    };
+    mode_matches
         && actual.ox == wanted.ox
         && actual.oy == wanted.oy
         && actual.degree == wanted.degree
@@ -826,6 +830,7 @@ fn restore_saved_layout(saved: &SavedLayout) -> Result<(), String> {
                 && (!wanted.enabled || (actual.layout_mode().is_some()
                     && actual.frame_w() == wanted.w
                     && actual.frame_h() == wanted.h
+                    && wanted.mode_index.map_or(true, |index| actual.active_mode().map(|m| m.index) == Some(index))
                     && actual.hz == wanted.hz
                     && actual.color_depth == wanted.depth
                     && actual.ox == wanted.ox
@@ -876,6 +881,7 @@ fn restore_saved_layout(saved: &SavedLayout) -> Result<(), String> {
         if actual.enabled != wanted.enabled
             || (wanted.enabled && (actual.frame_w() != wanted.w
             || actual.frame_h() != wanted.h
+            || wanted.mode_index.is_some_and(|index| actual.active_mode().map(|m| m.index) != Some(index))
             || actual.hz != wanted.hz
             || actual.color_depth != wanted.depth
             || actual.ox != wanted.ox
@@ -925,8 +931,8 @@ fn mode_height(mode: &ScreenMode) -> u32 {
 }
 
 fn mode_matches(actual: &Screen, wanted: &ScreenMode, degree: u32) -> bool {
-    actual.active_mode().map(|m| (m.w, m.h, m.hz, m.depth, m.scaling))
-        == Some((wanted.w, wanted.h, wanted.hz, wanted.depth, wanted.scaling))
+    actual.active_mode().map(|m| (m.index, m.w, m.h, m.hz, m.depth, m.scaling))
+        == Some((wanted.index, wanted.w, wanted.h, wanted.hz, wanted.depth, wanted.scaling))
         && actual.degree == degree
 }
 

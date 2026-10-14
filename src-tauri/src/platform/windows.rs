@@ -757,12 +757,19 @@ public class SGCore {
         vy = 0;
       }
     }
-    // Some application windows clamp cross-monitor dimensions in WM_WINDOWPOSCHANGING.
-    // Skip that pre-change hook for the requested span; keep the GetWindowRect readback
-    // below as the authoritative check that the requested physical-pixel bounds stuck.
-    if (!SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOSENDCHANGING)) {
-      RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
-      return "ERR:SetWindowPos 失败（" + Marshal.GetLastWin32Error() + "），目标矩形=" + vx + "," + vy + " " + vw + "x" + vh;
+    uint spanFlags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW;
+    bool bypassedWindowPosChanging = false;
+    int normalError = 0;
+    if (!SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, spanFlags)) {
+      normalError = Marshal.GetLastWin32Error();
+      // Some application windows reject cross-monitor dimensions in
+      // WM_WINDOWPOSCHANGING. Retry once without that pre-change hook.
+      if (!SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, spanFlags | SWP_NOSENDCHANGING)) {
+        int bypassError = Marshal.GetLastWin32Error();
+        RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
+        return "ERR:SetWindowPos 普通请求失败（" + normalError + "），绕过 WM_WINDOWPOSCHANGING 重试也失败（" + bypassError + "），目标矩形=" + vx + "," + vy + " " + vw + "x" + vh;
+      }
+      bypassedWindowPosChanging = true;
     }
     System.Threading.Thread.Sleep(120);
     SGRECT actual;
@@ -772,8 +779,27 @@ public class SGCore {
     }
     int actualW = actual.Right - actual.Left, actualH = actual.Bottom - actual.Top;
     if (Math.Abs(actual.Left - vx) > 8 || Math.Abs(actual.Top - vy) > 8 || Math.Abs(actualW - vw) > 8 || Math.Abs(actualH - vh) > 8) {
-      RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
-      return "ERR:目标窗口未接受完整的双屏尺寸；目标=" + vx + "," + vy + " " + vw + "x" + vh + "，实际=" + actual.Left + "," + actual.Top + " " + actualW + "x" + actualH;
+      if (!bypassedWindowPosChanging) {
+        // Give the target app its normal resize hook first. Bypass it only when
+        // the physical-pixel readback proves that it clamped the requested span.
+        if (!SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, spanFlags | SWP_NOSENDCHANGING)) {
+          int bypassError = Marshal.GetLastWin32Error();
+          RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
+          return "ERR:窗口普通调整未铺满且绕过 WM_WINDOWPOSCHANGING 重试失败（" + bypassError + "）；目标=" + vx + "," + vy + " " + vw + "x" + vh + "，普通调整实际=" + actual.Left + "," + actual.Top + " " + actualW + "x" + actualH;
+        }
+        bypassedWindowPosChanging = true;
+        System.Threading.Thread.Sleep(120);
+        if (!GetWindowRect(h, out actual)) {
+          RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
+          return "ERR:绕过 WM_WINDOWPOSCHANGING 重试后无法回读窗口边界；已尝试恢复窗口原样";
+        }
+        actualW = actual.Right - actual.Left;
+        actualH = actual.Bottom - actual.Top;
+      }
+      if (Math.Abs(actual.Left - vx) > 8 || Math.Abs(actual.Top - vy) > 8 || Math.Abs(actualW - vw) > 8 || Math.Abs(actualH - vh) > 8) {
+        RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
+        return "ERR:目标窗口未接受完整的双屏尺寸（已尝试跳过 WM_WINDOWPOSCHANGING）；目标=" + vx + "," + vy + " " + vw + "x" + vh + "，实际=" + actual.Left + "," + actual.Top + " " + actualW + "x" + actualH;
+      }
     }
     return "OK|" + (string.IsNullOrEmpty(title) ? "（无标题窗口）" : title);
   }
