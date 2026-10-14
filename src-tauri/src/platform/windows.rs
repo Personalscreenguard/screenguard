@@ -801,7 +801,9 @@ public class SGCore {
         return "ERR:目标窗口未接受完整的双屏尺寸（已尝试跳过 WM_WINDOWPOSCHANGING）；目标=" + vx + "," + vy + " " + vw + "x" + vh + "，实际=" + actual.Left + "," + actual.Top + " " + actualW + "x" + actualH;
       }
     }
-    return "OK|" + (string.IsNullOrEmpty(title) ? "（无标题窗口）" : title);
+    return "OK|" + EscW(string.IsNullOrEmpty(title) ? "（无标题窗口）" : title)
+      + "|窗口外框回读=" + actual.Left + "," + actual.Top + " " + actualW + "x" + actualH
+      + "；目标=" + vx + "," + vy + " " + vw + "x" + vh;
   }
 
   /// 铺满指定的窗口（按 hwnd）。直接对目标句柄动手，不依赖前台窗口。
@@ -3213,7 +3215,7 @@ pub fn span_foreground(mode: u32) -> Result<String, String> {
     };
     let t = out.trim();
     if let Some(rest) = t.strip_prefix("OK|") {
-        return Ok(format!("{}{}", pre, rest));
+        return Ok(span_success_message(&pre, rest));
     }
     Err(format!("{}{}", t.strip_prefix("ERR:").unwrap_or(t), rollback_span_alignment(auto_aligned)))
 }
@@ -3640,6 +3642,13 @@ pub fn list_windows() -> Result<String, String> {
     }
 }
 
+fn span_success_message(prefix: &str, details: &str) -> String {
+    match details.split_once('|') {
+        Some((title, bounds)) => format!("{}{}（{}）", prefix, title, bounds),
+        None => format!("{}{}", prefix, details),
+    }
+}
+
 /// 铺满指定窗口（hwnd）；mode 含义同 span_foreground
 pub fn span_window(hwnd: i64, mode: u32) -> Result<String, String> {
     mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
@@ -3668,7 +3677,7 @@ pub fn span_window(hwnd: i64, mode: u32) -> Result<String, String> {
     };
     let t = out.trim();
     if let Some(rest) = t.strip_prefix("OK|") {
-        Ok(format!("{}{}", pre, rest))
+        Ok(span_success_message(&pre, rest))
     } else if let Some(rest) = t.strip_prefix("ERR:") {
         Err(format!("{}{}", rest, rollback_span_alignment(auto_aligned)))
     } else {

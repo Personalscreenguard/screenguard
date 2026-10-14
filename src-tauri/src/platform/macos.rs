@@ -1339,7 +1339,11 @@ fn span_to_rect(token: i64, mode: u32, expected_title: Option<&str>) -> Result<S
         let rollback = restore_window_rect_after_failed_span(token, &original);
         return Err(format!("{}；{}", reason, rollback));
     }
-    Ok(actual.title)
+    Ok(format!(
+        "{}（AX窗口边界回读：({}, {}) {}x{}；目标：({}, {}) {}x{}）",
+        actual.title, actual.x, actual.y, actual.w, actual.h,
+        x0, y0, x1 - x0, y1 - y0
+    ))
 }
 
 pub fn list_windows() -> Result<String, String> {
