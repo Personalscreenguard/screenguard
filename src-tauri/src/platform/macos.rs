@@ -1,6 +1,16 @@
 use super::{run_cmd, which, DisplayInfo};
 use serde::{Deserialize, Serialize};
 
+type CGDisplayConfigRef = *mut std::ffi::c_void;
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGBeginDisplayConfiguration(config: *mut CGDisplayConfigRef) -> i32;
+    fn CGCancelDisplayConfiguration(config: CGDisplayConfigRef) -> i32;
+    fn CGConfigureDisplayOrigin(config: CGDisplayConfigRef, display: u32, x: i32, y: i32) -> i32;
+    fn CGCompleteDisplayConfiguration(config: CGDisplayConfigRef, option: u32) -> i32;
+}
+
 const BETTERDISPLAY: &str = "/Applications/BetterDisplay.app/Contents/MacOS/BetterDisplay";
 
 pub fn platform_name() -> &'static str {
@@ -808,6 +818,80 @@ fn apply_screen_layout(screens: &[Screen]) -> Result<(), String> {
     run_displayplacer(&args).map(|_| ())
 }
 
+/// Apply only desktop origins through Quartz. This avoids resubmitting already
+/// active display modes when alignment needs to move screens but keep their
+/// current signal/scaling configuration intact.
+fn apply_screen_origins_only(screens: &[Screen]) -> Result<(), String> {
+    let current = parse_screens();
+    let mut changed: Vec<&Screen> = Vec::new();
+    for wanted in screens.iter().filter(|s| s.enabled) {
+        let actual = current
+            .iter()
+            .find(|s| s.id == wanted.id && s.enabled)
+            .ok_or_else(|| format!("原点更新前找不到活动显示器 {}", wanted.id))?;
+        let mode_matches = match &wanted.requested_mode {
+            Some(requested) => actual.active_mode().map(|m| {
+                (m.index, m.w, m.h, m.hz, m.depth, m.scaling)
+            }) == Some((
+                requested.index,
+                requested.w,
+                requested.h,
+                requested.hz,
+                requested.depth,
+                requested.scaling,
+            )),
+            None => actual.active_mode().map(|m| {
+                (m.w, m.h, m.hz, m.depth, m.scaling)
+            }) == wanted.active_mode().map(|m| {
+                (m.w, m.h, m.hz, m.depth, m.scaling)
+            }),
+        } && actual.degree == wanted.degree;
+        if !mode_matches {
+            return Err(format!("显示器 {} 的当前模式已变化，取消仅位置调整", wanted.id));
+        }
+        if actual.ox != wanted.ox || actual.oy != wanted.oy {
+            changed.push(wanted);
+        }
+    }
+    if changed.is_empty() {
+        return Ok(());
+    }
+
+    let mut config = std::ptr::null_mut();
+    let begin = unsafe { CGBeginDisplayConfiguration(&mut config) };
+    if begin != 0 || config.is_null() {
+        return Err(format!("创建 Core Graphics 显示布局事务失败（码 {}）", begin));
+    }
+    for wanted in &changed {
+        let Some(display_id) = wanted.ctx else {
+            unsafe { CGCancelDisplayConfiguration(config) };
+            return Err(format!("显示器 {} 缺少 Core Graphics ID，未提交位置", wanted.id));
+        };
+        let result = unsafe {
+            CGConfigureDisplayOrigin(config, display_id, wanted.ox, wanted.oy)
+        };
+        if result != 0 {
+            unsafe { CGCancelDisplayConfiguration(config) };
+            return Err(format!(
+                "设置显示器 {} 的桌面原点失败（码 {}）",
+                wanted.id, result
+            ));
+        }
+    }
+    let result = unsafe { CGCompleteDisplayConfiguration(config, 2) };
+    if result != 0 {
+        return Err(format!("提交 Core Graphics 显示布局事务失败（码 {}）", result));
+    }
+
+    for _ in 0..12 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if layouts_match(&parse_screens(), screens) {
+            return Ok(());
+        }
+    }
+    Err("Core Graphics 已提交位置，但回读原点/模式索引与目标不一致".into())
+}
+
 fn restore_saved_layout(saved: &SavedLayout) -> Result<(), String> {
     let connected = parse_screens();
     let connected_ids: std::collections::HashSet<&str> =
@@ -1035,7 +1119,13 @@ pub fn align_apply() -> Result<String, String> {
         } else {
             target[si].ox = target[mi].ox - target[si].frame_w() as i32;
         }
-        let applied = apply_screen_layout(&target);
+        let modes_unchanged = mode_matches(&main, main_mode, main.degree)
+            && mode_matches(&sec, sec_mode, sec.degree);
+        let applied = if modes_unchanged {
+            apply_screen_origins_only(&target)
+        } else {
+            apply_screen_layout(&target)
+        };
         if applied.is_ok() {
             std::thread::sleep(std::time::Duration::from_millis(900));
             let actual = parse_screens();
@@ -1049,8 +1139,19 @@ pub fn align_apply() -> Result<String, String> {
                     && (gm.ox + gm.frame_w() as i32 == gs.ox || gs.ox + gs.frame_w() as i32 == gm.ox)
                 {
                     return Ok(format!(
-                        "已对齐 macOS 两屏逻辑高度：{}px。主屏 {}x{}@{}，副屏 {}x{}@{}；顶边已对齐。物理面板尺寸可能不同，请实际检查边缘。",
-                        height, gm.frame_w(), gm.frame_h(), hz_label(gm.hz), gs.frame_w(), gs.frame_h(), hz_label(gs.hz)
+                        "已对齐 macOS 两屏逻辑高度：{}px。主屏 {}x{}@{}，副屏 {}x{}@{}；顶边已对齐。{}。物理面板尺寸可能不同，请实际检查边缘。",
+                        height,
+                        gm.frame_w(),
+                        gm.frame_h(),
+                        hz_label(gm.hz),
+                        gs.frame_w(),
+                        gs.frame_h(),
+                        hz_label(gs.hz),
+                        if modes_unchanged {
+                            "保留当前显示模式，仅调整屏幕位置"
+                        } else {
+                            "已应用共同高度显示模式"
+                        }
                     ));
                 }
             }
@@ -1058,7 +1159,12 @@ pub fn align_apply() -> Result<String, String> {
         } else {
             failures.push(format!("{}px 模式应用失败：{}", height, applied.unwrap_err()));
         }
-        if let Err(e) = apply_screen_layout(&original) {
+        let rollback = if modes_unchanged {
+            apply_screen_origins_only(&original)
+        } else {
+            apply_screen_layout(&original)
+        };
+        if let Err(e) = rollback {
             return Err(format!("对齐尝试失败，且自动回滚原布局也失败：{}。请在 macOS 显示器设置中恢复；备份保存在 ScreenGuard 应用支持目录。", e));
         }
         std::thread::sleep(std::time::Duration::from_millis(900));
