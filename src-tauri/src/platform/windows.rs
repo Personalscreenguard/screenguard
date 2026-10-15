@@ -154,6 +154,7 @@ public class SGCore {
   [DllImport("dxva2.dll")] static extern bool GetVCPFeatureAndVCPFeatureReply(IntPtr h, byte code, IntPtr pvct, ref uint cur, ref uint max);
 
   [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr v);
+  [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr v);
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out SGRECT r);
   [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
   [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr h, int idx);
@@ -211,7 +212,7 @@ public class SGCore {
 
   const int GWL_STYLE = -16;
   const uint WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_POPUP = 0x80000000;
-  const uint SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
+  const uint SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040, SWP_NOSENDCHANGING = 0x0400;
   const uint DM_DISPLAYORIENTATION = 0x00000080;
   const uint DM_PELSWIDTH = 0x00080000, DM_PELSHEIGHT = 0x00100000, DM_DISPLAYFREQUENCY = 0x00400000;
   const uint CDS_UPDATEREGISTRY = 0x0001, CDS_GLOBAL = 0x0008;
@@ -577,17 +578,35 @@ public class SGCore {
     if ((int)fgPid == myPid) {
       return "ERR:当前前台是本程序自己的窗口，不能铺满它（否则你可能找不到「还原」）。请先在右下角「选择窗口」里挑一个别的窗口";
     }
+    long originalShowCmd = IsZoomed(h) ? 3 : (IsIconic(h) ? 6 : 1);
     // 最大化/最小化先还原，否则 SetWindowPos 改不动尺寸
     if (IsIconic(h) || IsZoomed(h)) ShowWindow(h, 9);  // SW_RESTORE
     System.Threading.Thread.Sleep(260);
     SGRECT wr;
-    if (!GetWindowRect(h, out wr)) return "ERR:读取窗口位置失败";
-    if (wr.Right - wr.Left <= 0 || wr.Bottom - wr.Top <= 0) return "ERR:窗口尺寸无效（可能已被最小化）";
-    return SpanHandle(h, stateFile, myPid, mode);
+    if (!GetWindowRect(h, out wr)) {
+      RestoreShowState(h, originalShowCmd);
+      return "ERR:读取窗口位置失败；已恢复原最大化/最小化状态";
+    }
+    if (wr.Right - wr.Left <= 0 || wr.Bottom - wr.Top <= 0) {
+      RestoreShowState(h, originalShowCmd);
+      return "ERR:窗口尺寸无效（可能已被最小化）；已恢复原显示状态";
+    }
+    return SpanHandle(h, stateFile, myPid, mode, originalShowCmd);
   }
 
   /// 还原上一次被铺满的窗口（按记录里的句柄找，不依赖当前前台）
   public static string RestoreForeground(string stateFile) {
+    // Restoration coordinates were captured in per-monitor physical pixels.
+    // Each PowerShell bridge call runs in a fresh process, so explicitly use the
+    // same coordinate space as the span operation before applying those bounds.
+    IntPtr oldDpi = IntPtr.Zero;
+    try { oldDpi = SetThreadDpiAwarenessContext(new IntPtr(-4)); } catch { }
+    if (oldDpi == IntPtr.Zero) return "ERR:无法启用逐屏 DPI 坐标，未还原窗口";
+    try { return RestoreForegroundDpiAware(stateFile); }
+    finally { try { SetThreadDpiAwarenessContext(oldDpi); } catch { } }
+  }
+
+  static string RestoreForegroundDpiAware(string stateFile) {
     string js;
     try { js = System.IO.File.ReadAllText(stateFile); } catch { return "ERR:没有可恢复的记录（先点一次铺满）"; }
     IntPtr h = new IntPtr(JsInt(js, "hwnd"));
@@ -595,9 +614,26 @@ public class SGCore {
     int x = (int)JsInt(js, "x"), y = (int)JsInt(js, "y");
     int w = (int)JsInt(js, "w"), hh = (int)JsInt(js, "h");
     long st = JsInt(js, "style");
+    long showCmd = JsInt(js, "showCmd");
     if (st != 0) SetWindowLongPtr(h, GWL_STYLE, new IntPtr(st));
-    SetWindowPos(h, IntPtr.Zero, x, y, w, hh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    if (!SetWindowPos(h, IntPtr.Zero, x, y, w, hh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW)) {
+      return "ERR:还原窗口位置失败（" + Marshal.GetLastWin32Error() + "），目标矩形=" + x + "," + y + " " + w + "x" + hh;
+    }
+    System.Threading.Thread.Sleep(120);
+    SGRECT actual;
+    if (!GetWindowRect(h, out actual)) return "ERR:窗口已发送还原命令，但无法回读实际边界";
+    int actualW = actual.Right - actual.Left, actualH = actual.Bottom - actual.Top;
+    if (Math.Abs(actual.Left - x) > 8 || Math.Abs(actual.Top - y) > 8 || Math.Abs(actualW - w) > 8 || Math.Abs(actualH - hh) > 8) {
+      return "ERR:窗口未接受还原尺寸；目标=" + x + "," + y + " " + w + "x" + hh + "，实际=" + actual.Left + "," + actual.Top + " " + actualW + "x" + actualH;
+    }
+    RestoreShowState(h, showCmd);
     return "OK";
+  }
+
+  static void RestoreShowState(IntPtr h, long showCmd) {
+    if (!IsWindow(h)) return;
+    if (showCmd == 3) ShowWindow(h, 3);       // SW_MAXIMIZE
+    else if (showCmd == 2 || showCmd == 6) ShowWindow(h, 6); // minimized before span
   }
 
   static string EscW(string s) {
@@ -642,14 +678,43 @@ public class SGCore {
   /// 必须拆出来：SetForegroundWindow 常常被 Windows 拒绝（后台程序不能抢前台），
   /// 于是原来「先置前再走前台那套逻辑」会把**别人**的窗口铺满 —— 实测拿记事本当靶子，
   /// 结果铺满的是当时真正在前台的抖音窗口。
-  static string SpanHandle(IntPtr h, string stateFile, int myPid, int mode) {
+  static string SpanHandle(IntPtr h, string stateFile, int myPid, int mode, long originalShowCmd) {
+    // Screen metrics and SetWindowPos must use the same per-monitor physical-pixel
+    // coordinate space. PowerShell may already have initialized USER32 before the
+    // process-level DPI switch, so set the calling thread context explicitly.
+    IntPtr oldDpi = IntPtr.Zero;
+    try { oldDpi = SetThreadDpiAwarenessContext(new IntPtr(-4)); } catch { }
+    if (oldDpi == IntPtr.Zero) {
+      RestoreShowState(h, originalShowCmd);
+      return "ERR:无法启用逐屏 DPI 坐标，未调整窗口；已恢复原最大化/最小化状态";
+    }
+    try { return SpanHandleDpiAware(h, stateFile, myPid, mode, originalShowCmd); }
+    finally { try { SetThreadDpiAwarenessContext(oldDpi); } catch { } }
+  }
+
+  static void RollbackSpanWindow(IntPtr h, long oldStyle, SGRECT oldRect, long originalShowCmd) {
+    if (!IsWindow(h)) return;
+    SetWindowLongPtr(h, GWL_STYLE, new IntPtr(oldStyle));
+    SetWindowPos(h, IntPtr.Zero, oldRect.Left, oldRect.Top,
+      oldRect.Right - oldRect.Left, oldRect.Bottom - oldRect.Top,
+      SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    RestoreShowState(h, originalShowCmd);
+  }
+
+  static string SpanHandleDpiAware(IntPtr h, string stateFile, int myPid, int mode, long originalShowCmd) {
     StringBuilder tb = new StringBuilder(512);
     GetWindowTextW(h, tb, 300);
     string title = tb.ToString();
     // 这两句原来在读前台窗口的那段里，搬到 SpanHandle 时必须一起带上（否则 wr 未声明）
     SGRECT wr;
-    if (!GetWindowRect(h, out wr)) return "ERR:读取窗口位置失败";
-    if (wr.Right - wr.Left <= 0 || wr.Bottom - wr.Top <= 0) return "ERR:窗口尺寸无效（可能已被最小化）";
+    if (!GetWindowRect(h, out wr)) {
+      RestoreShowState(h, originalShowCmd);
+      return "ERR:读取窗口位置失败；已恢复原最大化/最小化状态";
+    }
+    if (wr.Right - wr.Left <= 0 || wr.Bottom - wr.Top <= 0) {
+      RestoreShowState(h, originalShowCmd);
+      return "ERR:窗口尺寸无效（可能已被最小化）；已恢复原显示状态";
+    }
     long oldStyle = GetWindowLongPtr(h, GWL_STYLE).ToInt64();
     int vx0 = GetSystemMetrics(76), vy0 = GetSystemMetrics(77);
     int vw0 = GetSystemMetrics(78), vh0 = GetSystemMetrics(79);
@@ -672,7 +737,7 @@ public class SGCore {
     if (!(alreadySpanned && sameWin)) {
       string json = "{\"hwnd\":" + h.ToInt64() + ",\"x\":" + wr.Left + ",\"y\":" + wr.Top
         + ",\"w\":" + (wr.Right - wr.Left) + ",\"h\":" + (wr.Bottom - wr.Top)
-        + ",\"style\":" + oldStyle + "}";
+        + ",\"style\":" + oldStyle + ",\"showCmd\":" + originalShowCmd + "}";
       try { System.IO.File.WriteAllText(stateFile, json); } catch { }
     }
     long s = oldStyle;
@@ -692,8 +757,53 @@ public class SGCore {
         vy = 0;
       }
     }
-    SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-    return "OK|" + (string.IsNullOrEmpty(title) ? "（无标题窗口）" : title);
+    uint spanFlags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW;
+    bool bypassedWindowPosChanging = false;
+    int normalError = 0;
+    if (!SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, spanFlags)) {
+      normalError = Marshal.GetLastWin32Error();
+      // Some application windows reject cross-monitor dimensions in
+      // WM_WINDOWPOSCHANGING. Retry once without that pre-change hook.
+      if (!SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, spanFlags | SWP_NOSENDCHANGING)) {
+        int bypassError = Marshal.GetLastWin32Error();
+        RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
+        return "ERR:SetWindowPos 普通请求失败（" + normalError + "），绕过 WM_WINDOWPOSCHANGING 重试也失败（" + bypassError + "），目标矩形=" + vx + "," + vy + " " + vw + "x" + vh;
+      }
+      bypassedWindowPosChanging = true;
+    }
+    System.Threading.Thread.Sleep(120);
+    SGRECT actual;
+    if (!GetWindowRect(h, out actual)) {
+      RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
+      return "ERR:已发送铺满命令，但无法回读窗口边界；已尝试恢复窗口原样";
+    }
+    int actualW = actual.Right - actual.Left, actualH = actual.Bottom - actual.Top;
+    if (Math.Abs(actual.Left - vx) > 8 || Math.Abs(actual.Top - vy) > 8 || Math.Abs(actualW - vw) > 8 || Math.Abs(actualH - vh) > 8) {
+      if (!bypassedWindowPosChanging) {
+        // Give the target app its normal resize hook first. Bypass it only when
+        // the physical-pixel readback proves that it clamped the requested span.
+        if (!SetWindowPos(h, IntPtr.Zero, vx, vy, vw, vh, spanFlags | SWP_NOSENDCHANGING)) {
+          int bypassError = Marshal.GetLastWin32Error();
+          RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
+          return "ERR:窗口普通调整未铺满且绕过 WM_WINDOWPOSCHANGING 重试失败（" + bypassError + "）；目标=" + vx + "," + vy + " " + vw + "x" + vh + "，普通调整实际=" + actual.Left + "," + actual.Top + " " + actualW + "x" + actualH;
+        }
+        bypassedWindowPosChanging = true;
+        System.Threading.Thread.Sleep(120);
+        if (!GetWindowRect(h, out actual)) {
+          RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
+          return "ERR:绕过 WM_WINDOWPOSCHANGING 重试后无法回读窗口边界；已尝试恢复窗口原样";
+        }
+        actualW = actual.Right - actual.Left;
+        actualH = actual.Bottom - actual.Top;
+      }
+      if (Math.Abs(actual.Left - vx) > 8 || Math.Abs(actual.Top - vy) > 8 || Math.Abs(actualW - vw) > 8 || Math.Abs(actualH - vh) > 8) {
+        RollbackSpanWindow(h, oldStyle, wr, originalShowCmd);
+        return "ERR:目标窗口未接受完整的双屏尺寸（已尝试跳过 WM_WINDOWPOSCHANGING）；目标=" + vx + "," + vy + " " + vw + "x" + vh + "，实际=" + actual.Left + "," + actual.Top + " " + actualW + "x" + actualH;
+      }
+    }
+    return "OK|" + EscW(string.IsNullOrEmpty(title) ? "（无标题窗口）" : title)
+      + "|窗口外框回读=" + actual.Left + "," + actual.Top + " " + actualW + "x" + actualH
+      + "；目标=" + vx + "," + vy + " " + vw + "x" + vh;
   }
 
   /// 铺满指定的窗口（按 hwnd）。直接对目标句柄动手，不依赖前台窗口。
@@ -701,10 +811,17 @@ public class SGCore {
     DpiOn();
     IntPtr h = new IntPtr(hwnd);
     if (!IsWindow(h)) return "ERR:该窗口已关闭";
-    if (IsIconic(h)) ShowWindow(h, 9);
+    long originalShowCmd = IsZoomed(h) ? 3 : (IsIconic(h) ? 6 : 1);
+    // A maximized app keeps its primary-monitor maximize rectangle and can
+    // ignore a cross-desktop resize. Restore it before removing its frame and
+    // setting the explicit virtual-desktop bounds (same sequence as foreground).
+    if (IsIconic(h) || IsZoomed(h)) {
+      ShowWindow(h, 9); // SW_RESTORE
+      System.Threading.Thread.Sleep(260);
+    }
     // 直接对目标句柄动手，**不**依赖 SetForegroundWindow
     // （它会失败，导致铺满的是当时真正在前台的**别人**的窗口 —— 实测踩过）
-    return SpanHandle(h, stateFile, myPid, mode);
+    return SpanHandle(h, stateFile, myPid, mode, originalShowCmd);
   }
 
   /// 对指定显示设备执行 DDC/CI（VCP 读或写），返回是否命中；retries 为最大重试次数
@@ -933,8 +1050,121 @@ public class SGCore {
   }
 
   /// 每台在用的屏的当前模式：M|设备名|宽|高|刷新率|方向
+  /// 末尾追加活动输出信号分辨率（GetDisplayConfig 的 target mode），取不到时为 ?。
+  static System.Collections.Generic.Dictionary<string, string> ActiveSignalSizes() {
+    var result = new System.Collections.Generic.Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    uint nPaths, nModes;
+    if (GetDisplayConfigBufferSizes(2, out nPaths, out nModes) != 0 || nPaths == 0 || nModes == 0) return result;
+    IntPtr pa = Marshal.AllocHGlobal((int)(nPaths * 72));
+    IntPtr ma = Marshal.AllocHGlobal((int)(nModes * 64));
+    try {
+      uint p = nPaths, m = nModes;
+      if (QueryDisplayConfigRaw(2, ref p, pa, ref m, ma, IntPtr.Zero) != 0) return result;
+      for (int i = 0; i < p; i++) {
+        int pathOff = i * 72;
+        // DISPLAYCONFIG_PATH_INFO.targetInfo.modeInfoIdx is at +28. +32 is
+        // outputTechnology (HDMI / DisplayPort / etc.), not a mode index. Using
+        // +32 can accidentally read an unrelated mode and report bogus timings.
+        int modeIndex = Marshal.ReadInt32(pa, pathOff + 28);
+        if (modeIndex == 0xffff || (uint)modeIndex >= m) continue;
+        int modeOff = modeIndex * 64;
+        if (Marshal.ReadInt32(ma, modeOff) != 2) continue;
+        int w = Marshal.ReadInt32(ma, modeOff + 40);
+        int h = Marshal.ReadInt32(ma, modeOff + 44);
+        if (w <= 0 || h <= 0) continue;
+        // targetInfo.rotation is at +36; +40 is scaling.
+        int rotation = Marshal.ReadInt32(pa, pathOff + 36);
+        if (rotation == 2 || rotation == 4) { int swap = w; w = h; h = swap; }
+        var src = new SGDC_SRC_NAME();
+        src.header.type = 1;
+        src.header.size = (uint)Marshal.SizeOf(typeof(SGDC_SRC_NAME));
+        src.header.adapterId.LowPart = (uint)Marshal.ReadInt32(pa, pathOff);
+        src.header.adapterId.HighPart = Marshal.ReadInt32(pa, pathOff + 4);
+        src.header.id = (uint)Marshal.ReadInt32(pa, pathOff + 8);
+        if (DisplayConfigGetDeviceInfo(ref src) != 0 || string.IsNullOrEmpty(src.viewGdiDeviceName)) continue;
+        result[src.viewGdiDeviceName] = w + "x" + h;
+      }
+      return result;
+    } finally { Marshal.FreeHGlobal(pa); Marshal.FreeHGlobal(ma); }
+  }
+
+  /// Update only active source origins while preserving the queried source and target modes.
+  /// Map format: GDI device|x|y;GDI device|x|y. Validate the supplied config before applying it.
+  public static string SetDisplayPositions(string mapping, bool apply) {
+    var requested = new System.Collections.Generic.Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+    foreach (string row in (mapping ?? "").Split(new char[] { (char)59 }, StringSplitOptions.RemoveEmptyEntries)) {
+      string[] fields = row.Split((char)124);
+      int x, y;
+      if (fields.Length != 3 || !int.TryParse(fields[1], out x) || !int.TryParse(fields[2], out y))
+        return "ERR:显示器位置参数无效";
+      requested[fields[0]] = new int[] { x, y };
+    }
+    if (requested.Count == 0) return "ERR:没有需要设置的显示器位置";
+
+    uint nPaths, nModes;
+    int sizeResult = GetDisplayConfigBufferSizes(2, out nPaths, out nModes);
+    if (sizeResult != 0 || nPaths == 0 || nModes == 0)
+      return "ERR:GetDisplayConfigBufferSizes 失败（" + sizeResult + "）";
+    IntPtr paths = Marshal.AllocHGlobal(checked((int)nPaths * 72));
+    IntPtr modes = Marshal.AllocHGlobal(checked((int)nModes * 64));
+    try {
+      uint pathCount = nPaths, modeCount = nModes;
+      int queryResult = QueryDisplayConfigRaw(2, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero);
+      if (queryResult != 0)
+        return "ERR:QueryDisplayConfig 读取活动路径失败（" + queryResult + "）";
+
+      var found = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+      for (int i = 0; i < pathCount; i++) {
+        int pathOffset = i * 72;
+        int sourceModeIndex = Marshal.ReadInt32(paths, pathOffset + 12);
+        if (sourceModeIndex == -1 || sourceModeIndex < 0 || (uint)sourceModeIndex >= modeCount)
+          return "ERR:活动显示路径缺少可编辑的源模式";
+        int modeOffset = sourceModeIndex * 64;
+        if (Marshal.ReadInt32(modes, modeOffset) != 1)
+          return "ERR:活动显示路径引用的模式不是源模式";
+
+        var sourceName = new SGDC_SRC_NAME();
+        sourceName.header.type = 1;
+        sourceName.header.size = (uint)Marshal.SizeOf(typeof(SGDC_SRC_NAME));
+        sourceName.header.adapterId.LowPart = (uint)Marshal.ReadInt32(paths, pathOffset);
+        sourceName.header.adapterId.HighPart = Marshal.ReadInt32(paths, pathOffset + 4);
+        sourceName.header.id = (uint)Marshal.ReadInt32(paths, pathOffset + 8);
+        int nameResult = DisplayConfigGetDeviceInfo(ref sourceName);
+        if (nameResult != 0 || string.IsNullOrEmpty(sourceName.viewGdiDeviceName))
+          return "ERR:无法读取活动显示源设备名（" + nameResult + "）";
+
+        int[] position;
+        if (!requested.TryGetValue(sourceName.viewGdiDeviceName, out position)) continue;
+        // DISPLAYCONFIG_SOURCE_MODE starts at modeInfo + 16; position is after width,
+        // height, and pixelFormat (x at +28, y at +32 from the modeInfo base).
+        Marshal.WriteInt32(modes, modeOffset + 28, position[0]);
+        Marshal.WriteInt32(modes, modeOffset + 32, position[1]);
+        found.Add(sourceName.viewGdiDeviceName);
+      }
+      if (found.Count != requested.Count)
+        return "ERR:部分设备不在当前活动显示路径中（命中 " + found.Count + "/" + requested.Count + "）";
+
+      int validateResult = SetDisplayConfigApply(pathCount, paths, modeCount, modes, 0x40 | 0x20);
+      if (validateResult != 0)
+        return "ERR:SetDisplayConfig 校验位置布局失败（" + validateResult + "）";
+      if (!apply) return "OK|活动显示位置配置校验通过";
+
+      int applyResult = SetDisplayConfigApply(pathCount, paths, modeCount, modes, 0x80 | 0x20 | 0x200);
+      if (applyResult != 0)
+        return "ERR:SetDisplayConfig 应用位置布局失败（" + applyResult + "）";
+      return "OK|SetDisplayConfig 已保留显示模式并更新桌面位置";
+    } catch (Exception e) {
+      return "ERR:SetDisplayConfig 位置调整异常：" + e.Message;
+    } finally {
+      Marshal.FreeHGlobal(paths);
+      Marshal.FreeHGlobal(modes);
+    }
+  }
+
+  /// 每台在用的屏的当前模式：M|设备名|宽|高|刷新率|方向|活动输出宽x高
   public static string ModeDetail() {
     var sb = new System.Text.StringBuilder();
+    var signals = ActiveSignalSizes();
     for (int i = 1; i <= 12; i++) {
       string dev = "\\\\.\\DISPLAY" + i;
       var dm = AllocDevMode();
@@ -945,7 +1175,7 @@ public class SGCore {
           int hz = Marshal.ReadInt32(dm, OFF_FREQUENCY);
           int ori = Marshal.ReadInt32(dm, OFF_ORIENTATION);
           if (w > 0 && h > 0)
-            sb.Append("M|").Append(dev).Append("|").Append(w).Append("|").Append(h).Append("|").Append(hz).Append("|").Append(ori).Append((char)10);
+            sb.Append("M|").Append(dev).Append("|").Append(w).Append("|").Append(h).Append("|").Append(hz).Append("|").Append(ori).Append("|").Append(signals.ContainsKey(dev) ? signals[dev] : "?").Append((char)10);
         }
       } finally { Marshal.FreeHGlobal(dm); }
     }
@@ -3023,34 +3253,48 @@ fn span_fg_file() -> String {
     format!(r"{}\screenguard_span_fg.json", base)
 }
 
+fn rollback_span_alignment(aligned: bool) -> String {
+    if !aligned {
+        return String::new();
+    }
+    match align_restore_modes() {
+        Ok(s) => format!("；显示布局已回滚：{}", s),
+        Err(e) => format!("；显示布局回滚失败：{}", e),
+    }
+}
+
 /// 把当前前台窗口铺满所有屏（浏览器里的抖音全屏、播放器、任意窗口都可以）
 /// mode: 0 = 铺满整块桌面包围盒；1 = 以主屏为基准（高度取主屏，避免主屏底部被裁）
 pub fn span_foreground(mode: u32) -> Result<String, String> {
     mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     // mode=2：**先把两块屏的清晰度自动对齐**（竖向像素高度一致），再按包围盒铺满 ——
     // 这样两块屏都会被完整覆盖，副屏底下/中间不会留下一块没铺到的画面。
-    let (mode, pre) = if mode == 2 {
+    let auto_aligned = mode == 2;
+    let (mode, pre) = if auto_aligned {
         match align_apply() {
             Ok(s) => {
                 std::thread::sleep(std::time::Duration::from_millis(1800));
                 (0u32, format!("已先自动对齐两屏清晰度 → {}；然后", s.replace('\n', " ")))
             }
-            Err(e) => (1u32, format!("自动对齐没成功（{}），改用「以主屏为基准」铺满；", e)),
+            Err(e) => return Err(format!("自动对齐失败，未执行双屏铺满：{}", e)),
         }
     } else {
         (mode, String::new())
     };
-    let out = ps_core(&format!(
+    let out = match ps_core(&format!(
         "[SGCore]::SpanForeground('{}', {}, {})",
         span_fg_file(),
         std::process::id(),
         mode
-    ))?;
+    )) {
+        Ok(out) => out,
+        Err(e) => return Err(format!("铺满窗口命令失败：{}{}", e, rollback_span_alignment(auto_aligned))),
+    };
     let t = out.trim();
     if let Some(rest) = t.strip_prefix("OK|") {
-        return Ok(format!("{}{}", pre, rest));
+        return Ok(span_success_message(&pre, rest));
     }
-    Err(t.strip_prefix("ERR:").unwrap_or(t).to_string())
+    Err(format!("{}{}", t.strip_prefix("ERR:").unwrap_or(t), rollback_span_alignment(auto_aligned)))
 }
 
 /// 还原上一次被铺满的窗口
@@ -3475,35 +3719,46 @@ pub fn list_windows() -> Result<String, String> {
     }
 }
 
+fn span_success_message(prefix: &str, details: &str) -> String {
+    match details.split_once('|') {
+        Some((title, bounds)) => format!("{}{}（{}）", prefix, title, bounds),
+        None => format!("{}{}", prefix, details),
+    }
+}
+
 /// 铺满指定窗口（hwnd）；mode 含义同 span_foreground
 pub fn span_window(hwnd: i64, mode: u32) -> Result<String, String> {
     mark_change(); // 用户主动改的显示配置：自动修复 120 秒内不要插手
     // 同 span_foreground：mode=2 先把两块屏清晰度对齐，再铺满，保证两块屏都不留没覆盖的地方
-    let (mode, pre) = if mode == 2 {
+    let auto_aligned = mode == 2;
+    let (mode, pre) = if auto_aligned {
         match align_apply() {
             Ok(s) => {
                 std::thread::sleep(std::time::Duration::from_millis(1800));
                 (0u32, format!("已先自动对齐两屏清晰度 → {}；然后", s.replace('\n', " ")))
             }
-            Err(e) => (1u32, format!("自动对齐没成功（{}），改用「以主屏为基准」铺满；", e)),
+            Err(e) => return Err(format!("自动对齐失败，未执行双屏铺满：{}", e)),
         }
     } else {
         (mode, String::new())
     };
-    let out = ps_core(&format!(
+    let out = match ps_core(&format!(
         "[SGCore]::SpanWindow([int64]{}, '{}', {}, {})",
         hwnd,
         span_fg_file(),
         std::process::id(),
         mode
-    ))?;
+    )) {
+        Ok(out) => out,
+        Err(e) => return Err(format!("铺满窗口命令失败：{}{}", e, rollback_span_alignment(auto_aligned))),
+    };
     let t = out.trim();
     if let Some(rest) = t.strip_prefix("OK|") {
-        Ok(format!("{}{}", pre, rest))
+        Ok(span_success_message(&pre, rest))
     } else if let Some(rest) = t.strip_prefix("ERR:") {
-        Err(rest.to_string())
+        Err(format!("{}{}", rest, rollback_span_alignment(auto_aligned)))
     } else {
-        Err(t.to_string())
+        Err(format!("{}{}", t, rollback_span_alignment(auto_aligned)))
     }
 }
 
@@ -4152,6 +4407,7 @@ struct AlignInfo {
     name: String,
     is_main: bool,
     px: (u32, u32),
+    signal_px: Option<(u32, u32)>,
     modes: Vec<(u32, u32)>,
     phys_w: f64,
     phys_h: f64,
@@ -4192,7 +4448,6 @@ extern "system" {
     fn ChangeDisplaySettingsExW(dev: *const u16, dm: *mut u8, hwnd: *mut core::ffi::c_void, flags: u32, param: *mut core::ffi::c_void) -> i32;
 }
 
-const DM_BITSPERPEL: u32 = 0x0004_0000;
 const DM_PELSWIDTH: u32 = 0x0008_0000;
 const DM_PELSHEIGHT: u32 = 0x0010_0000;
 const DM_DISPLAYFREQUENCY: u32 = 0x0040_0000;
@@ -4227,10 +4482,18 @@ fn set_pos_norset(dev: &str, x: i32, y: i32) -> Result<(), String> {
     if ok == 0 {
         return Err(format!("读 {} 当前模式失败", dev));
     }
-    // 在已有模式基础上，追加「位置」和「宽高」字段（带上宽高才不会 BADFLAGS）
-    let fields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
-    let cur = u32::from_le_bytes([b[72], b[73], b[74], b[75]]);
-    b[72..76].copy_from_slice(&(cur | fields).to_le_bytes());
+    // 在已有模式基础上追加位置字段。保留驱动当前 dmFields 位，避免提交位置时
+    // 丢掉缩放/旋转等驱动字段；默认刷新率 0/1 不显式写入，避免位置提交时
+    // 把驱动默认刷新率误当成一个具体频率重新应用。
+    let current_fields = u32::from_le_bytes([b[72], b[73], b[74], b[75]]);
+    let current_hz = u32::from_le_bytes([b[184], b[185], b[186], b[187]]);
+    let mut fields = current_fields | DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
+    if current_hz > 1 {
+        fields |= DM_DISPLAYFREQUENCY;
+    } else {
+        fields &= !DM_DISPLAYFREQUENCY;
+    }
+    b[72..76].copy_from_slice(&fields.to_le_bytes());
     b[76..80].copy_from_slice(&x.to_le_bytes());
     b[80..84].copy_from_slice(&y.to_le_bytes());
     let r = unsafe {
@@ -4271,9 +4534,10 @@ pub fn align_positions() -> Result<String, String> {
     }
     let (mdev, _, _, mcur, _, _) = infos[main_idx].clone();
     let (mx, my) = cur_pos(&mdev);
-    let _ = set_pos_norset(&mdev, mx, my);
     let mut cursor_right = mx + mcur.0 as i32;
+    let mut expected = vec![(mdev.clone(), mx, my)];
     let mut done = Vec::new();
+    let mut changed = false;
     for (i, it) in infos.iter().enumerate() {
         if i == main_idx {
             continue;
@@ -4285,30 +4549,105 @@ pub fn align_positions() -> Result<String, String> {
         if !on_left {
             cursor_right += cur.0 as i32;
         }
-        set_pos_norset(dev, tx, my)?;
+        if px != tx || py != my {
+            changed = true;
+        }
+        expected.push((dev.clone(), tx, my));
         done.push(format!("{} 从 y={} 拉到 y={}、x={}", dev, py, my, tx));
     }
-    let r = unsafe {
-        ChangeDisplaySettingsExW(std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), 0, std::ptr::null_mut())
-    };
-    if r != 0 {
-        return Err(format!("应用显示器位置失败（码 {}）", r));
+    let mut apply_method = "位置未变化".to_string();
+    if changed {
+        let mapping = expected
+            .iter()
+            .map(|(dev, x, y)| format!("{}|{}|{}", dev, x, y))
+            .collect::<Vec<_>>()
+            .join(";");
+        let result = ps_core(&format!(
+            "$r=[SGCore]::SetDisplayPositions('{}',$true); Write-Output $r",
+            mapping
+        ));
+        match result {
+            Ok(output) if output.trim().starts_with("OK|") => {
+                apply_method = "SetDisplayConfig 保留当前显示模式".to_string();
+            }
+            mode_preserving_error => {
+                let mode_preserving_error = match mode_preserving_error {
+                    Ok(output) => output.trim().to_string(),
+                    Err(error) => error,
+                };
+                // 兼容拒绝 supplied-config 的旧驱动。旧 DEVMODE 路径仍可用，
+                // 但它会重新提交当前宽高，明确标记回退以便诊断模式变化问题。
+                for (dev, x, y) in &expected {
+                    if dev == &mdev && *x == mx && *y == my {
+                        continue;
+                    }
+                    let (px, py) = cur_pos(dev);
+                    if px != *x || py != *y {
+                        set_pos_norset(dev, *x, *y)?;
+                    }
+                }
+                let r = unsafe {
+                    ChangeDisplaySettingsExW(
+                        std::ptr::null(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        0,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if r != 0 {
+                    return Err(format!(
+                        "SetDisplayConfig 失败（{}）；DEVMODE 回退应用位置失败（码 {}）",
+                        mode_preserving_error,
+                        r
+                    ));
+                }
+                apply_method = format!(
+                    "DEVMODE 兼容回退（SetDisplayConfig 未成功：{}）",
+                    mode_preserving_error
+                );
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1200));
     }
-    std::thread::sleep(std::time::Duration::from_millis(1200));
-    Ok(format!("已把两屏顶边对齐：{}", done.join("；")))
+    for (dev, x, y) in &expected {
+        let (actual_x, actual_y) = cur_pos(dev);
+        if actual_x != *x || actual_y != *y {
+            return Err(format!(
+                "显示器位置未能应用：{} 目标 ({},{}), 实际 ({},{})",
+                dev, x, y, actual_x, actual_y
+            ));
+        }
+    }
+    Ok(format!(
+        "已把两屏顶边对齐（{}）：{}",
+        apply_method,
+        done.join("；")
+    ))
 }
 
-/// 构造 DEVMODEW 缓冲区（显式字节偏移，见 display_modes_ffi 的说明）
-fn devmode_buf(w: u32, h: u32, hz: u32) -> [u8; 220] {
+/// 从当前完整 DEVMODEW 出发，仅改分辨率和刷新率，保留旋转、位置及驱动字段。
+fn devmode_buf(dev: &str, w: u32, h: u32, hz: u32) -> Result<[u8; 220], String> {
+    let name = dev_name_ptr(dev);
     let mut b = [0u8; 220];
     b[68] = 220;
-    let fields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+    if unsafe { EnumDisplaySettingsW(name.as_ptr(), 0xFFFF_FFFF, b.as_mut_ptr()) } == 0 {
+        return Err(format!("读取 {} 当前 DEVMODE 失败", dev));
+    }
+    let mut fields = u32::from_le_bytes([b[72], b[73], b[74], b[75]])
+        | DM_PELSWIDTH | DM_PELSHEIGHT;
+    // DEVMODE uses 0/1 to request the device's hardware-default refresh rate.
+    // Keep that sentinel out of dmFields so the driver can choose its default.
+    if hz > 1 {
+        fields |= DM_DISPLAYFREQUENCY;
+    } else {
+        fields &= !DM_DISPLAYFREQUENCY;
+    }
     b[72..76].copy_from_slice(&fields.to_le_bytes());
-    b[168..172].copy_from_slice(&32u32.to_le_bytes());
     b[172..176].copy_from_slice(&w.to_le_bytes());
     b[176..180].copy_from_slice(&h.to_le_bytes());
     b[184..188].copy_from_slice(&hz.to_le_bytes());
-    b
+    Ok(b)
 }
 
 fn dev_name_ptr(dev: &str) -> Vec<u16> {
@@ -4323,7 +4662,7 @@ fn dev_name_ptr(dev: &str) -> Vec<u16> {
 /// 应用时用 flags=0（**不写注册表**），所以重启/崩溃后会自动回到原模式，天然安全。
 pub fn set_mode(dev: &str, w: u32, h: u32, hz: u32, apply: bool) -> Result<String, String> {
     let name = dev_name_ptr(dev);
-    let mut b = devmode_buf(w, h, hz);
+    let mut b = devmode_buf(dev, w, h, hz)?;
     let t = unsafe { ChangeDisplaySettingsExW(name.as_ptr(), b.as_mut_ptr(), std::ptr::null_mut(), CDS_TEST, std::ptr::null_mut()) };
     if t != 0 {
         return Err(format!("{}x{}@{} 驱动不支持（试算码 {}）", w, h, hz, t));
@@ -4331,7 +4670,7 @@ pub fn set_mode(dev: &str, w: u32, h: u32, hz: u32, apply: bool) -> Result<Strin
     if !apply {
         return Ok(format!("{}x{}@{} 可用", w, h, hz));
     }
-    let mut b2 = devmode_buf(w, h, hz);
+    let mut b2 = devmode_buf(dev, w, h, hz)?;
     let r = unsafe { ChangeDisplaySettingsExW(name.as_ptr(), b2.as_mut_ptr(), std::ptr::null_mut(), 0, std::ptr::null_mut()) };
     if r != 0 {
         return Err(format!("切到 {}x{}@{} 失败（码 {}）", w, h, hz, r));
@@ -4371,16 +4710,18 @@ fn align_gather() -> Vec<(String, String, Vec<(u32, u32)>, (u32, u32, u32), f64,
             continue;
         }
         let mut modes = display_modes_ffi(&dev);
-        if modes.is_empty() {
+        if !modes.contains(&(cur.0, cur.1)) {
             modes.push((cur.0, cur.1));
         }
         let nat_mode = modes.iter().cloned().max_by_key(|m| (m.0 as u64) * (m.1 as u64)).unwrap_or((cur.0, cur.1));
-        let nat = nat_mode.0 as f64 / nat_mode.1 as f64;
+        let native_ratio = nat_mode.0 as f64 / nat_mode.1 as f64;
+        let portrait = cur.1 > cur.0;
+        let nat = if portrait { 1.0 / native_ratio } else { native_ratio };
         // 物理高度（英寸）
         let mut ph = 0.0f64;
         if let Some((_, ch, cv)) = edid.iter().find(|(m, a, b)| *m == manuf && *a > 0 && *b > 0).cloned() {
-            ph = cv as f64 / 2.54;
-            let _ = ch;
+            // EDID尺寸按面板原生横向记录；竖屏时当前垂直边对应原生物理宽度。
+            ph = if portrait { ch as f64 } else { cv as f64 } / 2.54;
         }
         if ph <= 0.0 {
             if let Some(ent) = st.screen_in.iter().find(|e| e.split('|').next() == Some(manuf.as_str())) {
@@ -4388,8 +4729,9 @@ fn align_gather() -> Vec<(String, String, Vec<(u32, u32)>, (u32, u32, u32), f64,
                 if p.len() >= 2 {
                     if let Ok(di) = p[1].trim().parse::<f64>() {
                         if di > 5.0 {
-                            let nh = di / (nat * nat + 1.0).sqrt();
-                            ph = if cur.1 > cur.0 { nh } else { nh * nat };
+                            let nh = di / (native_ratio * native_ratio + 1.0).sqrt();
+                            let nw = nh * native_ratio;
+                            ph = if portrait { nw } else { nh };
                         }
                     }
                 }
@@ -4430,6 +4772,7 @@ pub fn align_restore_modes() -> Result<String, String> {
         return Ok("没有记录过原始分辨率，无需还原".to_string());
     }
     let mut done = Vec::new();
+    let mut errors = Vec::new();
     for e in st.base_mode.iter() {
         let p: Vec<&str> = e.split('|').collect();
         if p.len() >= 3 {
@@ -4439,33 +4782,61 @@ pub fn align_restore_modes() -> Result<String, String> {
                 let w: u32 = wh[0].parse().unwrap_or(0);
                 let h: u32 = wh[1].parse().unwrap_or(0);
                 let hz: u32 = p[2].parse().unwrap_or(60);
+                if cur_mode(dev) == (w, h, hz) {
+                    done.push(format!("{} 已是原模式 {}x{}@{}，未重设", dev, w, h, hz));
+                    continue;
+                }
                 match set_mode(dev, w, h, hz, true) {
                     Ok(s) => done.push(format!("{} → {}", dev, s)),
-                    Err(e2) => done.push(format!("{} 还原失败：{}", dev, e2)),
+                    Err(e2) => errors.push(format!("{} 分辨率还原失败：{}", dev, e2)),
                 }
             }
         }
     }
     // 位置也放回去（对齐时把两屏顶边拉齐过）
     if !st.base_pos.is_empty() {
-        let mut n = 0;
+        let mut changed = false;
+        let mut expected = Vec::new();
         for e in st.base_pos.iter() {
             let p: Vec<&str> = e.split('|').collect();
             if p.len() >= 3 {
                 let x: i32 = p[1].parse().unwrap_or(0);
                 let y: i32 = p[2].parse().unwrap_or(0);
-                if set_pos_norset(p[0], x, y).is_ok() {
-                    n += 1;
+                let current = cur_pos(p[0]);
+                if current != (x, y) {
+                    if let Err(e) = set_pos_norset(p[0], x, y) {
+                        errors.push(format!("{} 位置还原失败：{}", p[0], e));
+                        continue;
+                    }
+                    changed = true;
                 }
+                expected.push((p[0], x, y));
             }
         }
-        if n > 0 {
-            let _ = unsafe {
+        if changed {
+            let apply = unsafe {
                 ChangeDisplaySettingsExW(std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), 0, std::ptr::null_mut())
             };
-            std::thread::sleep(std::time::Duration::from_millis(900));
-            done.push(format!("{} 台屏的位置也还原了", n));
+            if apply != 0 {
+                errors.push(format!("应用原始屏幕位置失败（码 {}）", apply));
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(900));
+            }
         }
+        for (dev, x, y) in expected {
+            let actual = cur_pos(dev);
+            if actual != (x, y) {
+                errors.push(format!("{} 位置未恢复：目标 ({},{}), 实际 ({},{})", dev, x, y, actual.0, actual.1));
+            }
+        }
+        if !changed && errors.is_empty() {
+            done.push("屏幕位置本来已是原布局，未重设".to_string());
+        } else if changed && errors.is_empty() {
+            done.push("屏幕位置已恢复到原布局".to_string());
+        }
+    }
+    if !errors.is_empty() {
+        return Err(format!("显示器布局还原未完全成功：{}", errors.join("；")));
     }
     Ok(format!("已还原原始分辨率：{}", done.join("；")))
 }
@@ -4480,20 +4851,71 @@ pub fn align_apply() -> Result<String, String> {
     snapshot_modes(&infos)?;
     let a = infos[0].clone();
     let b = infos[1].clone();
-    // 候选：两屏竖向像素数相同（±2%），优先"宽高比接近原生"，再比分辨率
-    let mut cands: Vec<(f64, (u32, u32), (u32, u32))> = Vec::new();
+    // 候选只接受完全相同的竖向像素数。宽高比按当前屏幕方向比较；
+    // 两屏物理高度已知时，再优先选择竖向 PPI 接近的组合。
+    let mut cands: Vec<(f64, (u32, u32), (u32, u32), u32, u32, f64)> = Vec::new();
     for m1 in a.2.iter() {
         for m2 in b.2.iter() {
-            let dh = (m1.1 as f64 - m2.1 as f64).abs() / m1.1.max(m2.1) as f64;
-            if dh > 0.02 {
+            if m1.1 != m2.1 {
                 continue;
             }
+            // Keep an already working pair (for example 2560x1600 + 1024x1600)
+            // intact. Re-applying an unchanged mode through CDS can change how
+            // some drivers scale the signal, even though Settings uses that mode.
+            let current_penalty = (if (m1.0, m1.1) == (a.3.0, a.3.1) { 0.0 } else { 1.0 })
+                + (if (m2.0, m2.1) == (b.3.0, b.3.1) { 0.0 } else { 1.0 });
             let d1 = ((m1.0 as f64 / m1.1 as f64) - a.5).abs() / a.5;
             let d2 = ((m2.0 as f64 / m2.1 as f64) - b.5).abs() / b.5;
-            // 评分：变形权重高（会拉伸/留边），其次高度差，再其次损失分辨率
-            let area_pen = 1.0 - ((m1.0 as f64 * m1.1 as f64) / (3840.0 * 2160.0)).min(1.0) * 0.15;
-            let score = (d1 + d2) * 10.0 + dh * 5.0 + area_pen;
-            cands.push((score, *m1, *m2));
+            let ppi1 = if a.4 > 0.0 { m1.1 as f64 / a.4 } else { 0.0 };
+            let ppi2 = if b.4 > 0.0 { m2.1 as f64 / b.4 } else { 0.0 };
+            let pdiff = if ppi1 > 0.0 && ppi2 > 0.0 { (ppi1.max(ppi2) / ppi1.min(ppi2)) - 1.0 } else { 0.0 };
+            // 保持两屏原生比例优先；PPI用于区分可行共同高度，分辨率只作为最后排序项。
+            let area_pen = 1.0 / (m1.0 as f64 * m1.1 as f64 + m2.0 as f64 * m2.1 as f64).sqrt();
+            // EnumDisplaySettings can report a rounded 59/60 Hz value that differs
+            // from the active DEVMODE. If this resolution is already active, trust
+            // that exact current mode and don't switch refresh rate just to align.
+            let current_res1 = (m1.0, m1.1) == (a.3.0, a.3.1);
+            let current_res2 = (m2.0, m2.1) == (b.3.0, b.3.1);
+            // EnumDisplaySettings documents 0 and 1 as "hardware default" refresh,
+            // not 0/1 Hz. Preserve that sentinel when resolution is already active;
+            // replacing 0 with 60 would unnecessarily resubmit the current mode.
+            let mut rates1 = if current_res1 {
+                vec![a.3.2]
+            } else {
+                display_refresh_rates_ffi(&a.0, m1.0, m1.1)
+            };
+            let mut rates2 = if current_res2 {
+                vec![b.3.2]
+            } else {
+                display_refresh_rates_ffi(&b.0, m2.0, m2.1)
+            };
+            if rates1.is_empty() { rates1.push(if a.3.2 > 1 { a.3.2 } else { 0 }); }
+            if rates2.is_empty() { rates2.push(if b.3.2 > 1 { b.3.2 } else { 0 }); }
+            for hz1 in &rates1 {
+                for hz2 in &rates2 {
+                    // A default-rate sentinel has no numeric Hz preference. If the
+                    // resolution is unchanged, the rate is unchanged too; if it is
+                    // changing, do not invent a preference for 60 Hz.
+                    let refresh_delta1 = if current_res1 || (a.3.2 <= 1 && *hz1 <= 1) {
+                        0
+                    } else if a.3.2 <= 1 {
+                        1 // Prefer the driver's default when its numeric rate is unknown.
+                    } else {
+                        hz1.abs_diff(a.3.2)
+                    };
+                    let refresh_delta2 = if current_res2 || (b.3.2 <= 1 && *hz2 <= 1) {
+                        0
+                    } else if b.3.2 <= 1 {
+                        1
+                    } else {
+                        hz2.abs_diff(b.3.2)
+                    };
+                    let refresh_delta = refresh_delta1 + refresh_delta2;
+                    let score = current_penalty * 10_000.0
+                        + (d1 + d2) * 100.0 + pdiff * 20.0 + refresh_delta as f64 * 10.0 + area_pen;
+                    cands.push((score, *m1, *m2, *hz1, *hz2, pdiff));
+                }
+            }
         }
     }
     cands.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -4501,38 +4923,86 @@ pub fn align_apply() -> Result<String, String> {
         return Err("两块屏没有任何竖向高度相同的模式组合 —— 需要在显卡控制面板里给其中一块屏添加自定义分辨率（见「对齐体检」里的理想方案）".to_string());
     }
     let mut tried: Vec<String> = Vec::new();
-    for (_, m1, m2) in cands.iter().take(12) {
-        let hz1 = 60u32;
-        let hz2 = 60u32;
-        if set_mode(&a.0, m1.0, m1.1, hz1, false).is_err() || set_mode(&b.0, m2.0, m2.1, hz2, false).is_err() {
+    let mut refresh_trials: HashMap<((u32, u32), (u32, u32)), usize> = HashMap::new();
+    let mut attempted = 0usize;
+    for (_, m1, m2, hz1, hz2, pdiff) in &cands {
+        if attempted >= 48 { break; }
+        let per_pair = refresh_trials.entry((*m1, *m2)).or_insert(0);
+        if *per_pair >= 4 { continue; }
+        *per_pair += 1;
+        attempted += 1;
+        if ((m1.0, m1.1, *hz1) != a.3 && set_mode(&a.0, m1.0, m1.1, *hz1, false).is_err())
+            || ((m2.0, m2.1, *hz2) != b.3 && set_mode(&b.0, m2.0, m2.1, *hz2, false).is_err()) {
             continue;
         }
-        let r1 = set_mode(&a.0, m1.0, m1.1, hz1, true);
-        if r1.is_err() {
-            tried.push(format!("{}x{} 失败", m1.0, m1.1));
-            continue;
+        if (m1.0, m1.1, *hz1) != a.3 {
+            let r1 = set_mode(&a.0, m1.0, m1.1, *hz1, true);
+            if r1.is_err() {
+                tried.push(format!("{}x{} 失败", m1.0, m1.1));
+                continue;
+            }
         }
-        let r2 = set_mode(&b.0, m2.0, m2.1, hz2, true);
-        if r2.is_err() {
-            let _ = align_restore_modes();
-            tried.push(format!("{}x{} 失败（已回滚）", m2.0, m2.1));
-            continue;
+        if (m2.0, m2.1, *hz2) != b.3 {
+            let r2 = set_mode(&b.0, m2.0, m2.1, *hz2, true);
+            if r2.is_err() {
+                let _ = align_restore_modes();
+                tried.push(format!("{}x{} 失败（已回滚）", m2.0, m2.1));
+                continue;
+            }
         }
         let ca = cur_mode(&a.0);
         let cb = cur_mode(&b.0);
-        if ca.1 == cb.1 && ca.1 > 0 {
+        let rate_matches = |actual: u32, requested: u32| actual == requested || (actual <= 1 && requested <= 1);
+        let source_modes_match = ca.0 == m1.0 && ca.1 == m1.1 && rate_matches(ca.2, *hz1)
+            && cb.0 == m2.0 && cb.1 == m2.1 && rate_matches(cb.2, *hz2)
+            && ca.1 == cb.1 && ca.1 > 0;
+        if source_modes_match {
             // 分辨率高度一致了，再把两块屏的**顶边拉齐**（否则虚拟桌面高度会翻倍、画面被竖切）
             let posmsg = match align_positions() {
                 Ok(p) => p,
-                Err(e) => format!("（顶边对齐未成功：{}）", e),
+                Err(e) => {
+                    let rollback = align_restore_modes()
+                        .map(|s| format!("；回滚结果：{}", s))
+                        .unwrap_or_else(|re| format!("；回滚也失败：{}", re));
+                    return Err(format!("模式已对齐，但屏幕位置校验失败，未报告铺满成功：{}{}", e, rollback));
+                }
             };
+            // Position updates must preserve the selected desktop modes. The
+            // target signal can legitimately be a different native timing on
+            // each display, so it is diagnostic only and must not block an
+            // otherwise valid equal-height desktop layout.
+            let final_a = cur_mode(&a.0);
+            let final_b = cur_mode(&b.0);
+            if final_a.0 != m1.0 || final_a.1 != m1.1 || final_b.0 != m2.0
+                || final_b.1 != m2.1 || final_a.1 != final_b.1
+            {
+                let rollback = align_restore_modes()
+                    .map(|s| format!("；已尝试回滚：{}", s))
+                    .unwrap_or_else(|e| format!("；自动回滚失败：{}", e));
+                return Err(format!(
+                    "屏幕位置调整后桌面模式发生变化（{}x{} / {}x{}），未报告对齐成功{}",
+                    final_a.0, final_a.1, final_b.0, final_b.1, rollback
+                ));
+            }
+            let final_detail = mode_detail();
+            let signal_label = |signal: Option<(u32, u32)>| {
+                signal.map(|(w, h)| format!("{}x{}", w, h)).unwrap_or_else(|| "无法读取".to_string())
+            };
+            let signal_msg = format!(
+                "；活动输出信号（诊断信息，不作对齐门槛）：{} / {}",
+                signal_label(active_signal_size(&final_detail, &a.0)),
+                signal_label(active_signal_size(&final_detail, &b.0))
+            );
             return Ok(format!(
-                "已对齐：{} {} → {}x{}@{}；{} {} → {}x{}@{}\n两屏竖向像素高度一致（{}），跨屏不丢画面\n{}",
-                a.1, a.0, ca.0, ca.1, ca.2, b.1, b.0, cb.0, cb.1, cb.2, ca.1, posmsg
+                "已对齐：{} {} → {}x{}@{}；{} {} → {}x{}@{}\n两屏桌面竖向像素高度一致（{}）{}{}\n{}",
+                a.1, a.0, ca.0, ca.1, ca.2, b.1, b.0, cb.0, cb.1, cb.2, ca.1,
+                if *pdiff > 0.0 { format!("；估算竖向像素密度差 {:.1}%", pdiff * 100.0) } else { String::new() },
+                signal_msg,
+                posmsg
             ));
         }
         let _ = align_restore_modes();
-        tried.push(format!("{}x{}+{}x{} 应用后高度仍不一致（已回滚）", m1.0, m1.1, m2.0, m2.1));
+        tried.push(format!("{}x{}+{}x{} 应用后模式与目标不一致（已回滚）", m1.0, m1.1, m2.0, m2.1));
     }
     Err(format!("试了 {} 组都不行：{}", tried.len(), tried.join("；")))
 }
@@ -4556,8 +5026,40 @@ fn display_modes_ffi(dev: &str) -> Vec<(u32, u32)> {
         let w = u32::from_le_bytes([buf[172], buf[173], buf[174], buf[175]]);
         let h = u32::from_le_bytes([buf[176], buf[177], buf[178], buf[179]]);
         let f = u32::from_le_bytes([buf[184], buf[185], buf[186], buf[187]]);
-        if w >= 640 && h >= 480 && f >= 24 && !out.contains(&(w, h)) {
+        if w >= 640 && h >= 480 && (f <= 1 || f >= 24) && !out.contains(&(w, h)) {
             out.push((w, h));
+        }
+    }
+    out
+}
+
+fn active_signal_size(mode_detail: &str, dev: &str) -> Option<(u32, u32)> {
+    mode_detail.lines().find_map(|line| {
+        let p: Vec<&str> = line.split('|').collect();
+        if p.len() < 7 || p[0] != "M" || !p[1].eq_ignore_ascii_case(dev) {
+            return None;
+        }
+        let (w, h) = p[6].split_once('x')?;
+        let size = (w.parse().ok()?, h.parse().ok()?);
+        if size.0 > 0 && size.1 > 0 { Some(size) } else { None }
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn display_refresh_rates_ffi(dev: &str, width: u32, height: u32) -> Vec<u32> {
+    let mut name: Vec<u16> = dev.encode_utf16().collect();
+    name.push(0);
+    let mut out = Vec::new();
+    for i in 0..2000u32 {
+        let mut buf = [0u8; 220];
+        buf[68] = 220;
+        let ok = unsafe { EnumDisplaySettingsW(name.as_ptr(), i, buf.as_mut_ptr()) };
+        if ok == 0 { break; }
+        let w = u32::from_le_bytes([buf[172], buf[173], buf[174], buf[175]]);
+        let h = u32::from_le_bytes([buf[176], buf[177], buf[178], buf[179]]);
+        let hz = u32::from_le_bytes([buf[184], buf[185], buf[186], buf[187]]);
+        if w == width && h == height && (hz <= 1 || (24..=1000).contains(&hz)) && !out.contains(&hz) {
+            out.push(hz);
         }
     }
     out
@@ -4565,6 +5067,11 @@ fn display_modes_ffi(dev: &str) -> Vec<(u32, u32)> {
 
 #[cfg(not(target_os = "windows"))]
 fn display_modes_ffi(_dev: &str) -> Vec<(u32, u32)> {
+    Vec::new()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn display_refresh_rates_ffi(_dev: &str, _width: u32, _height: u32) -> Vec<u32> {
     Vec::new()
 }
 
@@ -4587,7 +5094,7 @@ pub fn align_report() -> Result<String, String> {
             continue;
         }
         let mut modes: Vec<(u32, u32)> = display_modes_ffi(&dev);
-        if modes.is_empty() {
+        if !modes.contains(&px) {
             modes.push(px);
         }
         let nat_mode = modes
@@ -4595,14 +5102,16 @@ pub fn align_report() -> Result<String, String> {
             .cloned()
             .max_by_key(|m| (m.0 as u64) * (m.1 as u64))
             .unwrap_or(px);
-        let nat = nat_mode.0 as f64 / nat_mode.1 as f64;
         let portrait = px.1 > px.0;
+        let native_ratio = nat_mode.0 as f64 / nat_mode.1 as f64;
+        // 模式枚举和 EDID 尺寸以面板原生方向为基准；报告值改成当前方向，
+        // 这样竖屏的比例和物理画布高都与实际纵向像素对应。
+        let nat = if portrait { 1.0 / native_ratio } else { native_ratio };
         let (mut pw, mut ph, mut src) = (0.0f64, 0.0f64, String::from("未知（EDID 未上报，请手动填英寸）"));
         if let Some((_, ch, cv)) = edid.iter().find(|(m, a, b)| *m == manuf && *a > 0 && *b > 0).cloned() {
-            // EDID 的 cmH/cmV 是「面板原生方向」的物理宽高；而原生模式（面积最大的那个）
-            // 也在原生方向，两者一致 → 直接对应，**不要**再按当前横竖去交换。
-            pw = ch as f64 / 2.54;
-            ph = cv as f64 / 2.54;
+            // EDID 按面板原生方向上报尺寸；竖屏时当前纵向边是原生物理宽度。
+            pw = if portrait { cv as f64 } else { ch as f64 } / 2.54;
+            ph = if portrait { ch as f64 } else { cv as f64 } / 2.54;
             src = format!("EDID 上报 {}×{} cm", ch, cv);
         }
         if ph <= 0.0 {
@@ -4615,19 +5124,19 @@ pub fn align_report() -> Result<String, String> {
                 if p.len() >= 2 {
                     if let Ok(di) = p[1].trim().parse::<f64>() {
                         if di > 5.0 {
-                            // 由对角线 + 原生比例推物理宽高（在原生方向）：
-                            // nat = w/h，D² = w² + h² → h = D/√(nat²+1)，w = nat·h
-                            let nh = di / (nat * nat + 1.0).sqrt();
-                            let nw = nh * nat;
-                            pw = nw;
-                            ph = nh;
+                            // 由对角线 + 原生比例推物理宽高，再按当前方向换算。
+                            let nh = di / (native_ratio * native_ratio + 1.0).sqrt();
+                            let nw = nh * native_ratio;
+                            pw = if portrait { nh } else { nw };
+                            ph = if portrait { nw } else { nh };
                             src = format!("按你填的 {:.0} 英寸 + 原生比例推算", di);
                         }
                     }
                 }
             }
         }
-        infos.push(AlignInfo { manuf, dev, name: d.name.clone(), is_main: d.main, px, modes, phys_w: pw, phys_h: ph, src, nat });
+        let signal_px = active_signal_size(&md, &dev);
+        infos.push(AlignInfo { manuf, dev, name: d.name.clone(), is_main: d.main, px, signal_px, modes, phys_w: pw, phys_h: ph, src, nat });
     }
 
     let mut o = String::new();
@@ -4649,7 +5158,8 @@ pub fn align_report() -> Result<String, String> {
             i.dev
         ));
         o.push_str(&format!(
-            "     物理 {} · 画布高 {:.1} 英寸 · 竖向 {:.0} 像素/英寸 · 原生比例 {:.3} · 可用分辨率 {} 种（最大 {}x{}）\n",
+            "     活动输出信号 {} · 物理 {} · 画布高 {:.1} 英寸 · 竖向 {:.0} 像素/英寸 · 原生比例 {:.3} · 可用分辨率 {} 种（最大 {}x{}）\n",
+            i.signal_px.map(|(w,h)| format!("{}x{}",w,h)).unwrap_or_else(|| "无法读取".to_string()),
             i.src,
             i.phys_h,
             ppi,
@@ -4681,6 +5191,21 @@ pub fn align_report() -> Result<String, String> {
     }
     if bad == 0 {
         o.push_str("  [正常] 各屏竖向像素一致 → 跨屏不会丢画面\n");
+    }
+    let signal_heights: Vec<(String, u32)> = infos.iter().filter_map(|i| {
+        i.signal_px.map(|(_, h)| (i.name.clone(), h))
+    }).collect();
+    if signal_heights.len() >= 2 {
+        let min = signal_heights.iter().map(|(_, h)| *h).min().unwrap_or(0);
+        let max = signal_heights.iter().map(|(_, h)| *h).max().unwrap_or(0);
+        if min != max {
+            o.push_str(&format!(
+                "  [i] 活动输出信号高度不同（{}）；这是各屏实际扫描时序，不等同 Windows 桌面画布高度，不能单独据此判定黑边或裁切。自动对齐按桌面模式高度与屏幕位置核验\n",
+                signal_heights.iter().map(|(name,h)| format!("{} {}px", name, h)).collect::<Vec<_>>().join("；")
+            ));
+        } else {
+            o.push_str(&format!("  [i] 各屏当前活动输出信号高度均为 {}px（仅供诊断）\n", max));
+        }
     }
     if ppis.len() >= 2 {
         let pmax = ppis.iter().cloned().fold(0.0f64, f64::max);

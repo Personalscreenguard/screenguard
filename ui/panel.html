@@ -332,7 +332,7 @@ document.getElementById('cell-span').onclick = async (ev)=>{
   const c = ev.currentTarget; flash(c);
   pwHint('正在把当前窗口铺满两块屏…');
   try {
-    const title = await invoke('span_foreground');
+    const title = await invoke('span_foreground', { mode: 2 });
     pwHint('已铺满：「' + title + '」（点右边「还原」回到原位置）');
   } catch(e){ quickFail(c); pwHint('铺满失败：' + (e && e.message ? e.message : e), true); }
 };
