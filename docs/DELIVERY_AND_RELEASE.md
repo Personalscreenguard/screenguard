@@ -6,8 +6,8 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | 0.4.39 CI run `38922598089` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包 artifact 已下载回读、识别为 NSIS 并计算 SHA-256 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.40 本机 21 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；DMG 校验有效；0.4.40 CI 待验证 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| Windows x64 | NSIS 安装包 | 0.4.40 CI run `38924784040` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包 artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | 0.4.40 本机 21 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；DMG 校验有效；CI run `38924784040` 的三平台检查和 Mac/Windows 打包成功 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -55,6 +55,7 @@
 - macOS 原生后台联动新增 CoreGraphics `CGDisplayIsAsleep` 单屏睡眠传感器，在 DDC VCP `0xD6` 无法读取时作为独立来源；单屏状态变化可触发同步，多屏并发或与 DDC 冲突时不猜测来源。DDC 目标控制失败仍走 macOS 系统级待机/唤醒兜底。
 - 本地 Rust 单测 21/21、`cargo check`、仓库自检、前端脚本语法检查和版本一致性通过；Apple Silicon Release/DMG 构建成功。DMG SHA-256 `e6b241b1cbec338f0175de385b6e1c9ddaeb651bf1d9475f7d9a8b55bd49a9f5`，`hdiutil verify` 为 `VALID`；桌面副本及 sidecar 校验通过。
 - 已将原 0.4.39 安装备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.40-app-install-20261016/`；当前 `/Applications/Screenguard.app` 为 0.4.40，运行二进制 SHA-256 `ec21022c1208e68afd4bd5fe92c15c4e1fb6868fe3dfb9230280c4122e290993` 与构建产物一致。
+- PR 代码提交 `08f7b37c8de02b71707896188e1bc8539a697379` 的 CI run `38924784040` 全部成功，包含 macOS/Windows/Ubuntu 检查与测试、macOS DMG 和 Windows NSIS 构建。Mac artifact `12056068292`（3,987,300 bytes）DMG SHA-256 `10cd0b24bd7266480e77d0d4f1482f721c461bd41ea428b043102c644103310c`，`hdiutil verify` 为 `VALID`；Windows artifact `12055699379`（2,299,497 bytes）NSIS 安装包 SHA-256 `c2ea11991d15c46e802cb9b8c71b852a293a401acb7a1725244af197d135acb1`。两份 CI 包均复制至桌面并通过 sidecar SHA-256 校验；Windows 包尚未在 Windows 实机安装。
 - 该 API 反映 macOS 认定的显示器睡眠状态；若外接屏物理断电后仍在线且系统仍报告唤醒，仍无法得知硬件电源变化。真实关屏/唤醒跟随仍需双屏实测。
 
 ## v0.4.37 历史交付核验（2026-10-16）
