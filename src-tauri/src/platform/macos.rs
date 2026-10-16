@@ -1138,7 +1138,9 @@ fn union_bounds(screens: &[Screen]) -> Option<(i32, i32, i32, i32)> {
 
 #[cfg(test)]
 mod window_span_geometry_tests {
-    use super::{union_bounds, Screen, ScreenMode};
+    use super::{
+        should_restore_aligned_layout, union_bounds, SavedWindow, Screen, ScreenMode,
+    };
 
     fn screen(id: &str, enabled: bool, origin: (i32, i32), size: (u32, u32), main: bool) -> Screen {
         Screen {
@@ -1198,6 +1200,25 @@ mod window_span_geometry_tests {
 
         assert_eq!(union_bounds(&[unknown]), None);
         assert_eq!(union_bounds(&[]), None);
+    }
+
+    #[test]
+    fn restores_display_modes_only_when_this_span_applied_alignment() {
+        assert!(should_restore_aligned_layout(Some(true), true));
+        assert!(!should_restore_aligned_layout(Some(true), false));
+        assert!(!should_restore_aligned_layout(Some(false), true));
+        // Older window backups lack this field; retain their previous recovery path.
+        assert!(should_restore_aligned_layout(None, true));
+        assert!(!should_restore_aligned_layout(None, false));
+    }
+
+    #[test]
+    fn reads_legacy_window_backup_without_alignment_metadata() {
+        let old = r#"{"token":65537,"x":10,"y":20,"w":800,"h":600,"title":"Browser — Page"}"#;
+        let saved: SavedWindow =
+            serde_json::from_str(old).expect("legacy backup remains readable");
+        assert_eq!(saved.alignment_applied, None);
+        assert!(should_restore_aligned_layout(saved.alignment_applied, true));
     }
 }
 
@@ -1917,6 +1938,20 @@ struct SavedWindow {
     w: i32,
     h: i32,
     title: String,
+    // None means a backup written by an older release. For those backups,
+    // preserve the historical behavior and restore a pending layout snapshot.
+    #[serde(default)]
+    alignment_applied: Option<bool>,
+}
+
+fn should_restore_aligned_layout(
+    alignment_applied: Option<bool>,
+    layout_backup_exists: bool,
+) -> bool {
+    match alignment_applied {
+        Some(applied) => applied && layout_backup_exists,
+        None => layout_backup_exists,
+    }
 }
 
 fn listed_window_titles() -> &'static std::sync::Mutex<std::collections::HashMap<i64, String>> {
@@ -2033,6 +2068,7 @@ end tell
         w: p[3].parse().map_err(|_| "读取窗口宽度失败")?,
         h: p[4].parse().map_err(|_| "读取窗口高度失败")?,
         title: p[5].to_string(),
+        alignment_applied: Some(false),
     })
 }
 
@@ -2073,6 +2109,7 @@ end tell
         w: p[3].parse().map_err(|_| "读取窗口宽度失败")?,
         h: p[4].parse().map_err(|_| "读取窗口高度失败")?,
         title: p[5].to_string(),
+        alignment_applied: Some(false),
     })
 }
 
@@ -2085,6 +2122,18 @@ fn save_window_backup(window: &SavedWindow) -> Result<(), String> {
         if existing.as_ref().map(|w| w.token) == Some(window.token) { return Ok(()); }
     }
     save_json_atomic(&path, window)
+}
+
+fn mark_window_alignment_applied(window: &SavedWindow) -> Result<(), String> {
+    let path = window_backup_path()?;
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取窗口还原信息失败：{}", e))?;
+    let mut saved: SavedWindow = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("窗口还原信息损坏：{}", e))?;
+    if saved.token != window.token || saved.title != window.title {
+        return Err("窗口还原记录已变化，未标记屏幕对齐状态".into());
+    }
+    saved.alignment_applied = Some(true);
+    save_json_atomic(&path, &saved)
 }
 
 fn union_or_primary(mode: u32) -> Result<(i32, i32, i32, i32), String> {
@@ -2197,6 +2246,12 @@ pub fn span_window(token: i64, mode: u32) -> Result<String, String> {
     let aligned = mode == 2;
     if aligned {
         align_apply()?;
+        if let Err(error) = mark_window_alignment_applied(&before) {
+            let rollback = align_restore_modes()
+                .map(|s| format!("显示布局已回滚：{}", s))
+                .unwrap_or_else(|re| format!("显示布局回滚失败：{}", re));
+            return Err(format!("保存窗口对齐状态失败：{}；{}", error, rollback));
+        }
         std::thread::sleep(std::time::Duration::from_millis(900));
     }
     let result = span_to_rect(token, if mode == 1 { 1 } else { 0 }, Some(&expected_title));
@@ -2240,6 +2295,12 @@ end tell
     let aligned = mode == 2;
     if aligned {
         align_apply()?;
+        if let Err(error) = mark_window_alignment_applied(&before) {
+            let rollback = align_restore_modes()
+                .map(|s| format!("显示布局已回滚：{}", s))
+                .unwrap_or_else(|re| format!("显示布局回滚失败：{}", re));
+            return Err(format!("保存窗口对齐状态失败：{}；{}", error, rollback));
+        }
         std::thread::sleep(std::time::Duration::from_millis(900));
     }
     let result = span_to_rect(chosen, if mode == 1 { 1 } else { 0 }, Some(&before.title));
@@ -2259,9 +2320,12 @@ pub fn restore_foreground() -> Result<(), String> {
     if !path.exists() { return Ok(()); }
     let bytes = std::fs::read(&path).map_err(|e| format!("读取窗口还原信息失败：{}", e))?;
     let saved: SavedWindow = serde_json::from_slice(&bytes).map_err(|e| format!("窗口还原信息损坏：{}", e))?;
-    // Restore the original display topology first so the saved AX frame is again
-    // interpreted in the same desktop coordinate space in which it was captured.
-    align_restore_modes()?;
+    // Only undo display-mode changes when this span operation applied alignment.
+    // Older backups omit the field; for those, retain the previous layout-backup behavior.
+    let layout_backup_exists = layout_backup_path()?.exists();
+    if should_restore_aligned_layout(saved.alignment_applied, layout_backup_exists) {
+        align_restore_modes()?;
+    }
     let current = read_window(saved.token)?;
     if current.title != saved.title {
         return Err("原窗口编号已指向其他窗口，未恢复错误窗口；请重新打开原应用并刷新窗口列表".into());

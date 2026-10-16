@@ -1,13 +1,13 @@
 # Screenguard 桌面端交付状态与发布流程
 
-状态快照：2026-10-16，源码版本 0.4.37。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
+状态快照：2026-10-16，源码版本 0.4.38。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
 
 ## 发布目标
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
 | Windows x64 | NSIS 安装包 | CI run `38914770919` 中 Windows 检查、Rust 单测、C# 桥接检查和 NSIS 构建全部成功；安装包 artifact 已回读并计算 SHA-256 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | CI run `38914770919` 中 macOS 检查、13 个 Rust 单测、DMG 构建成功；本机 0.4.37 App 已安装并核验版本/二进制哈希，CI 与本机 DMG 均校验有效 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| macOS Apple Silicon | DMG | 0.4.38 本机 15 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验，DMG 校验有效 | 新提交全平台 CI；双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -29,9 +29,18 @@
 1. 用户提到的新增 Windows 代码还没有出现在远端仓库分支或提交中，无法基于真实差异完成 Mac 移植。
 2. Windows 和 macOS 物理显示器行为仍需设备验收。macOS 屏幕即使物理关闭仍留在系统在线列表、且 DDC 不可读时，系统无法判断该屏已关；未知状态必须保留为未知。
 3. 当前签名身份列表没有 Developer ID Application。现有 release workflow 不执行签名或公证，只会创建带明确警示的 GitHub Draft Release；不能把未签名/未公证 DMG 当正式 macOS 发布。
-4. 当前 GitHub 最新公开 Release 仍是 v0.2.9；Windows x64 旧安装包可以回滚，但它不包含 0.4.37 的新代码。
+4. 当前 GitHub 最新公开 Release 仍是 v0.2.9；Windows x64 旧安装包可以回滚，但它不包含 0.4.38 的新代码。
 
-## v0.4.37 最新交付核验（2026-10-16）
+## v0.4.38 当前交付核验（2026-10-16）
+
+- 本轮发现并修复 macOS 跨屏窗口还原的状态耦合：此前还原窗口会无条件尝试恢复磁盘上的显示布局备份，即使这次铺满没有改屏幕模式。新版窗口备份记录本次是否应用了屏幕对齐；仅在确有对齐时恢复布局。无该字段的旧备份继续兼容旧行为。
+- 本机 Rust 单测 15/15 通过，包含是否恢复模式的决策及旧版 JSON 备份兼容覆盖；仓库自检、JS 语法、`git diff --check` 通过。
+- 本机 Release/DMG 构建已成功；`/tmp/screenguard-v0438-target/release/bundle/dmg/Screenguard_0.4.38_aarch64.dmg` 的 SHA-256 为 `9c930593026b1ed798456c10a5cbedf8ccb5da6682cd688f3b3ef9a7990b46ad`，`hdiutil verify` 为 `VALID`；副本 `/Users/nanyu/Desktop/Screenguard_0.4.38_aarch64.dmg` 的 sidecar 校验通过。
+- `/Applications/Screenguard.app` 已安装并运行 0.4.38；进程路径为 `/Applications/Screenguard.app/Contents/MacOS/screenguard`，可执行文件 SHA-256 `715a2e0951f2a4cee4e86ab65cce0141ff829c6f1f61cc5a0c45e0c24684469d`，与构建产物相同。安装前 0.4.37 App 备份在 `~/Library/Application Support/Screenguard/backups/pre-0.4.38-app-install-20261016/`。
+- 当前 PR head 的全平台 CI、macOS/Windows 安装包构建待新提交推送后核验。
+- PR 保持 open/draft；电源联动、窗口铺满/还原仍需实体双屏及辅助功能权限验收。
+
+## v0.4.37 历史交付核验（2026-10-16）
 
 - 源码候选：PR #1 `codex/screenguard-v0.4.31-mac-adaptation`，修复 commit `b59e4741765e1401016afe504a286e6152969c54`；PR 保持 open/draft，未合入 `main`。
 - 修复内容：macOS VCP `0xD6` 状态解析此前遗漏值 `3`，导致 DPMS Suspend 没有进入关屏状态转换；现解析器识别 1–5，新增五种模式及无效输出测试。版本号已统一升至 0.4.37。
