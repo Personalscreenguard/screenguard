@@ -549,14 +549,14 @@ pub fn display_snapshot() -> Vec<String> {
 }
 
 /// Per-display macOS sleep state reported by Quartz, independent of DDC/CI.
-pub fn display_sleep_states() -> Vec<(String, bool)> {
+pub fn display_sleep_states() -> Vec<super::DisplaySleepState> {
     parse_screens()
         .into_iter()
         .filter(|screen| screen.enabled)
         .filter_map(|screen| {
             screen.ctx.map(|display| {
                 let asleep = unsafe { CGDisplayIsAsleep(display) != 0 };
-                (screen.id, asleep)
+                super::DisplaySleepState { id: screen.id, asleep }
             })
         })
         .collect()

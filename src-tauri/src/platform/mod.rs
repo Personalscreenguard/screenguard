@@ -21,6 +21,13 @@ pub struct DisplayInfo {
     pub ddc_id: Option<u32>,
 }
 
+/// Operating-system sleep state for one display; this does not claim physical panel power.
+#[derive(Serialize, Clone, Debug)]
+pub struct DisplaySleepState {
+    pub id: String,
+    pub asleep: bool,
+}
+
 /// macOS 当前旋转方向可用的显示模式。
 #[derive(Serialize, Clone, Debug)]
 pub struct DisplayMode {
@@ -371,6 +378,11 @@ pub fn get_display_power(_display_id: &str) -> Result<u32, String> {
 
 #[cfg(target_os = "linux")]
 pub fn display_snapshot() -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn display_sleep_states() -> Vec<DisplaySleepState> {
     Vec::new()
 }
 

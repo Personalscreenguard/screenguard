@@ -178,6 +178,10 @@
     <div class="cell" id="cell-link"><span class="ico">🔗</span><span class="lbl">电源联动：关</span></div>
   </div>
   <div class="hint" id="power-hint" style="padding:0 10px 2px"></div>
+  <div class="btnrow" id="mac-sleep-diagnostic" style="display:none;align-items:center">
+    <button class="ibtn" id="read-mac-sleep-state">读取 macOS 屏幕状态</button>
+    <span class="hint" id="mac-sleep-state-hint" style="flex:2;padding:0 4px">显示 macOS 报告的睡眠状态；不代表显示器物理断电状态。</span>
+  </div>
   <div class="hint" id="hotkey-line" style="padding:0 10px 6px">快捷键：读取中…</div>
 
   <div class="sec-label">显示器健康 <span class="ver" id="health-badge"></span></div>
@@ -844,6 +848,30 @@ if (window.__TAURI__?.event?.listen) {
 }
 pwHint('本地模式可用：系统级待机（含不走 DDC 的屏）；macOS 使用系统显示器电源接口');
 
+const sleepDiagnostic = document.getElementById('mac-sleep-diagnostic');
+const sleepDiagnosticHint = document.getElementById('mac-sleep-state-hint');
+document.getElementById('read-mac-sleep-state').onclick = async ev => {
+  flash(ev.currentTarget);
+  sleepDiagnosticHint.textContent = '正在读取 macOS Quartz 屏幕睡眠状态…';
+  sleepDiagnosticHint.style.color = '';
+  try {
+    const [states, displays] = await Promise.all([
+      invoke('get_display_sleep_states'),
+      invoke('get_displays')
+    ]);
+    if (!Array.isArray(states) || !states.length) {
+      sleepDiagnosticHint.textContent = 'macOS 当前没有返回可用的显示器睡眠状态。';
+      return;
+    }
+    const names = new Map((displays || []).map(display => [display.id, display.name || display.id]));
+    const summary = states.map(state => `${names.get(state.id) || state.id}：${state.asleep ? '系统报告睡眠' : '系统报告唤醒'}`).join('；');
+    sleepDiagnosticHint.textContent = `${summary}。这是 macOS 睡眠状态，不等同于物理电源状态。`;
+  } catch (error) {
+    sleepDiagnosticHint.textContent = `读取失败：${error && error.message ? error.message : error}`;
+    sleepDiagnosticHint.style.color = '#ef6a6a';
+  }
+};
+
 document.getElementById('cell-offall').onclick = async (ev)=>{
   flash(ev.currentTarget);
   pwHint('正在让全部屏幕待机…');
@@ -1118,6 +1146,7 @@ window.addEventListener('storage', ev => {
 invoke('get_platform').then(p=>{
   link.platform = p;
   link.supported = p === 'windows' || p === 'macos';
+  if (sleepDiagnostic) sleepDiagnostic.style.display = p === 'macos' ? 'flex' : 'none';
   const betterDisplayGroup = document.getElementById('bdp-grp');
   if (betterDisplayGroup) betterDisplayGroup.style.display = p === 'macos' ? '' : 'none';
   setupBetterDisplayPanel();
@@ -1129,7 +1158,7 @@ invoke('get_platform').then(p=>{
   } else {
     const linkEl = document.getElementById('cell-link');
     linkEl.title = p === 'macos'
-      ? '原生后台服务优先读取 BetterDisplay DDC VCP 0xD6；失败时回退到系统显示器断开/重连事件'
+      ? '原生后台服务读取 BetterDisplay DDC VCP 0xD6、Quartz 单屏睡眠状态及显示器连接事件'
       : '显示器需支持 DDC/CI VCP 0xD6 电源控制';
     invoke('get_power_link_preference').then(enabled=>{
       localStorage.setItem(LINK_KEY, enabled ? '1' : '0');

@@ -219,6 +219,14 @@ async fn display_snapshot() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Per-display sleep state reported by macOS Quartz, exposed for power-link diagnostics.
+#[tauri::command]
+async fn get_display_sleep_states() -> Vec<platform::DisplaySleepState> {
+    tauri::async_runtime::spawn_blocking(platform::display_sleep_states)
+        .await
+        .unwrap_or_default()
+}
+
 // ---------- 显示器健康：KVM/EDID 异常检测与一键修复（无需管理员权限） ----------
 
 /// Whether this build includes the Windows event-log based display-health feature.
@@ -1125,6 +1133,24 @@ mod macos_power_transition_tests {
     }
 }
 
+#[cfg(test)]
+mod display_sleep_state_serialization_tests {
+    use crate::platform::DisplaySleepState;
+
+    #[test]
+    fn serializes_sleep_state_fields_for_the_webview() {
+        let encoded = serde_json::to_value(vec![DisplaySleepState {
+            id: "external-1".to_string(),
+            asleep: true,
+        }])
+        .unwrap();
+        assert_eq!(
+            encoded,
+            serde_json::json!([{ "id": "external-1", "asleep": true }])
+        );
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
     use std::collections::HashMap;
@@ -1163,7 +1189,10 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
                 was_enabled = true;
                 previous_online = current.clone();
                 previous_power.clear();
-                previous_sleep = platform::display_sleep_states().into_iter().collect();
+                previous_sleep = platform::display_sleep_states()
+                    .into_iter()
+                    .map(|state| (state.id, state.asleep))
+                    .collect();
                 for id in &current {
                     if let Ok(mode) = platform::get_display_power(id) {
                         previous_power.insert(id.clone(), mode);
@@ -1198,8 +1227,10 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
                 };
                 readings.insert(id.clone(), mode);
             }
-            let sleep_readings: HashMap<String, bool> =
-                platform::display_sleep_states().into_iter().collect();
+            let sleep_readings: HashMap<String, bool> = platform::display_sleep_states()
+                .into_iter()
+                .map(|state| (state.id, state.asleep))
+                .collect();
 
             // 多屏同时出现相反/并发电源变化时不猜测来源，避免把其它屏幕也反向切换。
             // 旧显示器关机后从在线列表消失时，helper 会回退到稳定的断开/重连事件。
@@ -1653,6 +1684,7 @@ pub fn run() {
             set_display_power,
             get_display_power,
             display_snapshot,
+            get_display_sleep_states,
             health_events,
             health_supported,
             mode_detail,
