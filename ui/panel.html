@@ -1062,7 +1062,7 @@ async function startLink(){
   if (link.platform === 'macos') {
     const unreadable = initial.unreadable.length;
     if (unreadable) {
-      pwHint('联动已开启，但当前有 '+unreadable+' 台屏幕读不到 DDC VCP 0xD6。请启动 BetterDisplay，在 Settings > Application > Integration 开启 CLI access 和 notification based integration，并确认该屏的 DDC Control 已开启。否则只能检测 macOS 显示器断开/重连；物理关屏后若仍留在系统显示器列表中，macOS 无法识别其电源状态。', true);
+      pwHint('联动已开启，但当前有 '+unreadable+' 台屏幕读不到 DDC VCP 0xD6。请启动 BetterDisplay，在 Settings > Application > Integration 开启 CLI access 和 notification based integration，并确认该屏的 DDC Control 已开启。仍会同时监测 macOS Quartz 单屏睡眠状态和显示器断开/重连；若屏幕物理断电后仍在线且系统仍报告唤醒，则 macOS 无法识别这次物理关屏。', true);
     } else {
       pwHint('联动已开启：当前显示器可读取 BetterDisplay DDC VCP 0xD6。请保持 Screenguard 和 BetterDisplay 运行；显示器是否响应电源命令仍取决于 DDC/CI 和连接链路。');
     }

@@ -1,13 +1,13 @@
 # Screenguard 桌面端交付状态与发布流程
 
-状态快照：2026-10-16，源码版本 0.4.40。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
+状态快照：2026-10-16，源码版本 0.4.41。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
 
 ## 发布目标
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
 | Windows x64 | NSIS 安装包 | 0.4.40 CI run `38924784040` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包 artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.40 本机 21 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；DMG 校验有效；CI run `38924784040` 的三平台检查和 Mac/Windows 打包成功 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| macOS Apple Silicon | DMG | 0.4.41 本机 Release/DMG 构建、安装版本与运行进程均已核验；DMG 校验有效；0.4.40 CI run `38924784040` 的三平台检查和 Mac/Windows 打包成功 | 0.4.41 CI；双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -50,7 +50,12 @@
 - 当前 Mac 返回 `output volume:missing value`、`output muted:missing value`，因此仅证明安全停用路径；实际音量变化和硬件/交互验收仍未完成。
 - 代码提交 `570bb50d5c111694a99c3da5cc879bfceffb051d` 的 CI run `38922598089` 全部成功。Mac artifact `12054578968`（3,985,907 bytes）DMG SHA-256 `86bd15787b81a3589802612c9b175b4b285ddd487c71cc5c6a4a8e587b6b47ae`，`hdiutil verify` 为 `VALID`；Windows artifact `12054549822`（2,297,257 bytes）NSIS 安装包 SHA-256 `4569e6c160486318ea2ecc77c75f6fbea850bedf84f67a33f9d8e1d74a263050`。两包均复制到桌面并通过 SHA-256 sidecar 校验；Windows 包尚未实机安装。
 
-## v0.4.40 当前交付核验（2026-10-16）
+## v0.4.41 当前交付核验（2026-10-16）
+
+- 修正 macOS 电源联动开启后的面板提示：DDC 不可读时明确说明后台仍监测 Quartz 单屏睡眠及显示器断开/重连，并准确说明物理断电但系统仍报告唤醒时的限制。
+- 基于 v0.4.40 已验证代码，版本升至 0.4.41；本机 Release/DMG 构建成功，DMG SHA-256 `4406e55cb78e1e6b3486007565c34c8f6ec97e795c328ec3c23638084afaec18` 且 `hdiutil verify` 为 `VALID`。安装前 0.4.40 App 已备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.41-app-install-20261016/`；当前 `/Applications/Screenguard.app` 为 0.4.41，运行二进制 SHA-256 `2b002ab54ab9bc6f2f466279ebb83fbf9bdae02b7597adb16d7890a7969cc07b` 与构建产物一致。0.4.41 三平台 CI 待验证。
+
+## v0.4.40 交付核验（2026-10-16）
 
 - macOS 原生后台联动新增 CoreGraphics `CGDisplayIsAsleep` 单屏睡眠传感器，在 DDC VCP `0xD6` 无法读取时作为独立来源；单屏状态变化可触发同步，多屏并发或与 DDC 冲突时不猜测来源。DDC 目标控制失败仍走 macOS 系统级待机/唤醒兜底。
 - 本地 Rust 单测 21/21、`cargo check`、仓库自检、前端脚本语法检查和版本一致性通过；Apple Silicon Release/DMG 构建成功。DMG SHA-256 `e6b241b1cbec338f0175de385b6e1c9ddaeb651bf1d9475f7d9a8b55bd49a9f5`，`hdiutil verify` 为 `VALID`；桌面副本及 sidecar 校验通过。
