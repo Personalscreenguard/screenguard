@@ -38,6 +38,9 @@
 
   .srow { display:grid; grid-template-columns:52px 1fr 40px; align-items:center; gap:10px; padding:5px 0; }
   .srow label { color:var(--dim); font-size:11.5px; }
+  .srow.mode-row { grid-template-columns:78px minmax(0,1fr) 48px; }
+  .mode-select { width:100%; min-width:0; padding:5px 7px; border:1px solid var(--border); border-radius:7px; background:#202635; color:var(--text); font:inherit; }
+  .mode-select:disabled { opacity:.65; }
   .hint { color:var(--dim); font-size:11px; padding:6px 0; line-height:1.5; }
   .ver { font-size:10px; color:var(--dim); font-weight:400; margin-left:6px; letter-spacing:.3px; }
   input[type=range]{ -webkit-appearance:none; width:100%; height:5px; border-radius:5px; background:rgba(255,255,255,.16); outline:none; }
@@ -109,11 +112,70 @@
   <div class="sec-label">显示器</div>
   <div class="scroll" id="scroll" style="flex:0 0 auto"><div class="empty">读取显示器…</div></div>
 
+  <div class="sec-label">显示器管理</div>
+  <div style="padding:0 8px">
+    <div class="grp" id="bdp-grp" style="display:none">
+      <div class="grp-h" id="bdp-head" role="button" tabindex="0" aria-expanded="false">
+        <div><div class="grp-title">🧰 BetterDisplay 控制</div><div class="grp-meta">镜像 · 排列 · 画中画 · 虚拟屏</div></div>
+        <div class="grp-right"><span class="badge">macOS</span><span id="bdp-caret">▸</span></div>
+      </div>
+      <div class="grp-body">
+        <div class="srow" style="grid-template-columns:52px minmax(0,1fr);gap:6px">
+          <label for="bdp-source">操作屏</label><select id="bdp-source" class="mode-select"><option value="">读取中…</option></select>
+        </div>
+        <div class="srow" style="grid-template-columns:52px minmax(0,1fr);gap:6px">
+          <label for="bdp-target">目标屏</label><select id="bdp-target" class="mode-select"><option value="">读取中…</option></select>
+        </div>
+        <div class="btnrow">
+          <button class="ibtn" data-bdp-action="set-main">设为主屏</button>
+          <button class="ibtn" data-bdp-action="mirror-on">镜像到目标</button>
+          <button class="ibtn" data-bdp-action="mirror-off">停止镜像</button>
+        </div>
+        <div class="btnrow">
+          <button class="ibtn" data-bdp-action="place-left">移到左侧</button>
+          <button class="ibtn" data-bdp-action="place-right">移到右侧</button>
+          <button class="ibtn" data-bdp-action="place-above">移到上方</button>
+          <button class="ibtn" data-bdp-action="place-below">移到下方</button>
+        </div>
+        <div class="btnrow">
+          <button class="ibtn" data-bdp-action="pip-on">画中画到目标</button>
+          <button class="ibtn" data-bdp-action="pip-off">关闭画中画</button>
+          <button class="ibtn" data-bdp-action="stream-on">屏幕串流</button>
+          <button class="ibtn" data-bdp-action="stream-off">停止串流</button>
+        </div>
+        <div class="btnrow">
+          <button class="ibtn" data-bdp-action="hdr-on">HDR 开</button>
+          <button class="ibtn" data-bdp-action="hdr-off">HDR 关</button>
+          <button class="ibtn" data-bdp-action="protect-resolution-on">锁分辨率</button>
+          <button class="ibtn" data-bdp-action="protect-resolution-off">解锁分辨率</button>
+        </div>
+        <div class="btnrow">
+          <button class="ibtn" data-bdp-action="protect-refresh-on">锁刷新率</button>
+          <button class="ibtn" data-bdp-action="protect-refresh-off">解锁刷新率</button>
+          <button class="ibtn" data-bdp-action="protect-rotation-on">锁旋转</button>
+          <button class="ibtn" data-bdp-action="protect-rotation-off">解锁旋转</button>
+        </div>
+        <div class="btnrow">
+          <button class="ibtn" data-bdp-action="virtual-16-9">创建 16:9 虚拟屏</button>
+          <button class="ibtn" data-bdp-action="virtual-21-9">创建 21:9 虚拟屏</button>
+          <button class="ibtn" data-bdp-action="connect-on">重新连接</button>
+          <button class="ibtn" data-bdp-action="connect-off">断开所选屏</button>
+        </div>
+        <div class="srow" style="grid-template-columns:72px minmax(0,1fr) auto;gap:6px">
+          <label for="bdp-input-code">输入源码</label>
+          <input id="bdp-input-code" inputmode="numeric" placeholder="VCP 代码 1–255">
+          <button class="ibtn" data-bdp-action="input-source">切换</button>
+        </div>
+        <div class="hint" id="bdp-hint">需要 BetterDisplay 正在运行并启用 CLI 集成；PIP/串流等部分能力需要 Pro。断开操作保留虚拟屏配置。</div>
+      </div>
+    </div>
+  </div>
+
   <div class="sec-label">屏幕电源 <span class="ver" id="pw-badge"></span></div>
   <div class="grid" id="power">
     <div class="cell" id="cell-offall"><span class="ico">🌙</span><span class="lbl">全部待机</span></div>
     <div class="cell" id="cell-wake"><span class="ico">☀️</span><span class="lbl">唤醒屏幕</span></div>
-    <div class="cell" id="cell-link"><span class="ico">🔗</span><span class="lbl">联动：关</span></div>
+    <div class="cell" id="cell-link"><span class="ico">🔗</span><span class="lbl">电源联动：关</span></div>
   </div>
   <div class="hint" id="power-hint" style="padding:0 10px 2px"></div>
   <div class="hint" id="hotkey-line" style="padding:0 10px 6px">快捷键：读取中…</div>
@@ -190,10 +252,113 @@ function sendVCP(kind, id, val){
   })();
 }
 
+const bdpPanel = { displays: [], loaded: false };
+function bdpSetHint(message, error=false){
+  const hint = document.getElementById('bdp-hint');
+  if (!hint) return;
+  hint.textContent = message || '';
+  hint.style.color = error ? '#ef6a6a' : '';
+}
+function bdpRefreshActionAvailability(){
+  const source = document.getElementById('bdp-source');
+  const target = document.getElementById('bdp-target');
+  const count = bdpPanel.displays.length;
+  const hasSource = !!(source && source.value);
+  const hasTarget = !!(target && target.value && target.value !== source?.value);
+  document.querySelectorAll('#bdp-grp [data-bdp-action]').forEach(button=>{
+    const action = button.dataset.bdpAction || '';
+    const needsTarget = action.startsWith('place-') || ['mirror-on','pip-on','stream-on'].includes(action);
+    button.disabled = !hasSource || (needsTarget && (count < 2 || !hasTarget));
+  });
+}
+function loadBetterDisplayPanel(displays){
+  const card = document.getElementById('bdp-grp');
+  const source = document.getElementById('bdp-source');
+  const target = document.getElementById('bdp-target');
+  if (!card || !source || !target) return;
+  bdpPanel.displays = Array.isArray(displays) ? displays : [];
+  const oldSource = source.value;
+  const oldTarget = target.value;
+  for (const select of [source, target]) {
+    select.replaceChildren();
+    if (!bdpPanel.displays.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = '未检测到显示器';
+      select.appendChild(option);
+      continue;
+    }
+    for (const display of bdpPanel.displays) {
+      const option = document.createElement('option');
+      option.value = display.id;
+      option.textContent = `${display.name || display.id}${display.main ? '（主屏）' : ''} · ${display.resolution || '未知分辨率'}${display.hz ? ` · ${display.hz}Hz` : ''}`;
+      select.appendChild(option);
+    }
+  }
+  if (bdpPanel.displays.some(display=>display.id === oldSource)) source.value = oldSource;
+  else source.value = bdpPanel.displays.find(display=>display.main)?.id || bdpPanel.displays[0]?.id || '';
+  if (bdpPanel.displays.some(display=>display.id === oldTarget && display.id !== source.value)) target.value = oldTarget;
+  else target.value = bdpPanel.displays.find(display=>display.id !== source.value)?.id || '';
+  bdpRefreshActionAvailability();
+  if (!bdpPanel.displays.length) bdpSetHint('未检测到显示器；连接显示器后点面板底部“刷新”。', true);
+}
+function setupBetterDisplayPanel(){
+  if (bdpPanel.loaded) return;
+  bdpPanel.loaded = true;
+  const group = document.getElementById('bdp-grp');
+  const head = document.getElementById('bdp-head');
+  const caret = document.getElementById('bdp-caret');
+  const toggle = ()=>{
+    const open = group.classList.toggle('open');
+    head.setAttribute('aria-expanded', String(open));
+    caret.textContent = open ? '▾' : '▸';
+  };
+  head.addEventListener('click', toggle);
+  head.addEventListener('keydown', event=>{
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); }
+  });
+  document.getElementById('bdp-source').addEventListener('change', bdpRefreshActionAvailability);
+  document.getElementById('bdp-target').addEventListener('change', bdpRefreshActionAvailability);
+  document.querySelectorAll('#bdp-grp [data-bdp-action]').forEach(button=>{
+    button.addEventListener('click', async ()=>{
+      const action = button.dataset.bdpAction;
+      const source = document.getElementById('bdp-source');
+      const target = document.getElementById('bdp-target');
+      const input = document.getElementById('bdp-input-code');
+      if (action === 'connect-off' && !confirm('断开所选显示器可能会让该屏幕暂时消失。继续吗？')) return;
+      if (action === 'input-source' && !/^[1-9]\d{0,2}$/.test(input.value.trim())) {
+        bdpSetHint('请输入 1–255 的 VCP 输入源代码。', true);
+        input.focus();
+        return;
+      }
+      const previousDisabled = button.disabled;
+      button.disabled = true;
+      bdpSetHint('正在执行 BetterDisplay 操作…');
+      try {
+        const result = await invoke('betterdisplay_action', {
+          action,
+          displayId: source.value,
+          targetId: target.value || null,
+          value: action === 'input-source' ? input.value.trim() : null
+        });
+        bdpSetHint(String(result || '操作已提交。'));
+        if (action === 'input-source') input.value = '';
+        await load();
+      } catch(error) {
+        bdpSetHint('操作失败：' + (error && error.message ? error.message : String(error)), true);
+      } finally {
+        button.disabled = previousDisabled;
+        bdpRefreshActionAvailability();
+      }
+    });
+  });
+}
+
 async function load(){
   const box = document.getElementById('scroll');
   try {
     const ds = await invoke('get_displays');
+    loadBetterDisplayPanel(ds);
     if(!ds||!ds.length){ box.innerHTML='<div class="empty">未检测到显示器</div>'; return; }
     box.innerHTML = ds.map(d=>{
       const hasBri = d.ddc || d.brightness != null; // DDC 或 WMI（内屏）亮度
@@ -205,7 +370,7 @@ async function load(){
       let hint = '';
       if (hasBri && !d.ddc) hint = '<div class="hint">内屏：亮度走系统 WMI；喇叭/耳机音量用上方「系统音量」。</div>';
       else if (!hasBri && !d.ddc) hint = '<div class="hint">此屏不走 DDC/CI，无法单独控制；用上方「全部待机」可让它与其它屏一起待机</div>';
-      return '<div class="grp open">'+
+      return '<div class="grp open" data-display-id="'+d.id+'">'+
         '<div class="grp-h">'+
           '<div><div class="grp-title">'+(d.name||d.id)+'</div><div class="grp-meta">'+(d.resolution||'')+(d.hz?' · '+d.hz+'Hz':'')+(d.main?' · 主屏':'')+(d.color_profile?' · '+d.color_profile:'')+'</div></div>'+
           '<div class="grp-right">'+badge+'</div>'+
@@ -213,6 +378,7 @@ async function load(){
         '<div class="grp-body">'+briRow+volRow+powerRow+hint+'</div>'+
       '</div>';
     }).join('');
+    void loadPanelDisplayModes(ds, box);
     box.querySelectorAll('input[type=range]').forEach(sl=>{
       sl.addEventListener('input', ev=>{ const v=ev.target.value; sl.parentElement.querySelector('.val').textContent=v+'%'; sendVCP(sl.dataset.k, sl.dataset.id, v); });
     });
@@ -236,6 +402,48 @@ async function load(){
       };
     });
   } catch(e){ box.innerHTML='<div class="empty">无法读取显示器：请确认显示器已连接，并检查依赖是否就绪</div>'; }
+}
+
+async function loadPanelDisplayModes(displays, box){
+  for(const display of displays){
+    try{
+      const modes = await invoke('get_display_modes', { displayId:display.id });
+      if(!Array.isArray(modes) || !modes.length) continue;
+      const group = [...box.querySelectorAll('.grp')].find(el=>el.dataset.displayId===display.id);
+      const body = group && group.querySelector('.grp-body');
+      if(!body) continue;
+      const row = document.createElement('div');
+      row.className = 'srow mode-row';
+      const label = document.createElement('label'); label.textContent = '分辨率';
+      const select = document.createElement('select'); select.className = 'mode-select';
+      select.title = '切换时画面可能短暂黑屏；系统未应用时会自动恢复原布局';
+      let activeMode = null;
+      for(const mode of modes){
+        const option = document.createElement('option');
+        option.value = String(mode.mode);
+        option.textContent = mode.resolution+' · '+mode.hz+'Hz'+(mode.scaled?' · 缩放':'');
+        if(mode.current){ option.selected = true; activeMode = String(mode.mode); }
+        select.appendChild(option);
+      }
+      const state = document.createElement('span'); state.className = 'val'; state.textContent = '当前';
+      row.append(label, select, state); body.appendChild(row);
+      select.addEventListener('change', async ()=>{
+        const selectedMode = Number(select.value);
+        select.disabled = true; state.textContent = '切换中…';
+        try{
+          const message = await invoke('set_display_mode', { displayId:display.id, mode:selectedMode });
+          activeMode = String(selectedMode); state.textContent = '已核验';
+          pwHint(message || '显示模式切换已回读核验');
+          await new Promise(resolve=>setTimeout(resolve,800));
+          await load();
+        }catch(error){
+          if(activeMode!==null) select.value = activeMode;
+          state.textContent = '未切换';
+          pwHint('显示模式切换失败：'+(error&&error.message?error.message:error), true);
+        }finally{ select.disabled = false; }
+      });
+    }catch(_){ /* Windows/Linux 显示模式由各自平台控制 */ }
+  }
 }
 
 // ============ 快捷控制（v0.3.2：色彩三合一循环 / 亮度同步 / HDR / 任意窗口铺满） ============
@@ -396,6 +604,11 @@ document.getElementById('mute-btn2').onclick = async ()=>{
 (async ()=>{
   const el = document.getElementById('hotkey-line');
   try {
+    const platform = await invoke('get_platform');
+    if (platform === 'macos') {
+      el.textContent = '全局快捷键：macOS 暂不支持；可用本面板的待机、唤醒和窗口还原按钮';
+      return;
+    }
     const hk = await invoke('hotkey_start');
     el.innerHTML = '快捷键：<span class="hk">' + hk + '</span> 屏幕待机/唤醒　<span class="hk">Ctrl+Alt+R</span> 还原被铺满的窗口（铺满后界面被盖住也能按）';
   } catch(e){
@@ -407,7 +620,7 @@ document.getElementById('mute-btn2').onclick = async ()=>{
 // ============ 链路记录折叠 ============
 const evtFold = document.getElementById('evt-fold');
 document.getElementById('evt-fold-h').onclick = ()=>{ evtFold.classList.toggle('open'); };
-document.getElementById('refresh-btn').onclick=load;
+document.getElementById('refresh-btn').onclick=()=>{ load(); loadBatteries(); };
 document.getElementById('main-btn').onclick=()=>invoke('open_main');
 document.getElementById('main-btn2').onclick=()=>invoke('open_main');
 document.getElementById('quit-btn').onclick=()=>invoke('quit_app');
@@ -496,7 +709,8 @@ async function loadAudio(){
   } catch(e){ /* 预览模式静默 */ }
 }
 
-// 电池设备（Windows：Battery 设备类枚举）
+// 电池设备（Windows 枚举连接设备；macOS 展示内置电池）
+let batteryLoadBusy = false;
 function battIcon(conn){
   if (conn === '内置') return '💻';
   if (conn === '蓝牙') return '🎧';
@@ -539,13 +753,24 @@ function battChart(arr){
     + (delta != null && delta !== 0 ? '（' + (delta > 0 ? '+' : '') + delta + '%' : '') + rate + '</div>';
 }
 async function loadBatteries(){
+  if (batteryLoadBusy) return;
+  batteryLoadBusy = true;
   try {
     const p = await invoke('get_platform');
-    if (p !== 'windows') return;
+    if (p !== 'windows' && p !== 'macos') return;
     const list = await invoke('get_batteries');
-    document.getElementById('batt-sec').style.display = '';
+    const section = document.getElementById('batt-sec');
+    section.style.display = '';
+    if (p === 'macos') section.textContent = 'Mac 电池状态';
     const bnote = document.getElementById('batt-note');
-    if (bnote) bnote.style.display = (list && list.some(x => x.health >= 0)) ? '' : 'none';
+    if (bnote) {
+      if (p === 'macos') {
+        bnote.textContent = 'macOS 提供内置电池电量和电源状态；外接蓝牙/USB 设备电量及电池健康度暂不在此面板采集。';
+        bnote.style.display = '';
+      } else {
+        bnote.style.display = (list && list.some(x => x.health >= 0)) ? '' : 'none';
+      }
+    }
     const box = document.getElementById('batt-box');
     if (!list || !list.length) {
       box.innerHTML = '<div style="padding:0 8px"><div class="empty">未检测到带电池的设备</div></div>';
@@ -583,6 +808,7 @@ async function loadBatteries(){
       '</div>';
     }).join('');
   } catch(e){ /* 预览模式静默 */ }
+  finally { batteryLoadBusy = false; }
 }
 
 invoke('get_version')
@@ -590,11 +816,14 @@ invoke('get_version')
   .catch(() => { /* 预览模式静默 */ });
 
 // ============ 屏幕电源（方案A：纯本地，不依赖网络） ============
-// 「全部待机」走 Windows 系统级指令：一次让全部屏待机，含不走 DDC 的屏（本机小米）。
-// 「唤醒」合成输入事件；「联动」轮询在线显示器快照，主控屏离线→其余屏跟着 DDC 待机。
+// 「全部待机」走平台系统级指令：一次让全部屏待机，含不走 DDC 的屏。
+// 「唤醒」走平台唤醒机制；Windows 联动读取 VCP 0xD6，macOS 联动使用在线显示器快照。
 const pwHintEl = document.getElementById('power-hint');
 function pwHint(t, err){ pwHintEl.textContent = t || ''; pwHintEl.style.color = err ? '#ef6a6a' : ''; }
-pwHint('本地模式可用：系统级待机（含不走 DDC 的屏）');
+if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen('power-link-status', event => pwHint(String(event.payload || '')));
+}
+pwHint('本地模式可用：系统级待机（含不走 DDC 的屏）；macOS 使用系统显示器电源接口');
 
 document.getElementById('cell-offall').onclick = async (ev)=>{
   flash(ev.currentTarget);
@@ -608,68 +837,282 @@ document.getElementById('cell-wake').onclick = async (ev)=>{
   catch(e){ pwHint('唤醒失败：' + (e && e.message ? e.message : e), true); }
 };
 
-// 联动状态机：只对支持 DDC 的屏下发动作（无 DDC 的屏由「全部待机」覆盖）
-const link = { on:false, timer:null, last:null, pend:null, pendCount:0, until:0, ddcIds:[] };
+// Windows/macOS 的 DDC 电源联动由 Rust 原生后台服务运行；面板快照只用于确认在线设备。
+// 偏好保存到本机。
+const LINK_KEY = 'sg_power_link_enabled';
+const link = { on:false, supported:false, platform:null, busy:false, timer:null, last:null, pend:null, pendCount:0, displayIds:[], expected:new Map(), powerReadRetryAt:new Map(), preferenceRevision:0 };
+function powerKind(mode){
+  if (mode === 1) return 'on';
+  if (mode === 2 || mode === 3 || mode === 4 || mode === 5) return 'off';
+  return null;
+}
 function paintLink(){
   const el = document.getElementById('cell-link');
   el.classList.toggle('active', link.on);
-  el.querySelector('.lbl').textContent = link.on ? '联动：开' : '联动：关';
+  el.querySelector('.lbl').textContent = link.on ? '电源联动：开' : '电源联动：关';
+}
+async function linkSample(){
+  const online = await invoke('display_snapshot');
+  if (!Array.isArray(online) || !online.length) return null;
+  const unknown = online.filter(id => !link.displayIds.includes(id));
+  if (unknown.length) {
+    try {
+      const ds = await invoke('get_displays');
+      for (const d of (ds || [])) {
+        if (!link.displayIds.includes(d.id)) link.displayIds.push(d.id);
+      }
+    } catch(e) { /* 在线快照仍可用于判断拔线/断电 */ }
+  }
+  const ids = online.filter(id => link.displayIds.includes(id));
+  // UI 快照不阻塞读取 DDC；macOS 电源状态由独立 Rust 后台线程轮询。
+  if (link.platform === 'macos') {
+    return { online:online.slice().sort(), power:new Map(), unreadable:ids.slice() };
+  }
+  const values = await Promise.all(ids.map(async id => {
+    if (Date.now() < (link.powerReadRetryAt.get(id) || 0)) return { id, state:null, skipped:true };
+    try {
+      const mode = Number(await invoke('get_display_power', { displayId:id }));
+      const state = powerKind(mode);
+      if (!state) throw new Error('未知的 VCP 0xD6 电源值');
+      link.powerReadRetryAt.delete(id);
+      return { id, state };
+    } catch(e) {
+      link.powerReadRetryAt.set(id, Date.now() + 5000);
+      return { id, state:null, error:e && e.message ? e.message : String(e) };
+    }
+  }));
+  const power = new Map();
+  const unreadable = [];
+  for (const v of values) {
+    if (v.state) {
+      power.set(v.id, v.state);
+      continue;
+    }
+    unreadable.push(v.id);
+    const previous = link.last && link.last.power.get(v.id);
+    // DDC 读取失败只能说明状态未知，不能据此推断用户已关闭屏幕。
+    if (previous) power.set(v.id, previous);
+  }
+  return { online:online.slice().sort(), power, unreadable };
+}
+function linkSignature(sample){
+  return JSON.stringify({ online:sample.online, power:[...sample.power.entries()].sort((a,b)=>a[0].localeCompare(b[0])) });
 }
 async function linkTick(){
-  if (!link.on) return;
+  if (!link.on || link.busy) return;
+  link.busy = true;
   try {
-    const snap = await invoke('display_snapshot');
-    if (!Array.isArray(snap) || !snap.length) return;
-    if (link.last === null) { link.last = snap.slice(); return; }
-    const gone = link.last.filter(x => !snap.includes(x));
-    const back = snap.filter(x => !link.last.includes(x));
-    if (!gone.length && !back.length) {
-      link.pend = null; link.pendCount = 0;    // 状态稳定，清掉等待确认的中间态
+    const sample = await linkSample();
+    if (!sample) return;
+    if (link.last === null) {
+      link.last = sample;
+      if (!sample.power.size && link.platform !== 'macos') {
+        pwHint('联动已开启，但目前无法读取显示器电源状态；检查 BetterDisplay CLI 集成。', true);
+      }
       return;
     }
-    // 防抖：同一状态连续 2 次采样才动作（切换输入源/重连瞬间会有抖动）。
-    // 关键：这里**不能**提前更新 link.last——否则下一次采样就看不到变化，
-    // 永远凑不满 2 次确认，联动会彻底不触发（实测踩过）。
-    const sig = snap.join(',');
-    if (link.pend === sig) {
-      link.pendCount++;
-    } else {
-      link.pend = sig;
-      link.pendCount = 1;
-      return;                                  // 第一次见到该状态，先观察
+    const changed = [];
+    for (const [id, state] of sample.power) {
+      const old = link.last.power.get(id);
+      if (old && old !== state) changed.push({ id, state, expected:link.expected.get(id) === state });
     }
+    const gone = link.last.online.filter(id => !sample.online.includes(id));
+    const back = sample.online.filter(id => !link.last.online.includes(id));
+    const changedIds = new Set(changed.map(x => x.id));
+    for (const id of gone) if (!changedIds.has(id)) changed.push({ id, state:'off', expected:link.expected.get(id) === 'off' });
+    for (const id of back) if (!changedIds.has(id)) changed.push({ id, state:'on', expected:link.expected.get(id) === 'on' });
+    if (!changed.length) {
+      link.last = sample;
+      link.pend = null; link.pendCount = 0;
+      return;
+    }
+    const sig = linkSignature(sample);
+    if (link.pend === sig) link.pendCount++;
+    else { link.pend = sig; link.pendCount = 1; return; }
     if (link.pendCount !== 2) return;
-    link.last = snap.slice();                  // 连续两次确认后才更新基线
+    link.last = sample; // 只有连续两次相同采样后才更新基线
     link.pend = null; link.pendCount = 0;
-    if (Date.now() < link.until) return;      // 冷却：动作后 15 秒内不重复触发
-    const others = snap.filter(id => link.ddcIds.includes(id));
-    const mode = gone.length ? 4 : 1;         // 有屏离线→其余待机；有屏回来→其余点亮
-    if (!others.length) return;
-    link.until = Date.now() + 15000;
-    pwHint((mode === 4 ? '检测到显示器离线 → 其余屏跟着待机…' : '检测到显示器回来 → 其余屏跟着点亮…'));
-    for (const id of others) { try { await invoke('set_display_power', { displayId: id, mode: mode }); } catch(e){} }
-    pwHint('已联动' + (mode === 4 ? '待机' : '点亮') + ' ' + others.length + ' 台（DDC）');
-  } catch(e){ /* 静默 */ }
+    for (const x of changed) if (link.expected.has(x.id)) link.expected.delete(x.id);
+    const external = changed.filter(x => !x.expected);
+    if (!external.length) return; // 这是本功能刚下发的状态变化，不应反向触发
+    const directions = new Set(external.map(x => x.state));
+    if (directions.size !== 1) {
+      pwHint('检测到多块屏同时切换到不同电源状态；为避免互相覆盖，本次未联动');
+      return;
+    }
+    const direction = [...directions][0];
+    const sources = new Set(external.map(x => x.id));
+    const others = sample.online.filter(id => !sources.has(id));
+    const mode = direction === 'off' ? 4 : 1;
+    if (!others.length) {
+      pwHint('已检测到屏幕' + (direction === 'off' ? '关闭' : '打开') + '；没有其它在线且支持 DDC 电源控制的屏可联动');
+      return;
+    }
+    pwHint(mode === 4 ? '检测到一块屏已关闭 → 正在让其它屏待机…' : '检测到一块屏已打开 → 正在唤醒其它屏…');
+    if (link.platform === 'macos') {
+      // 先对剩余屏尝试逐屏 DDC 控制并回读核验；此链路不可读时退回 macOS 全屏待机/唤醒。
+      const errors = [];
+      let verified = 0;
+      for (const id of others) {
+        link.expected.set(id, direction);
+        try {
+          await invoke('set_display_power', { displayId:id, mode });
+          await new Promise(resolve=>setTimeout(resolve, mode === 4 ? 1200 : 2200));
+          const actual = Number(await invoke('get_display_power', { displayId:id }));
+          if (powerKind(actual) !== direction) throw new Error('DDC 回读状态与目标不一致（'+actual+'）');
+          verified++;
+        } catch(e) {
+          link.expected.delete(id);
+          errors.push(e && e.message ? e.message : String(e));
+        }
+      }
+      if (verified === others.length) {
+        pwHint('已通过 DDC 回读核验：其余 '+verified+' 台屏幕已'+(direction === 'off' ? '待机' : '唤醒'));
+        return;
+      }
+      for (const id of others) link.expected.set(id, direction);
+      try {
+        await invoke(mode === 4 ? 'screen_off' : 'screen_wake');
+        const reason = errors.length ? '；DDC 未能核验：'+errors[0] : '';
+        pwHint('已发送 macOS 系统级'+(mode === 4 ? '待机' : '唤醒')+'请求，作用于全部当前显示器'+reason+'。macOS 未提供逐屏结果回读，请观察副屏状态。');
+      } catch(e) {
+        pwHint('macOS 屏幕联动失败：'+(e && e.message ? e.message : String(e)), true);
+      }
+      return;
+    }
+    let ok = 0, failed = 0;
+    const errors = [];
+    for (const id of others) {
+      const target = mode === 4 ? 'off' : 'on';
+      link.expected.set(id, target);
+      try { await invoke('set_display_power', { displayId:id, mode }); ok++; }
+      catch(e) { link.expected.delete(id); failed++; errors.push(e && e.message ? e.message : String(e)); }
+    }
+    if (failed && link.platform === 'macos') {
+      // macOS 没有公开的逐屏软件待机接口；DDC 失败时用系统级待机/唤醒兜底。
+      // 这会作用于当前所有仍连接的显示器，但可覆盖 DDC 不可写的目标屏。
+      for (const id of link.displayIds) link.expected.set(id, direction);
+      try {
+        await invoke(mode === 4 ? 'screen_off' : 'screen_wake');
+        pwHint('单屏 DDC 控制失败，已改用 macOS 系统级' + (mode === 4 ? '待机' : '唤醒') + '；此方式会作用于所有当前连接的屏幕');
+        return;
+      } catch(e) {
+        const fallbackError = e && e.message ? e.message : String(e);
+        pwHint('电源联动失败：DDC ' + (errors[0] || '命令失败') + '；macOS 系统级备用控制也失败：' + fallbackError, true);
+        return;
+      }
+    }
+    pwHint('电源联动完成：' + (mode === 4 ? '待机' : '唤醒') + ' ' + ok + ' 台' + (failed ? ('，失败 ' + failed + ' 台：' + errors[0]) : ''));
+  } catch(e){ pwHint('电源联动读取失败：' + (e && e.message ? e.message : e), true); }
+  finally { link.busy = false; }
+}
+async function startLink(){
+  if (!link.supported) { pwHint('电源联动目前仅支持 macOS / Windows'); return; }
+  if (link.on) return;
+  try { await invoke('set_power_link_preference', { enabled:true }); }
+  catch(e){ pwHint('保存电源联动状态失败：'+(e&&e.message?e.message:e), true); return; }
+  link.on = true; link.last = null; link.pend = null; link.pendCount = 0; link.expected.clear();
+  link.powerReadRetryAt.clear();
+  try {
+    const ds = await invoke('get_displays');
+    link.displayIds = (ds || []).map(d=>d.id);
+  } catch(e) { link.displayIds = []; }
+  try { localStorage.setItem(LINK_KEY, '1'); } catch(e) {}
+  paintLink();
+  await linkTick();
+  const initial = link.last;
+  if (!initial || !initial.online.length) {
+    link.on = false;
+    link.last = null;
+    try { await invoke('set_power_link_preference', { enabled:false }); } catch(e) {}
+    try { localStorage.setItem(LINK_KEY, '0'); } catch(e) {}
+    paintLink();
+    pwHint('电源联动未启用：macOS 没有检测到在线显示器；请刷新显示器列表后重试。', true);
+    return;
+  }
+  const ddcUnavailable = !initial.power.size || initial.unreadable.length > 0;
+  if (link.platform !== 'macos' && ddcUnavailable) {
+    link.on = false;
+    link.last = null;
+    try { await invoke('set_power_link_preference', { enabled:false }); } catch(e) {}
+    try { localStorage.setItem(LINK_KEY, '0'); } catch(e) {}
+    paintLink();
+    pwHint('电源联动未启用：无法读取显示器 DDC 电源状态。', true);
+    return;
+  }
+  if (link.platform === 'macos') {
+    pwHint('联动已开启：macOS 原生后台服务优先读取 BetterDisplay DDC VCP 0xD6，同步其它屏幕；读不到时回退到系统断开/重连事件。请保持 Screenguard 和 BetterDisplay 运行，实际效果取决于显示器与连接链路。');
+    return;
+  }
+  pwHint('电源联动已开启：Windows 原生后台服务会检测 DDC/CI VCP 0xD6 与显示器连接状态；保持 Screenguard 运行即可');
+}
+function stopLink(){
+  link.on = false;
+  if (link.timer) clearInterval(link.timer);
+  link.timer = null; link.last = null; link.pend = null; link.pendCount = 0; link.expected.clear();
+  invoke('set_power_link_preference', { enabled:false }).catch(()=>{});
+  try { localStorage.setItem(LINK_KEY, '0'); } catch(e) {}
+  paintLink();
+  pwHint('电源联动已关闭');
 }
 document.getElementById('cell-link').onclick = async (ev)=>{
   flash(ev.currentTarget);
-  link.on = !link.on;
-  paintLink();
-  if (link.on) {
-    link.last = null; link.pend = null; link.pendCount = 0; link.until = 0;
-    try { const ds = await invoke('get_displays'); link.ddcIds = (ds||[]).filter(d=>d.ddc).map(d=>d.id); } catch(e){ link.ddcIds = []; }
-    link.timer = setInterval(linkTick, 2500);
-    pwHint('联动已开（每 2.5 秒检测）：屏离线→其余屏跟着待机／回来→跟着点亮。⚠️ 只有真正从系统里消失的屏（拔线／断电）才检测得到；智能显示器用遥控关机一般不改变接口信号，检测不到');
-  } else {
-    if (link.timer) clearInterval(link.timer);
-    link.timer = null;
-    pwHint('联动已关');
-  }
+  if (link.on) stopLink(); else await startLink();
 };
+async function syncPowerLinkPreference(){
+  const revision = ++link.preferenceRevision;
+  let enabled = false;
+  try {
+    enabled = Boolean(await invoke('get_power_link_preference'));
+    localStorage.setItem(LINK_KEY, enabled ? '1' : '0');
+  } catch(e) { try { enabled = localStorage.getItem(LINK_KEY) === '1'; } catch(_) {} }
+  if (revision !== link.preferenceRevision) return;
+  if (!link.platform) {
+    try {
+      link.platform = await invoke('get_platform');
+      link.supported = link.platform === 'windows' || link.platform === 'macos';
+    } catch(e) {}
+  }
+  if (enabled && link.supported && !link.on) await startLink();
+  else if (!enabled && link.on) stopLink();
+}
+window.applyPowerLinkPreference = async enabled => {
+  ++link.preferenceRevision;
+  try { localStorage.setItem(LINK_KEY, enabled ? '1' : '0'); } catch(e) {}
+  if (enabled && !link.on) await startLink();
+  else if (!enabled && link.on) stopLink();
+  paintLink();
+};
+// 主窗口里的显式开关通过共享偏好同步到隐藏面板；面板显示时再核对一次，防止首次加载竞态。
+window.addEventListener('focus', syncPowerLinkPreference);
+window.addEventListener('storage', ev => {
+  if (ev.key === LINK_KEY) syncPowerLinkPreference();
+});
 // 按平台调整文案/可用性：
 // Windows 没有内建 P3 屏，「对齐Mac」的等价语义是「把主屏色彩配置对齐到其它屏」；
 // Linux 端这些能力尚未实现，置灰并标注，避免点了只弹错。
 invoke('get_platform').then(p=>{
+  link.platform = p;
+  link.supported = p === 'windows' || p === 'macos';
+  const betterDisplayGroup = document.getElementById('bdp-grp');
+  if (betterDisplayGroup) betterDisplayGroup.style.display = p === 'macos' ? '' : 'none';
+  setupBetterDisplayPanel();
+  if (!link.supported) {
+    const linkEl = document.getElementById('cell-link');
+    linkEl.title = '电源联动目前仅支持 macOS / Windows';
+    linkEl.style.opacity = '0.55';
+    linkEl.querySelector('.lbl').textContent = '联动仅限 macOS / Windows';
+  } else {
+    const linkEl = document.getElementById('cell-link');
+    linkEl.title = p === 'macos'
+      ? '原生后台服务优先读取 BetterDisplay DDC VCP 0xD6；失败时回退到系统显示器断开/重连事件'
+      : '显示器需支持 DDC/CI VCP 0xD6 电源控制';
+    invoke('get_power_link_preference').then(enabled=>{
+      localStorage.setItem(LINK_KEY, enabled ? '1' : '0');
+      if (enabled) startLink();
+      else syncPowerLinkPreference();
+    }).catch(()=>syncPowerLinkPreference());
+  }
   const align=document.getElementById('cell-align');
   if(p==='windows'){
     align.querySelector('.ico').textContent='🖥️';
@@ -688,6 +1131,8 @@ invoke('get_platform').then(p=>{
 load();
 loadAudio();
 loadBatteries();
+setInterval(()=>{ if (!document.hidden) loadBatteries(); }, 60000);
+document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) loadBatteries(); });
 refreshAutostart();
 
 // ============ 联网增强（方案B：ADB 精细控制，完全可选） ============
@@ -695,6 +1140,9 @@ refreshAutostart();
 // 没有 ADB → 上面方案A 的本地能力照常，互不影响。
 const adbHintEl = document.getElementById('adb-hint');
 function adbSay(t, err){ adbHintEl.textContent = t || ''; adbHintEl.style.color = err ? '#ef6a6a' : ''; }
+invoke('get_platform').then(p=>{
+  if (p === 'macos') adbHintEl.textContent = 'macOS 可使用 Android SDK，或点击「获取 ADB」安装 Google 官方 Platform-Tools；安装前会确认 SDK 条款。显示器需开启网络 ADB 调试。';
+}).catch(()=>{});
 
 // 检测：adb 是否存在 + 已连接哪些设备
 document.getElementById('cell-adbscan').onclick = async (ev)=>{
@@ -707,7 +1155,7 @@ document.getElementById('cell-adbscan').onclick = async (ev)=>{
     if (st.available) {
       adbSay('adb 已就绪：' + st.path + (devs.length ? ('｜已连接：' + devs.join('、')) : '｜尚未连接显示器（点「连接显示器」）'));
     } else {
-      adbSay('未找到 adb。点「获取 ADB」自动下载，或手动把 platform-tools 放到 %LOCALAPPDATA%\\screenguard_adb\\。方案A 本地功能不受影响。');
+      adbSay(st.tip || '未找到 adb。点击「获取 ADB」安装 Platform-Tools；本地显示器控制不受影响。');
     }
   } catch(e){ adbSay('检测失败：' + (e && e.message ? e.message : e), true); }
 };
@@ -715,13 +1163,23 @@ document.getElementById('cell-adbscan').onclick = async (ev)=>{
 // 获取 ADB：自动下载 Android Platform Tools 并解压
 document.getElementById('cell-adbdl').onclick = async (ev)=>{
   flash(ev.currentTarget);
-  adbSay('正在下载 Android Platform Tools（约 5MB，慢的话请等一会）…');
+  let platform = 'windows';
   try {
+    platform = await invoke('get_platform');
+    if (platform === 'macos') {
+      const accepted = window.confirm('将从 Google 官方下载 Android SDK Platform-Tools 到 Screenguard 应用数据目录。继续即表示你同意 Android SDK Platform-Tools 条款。条款：https://developer.android.com/tools/releases/platform-tools');
+      if (!accepted) { adbSay('已取消下载；其他本地显示器功能不受影响。'); return; }
+      adbSay('正在下载并验证 Google 官方 Android Platform-Tools…');
+    } else {
+      adbSay('正在下载 Android Platform Tools（约 5MB，慢的话请等一会）…');
+    }
     const p = await invoke('adb_download');
     adbSay('已就绪：' + p);
     document.getElementById('adb-badge').textContent = '就绪';
   } catch(e){
-    adbSay('自动下载失败：' + (e && e.message ? e.message : e) + '（可手动下载 platform-tools 解压到 %LOCALAPPDATA%\\screenguard_adb\\；装了 Android 模拟器或投屏工具的话，它们自带的 adb 也会被自动识别）', true);
+    adbSay(platform === 'macos'
+      ? 'ADB 安装失败：' + (e && e.message ? e.message : e)
+      : '自动下载失败：' + (e && e.message ? e.message : e) + '（可手动下载 platform-tools 解压到 %LOCALAPPDATA%\\screenguard_adb\\；装了 Android 模拟器或投屏工具的话，它们自带的 adb 也会被自动识别）', true);
   }
 };
 

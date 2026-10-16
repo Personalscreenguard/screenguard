@@ -1,5 +1,8 @@
-use super::{run_cmd, which, DisplayInfo};
+use super::{run_cmd, which, BatteryInfo, DisplayInfo, DisplayMode};
 use serde::{Deserialize, Serialize};
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 type CGDisplayConfigRef = *mut std::ffi::c_void;
 
@@ -13,9 +16,384 @@ extern "C" {
 
 const BETTERDISPLAY: &str = "/Applications/BetterDisplay.app/Contents/MacOS/BetterDisplay";
 const K_CG_CONFIGURE_PERMANENTLY: u32 = 2;
+const POWER_DDC_TIMEOUT: Duration = Duration::from_secs(6);
+
+fn parse_internal_battery(output: &str) -> Option<BatteryInfo> {
+    let header = output.lines().next().unwrap_or_default();
+    let line = output
+        .lines()
+        .find(|line| line.contains("InternalBattery"))?;
+    if line.contains("present: false") {
+        return None;
+    }
+    let percent = line
+        .split('%')
+        .next()?
+        .rsplit(|ch: char| !ch.is_ascii_digit())
+        .next()?
+        .parse::<i32>()
+        .ok()?;
+    if !(0..=100).contains(&percent) {
+        return None;
+    }
+    let lower = line.to_ascii_lowercase();
+    Some(BatteryInfo {
+        name: "Mac 内置电池".into(),
+        percent,
+        charging: lower.contains("charging") && !lower.contains("not charging"),
+        on_ac: header.contains("AC Power") || lower.contains("ac attached"),
+        conn: "内置".into(),
+        health: -1,
+        cap_mwh: 0,
+        full_mwh: 0,
+    })
+}
+
+pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
+    let output = run_cmd("/usr/bin/pmset", &["-g", "batt"])
+        .map_err(|error| format!("读取 Mac 内置电池状态失败：{}", error))?;
+    Ok(parse_internal_battery(&output).into_iter().collect())
+}
+
+fn adb_managed_dir() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(std::path::PathBuf::from(home)
+        .join("Library/Application Support/Screenguard/android-platform-tools"))
+}
+
+pub fn adb_exe() -> Option<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(dir) = adb_managed_dir() {
+        candidates.push(dir.join("platform-tools/adb"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("platform-tools/adb"));
+            candidates.push(dir.join("adb"));
+        }
+    }
+    for key in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
+        if let Some(root) = std::env::var_os(key) {
+            candidates.push(std::path::PathBuf::from(root).join("platform-tools/adb"));
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        candidates.push(std::path::PathBuf::from(home).join("Library/Android/sdk/platform-tools/adb"));
+    }
+    for path in ["/opt/homebrew/bin/adb", "/usr/local/bin/adb", "/usr/bin/adb"] {
+        candidates.push(std::path::PathBuf::from(path));
+    }
+    if let Ok(path) = run_cmd("which", &["adb"]) {
+        let path = std::path::PathBuf::from(path.trim());
+        if !path.as_os_str().is_empty() {
+            candidates.push(path);
+        }
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn run_adb(exe: &std::path::Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new(exe)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("adb 执行失败：{}", error))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if output.status.success() {
+        Ok(stdout)
+    } else if stderr.is_empty() {
+        Err(stdout.trim().to_string())
+    } else if stdout.trim().is_empty() {
+        Err(stderr)
+    } else {
+        Err(format!("{}{}", stdout, stderr).trim().to_string())
+    }
+}
+
+fn parse_adb_devices(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() >= 2 && fields[1] == "device" && !fields[0].starts_with('*') {
+                Some(fields[0].to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+pub fn adb_status() -> super::AdbStatus {
+    match adb_exe() {
+        None => super::AdbStatus {
+            available: false,
+            path: String::new(),
+            devices: Vec::new(),
+            tip: "未找到 adb。点击「获取 ADB」从 Google 官方下载 Android Platform-Tools；下载前需确认 SDK 条款。".into(),
+        },
+        Some(exe) => {
+            let devices = run_adb(&exe, &["devices"])
+                .map(|output| parse_adb_devices(&output))
+                .unwrap_or_default();
+            super::AdbStatus {
+                available: true,
+                path: exe.display().to_string(),
+                devices,
+                tip: "adb 就绪".into(),
+            }
+        }
+    }
+}
+
+pub fn adb_connect(addr: &str) -> Result<String, String> {
+    let exe = adb_exe().ok_or("未找到 adb，请先获取 Android Platform-Tools")?;
+    run_adb(&exe, &["connect", addr])
+}
+
+pub fn adb_shell(serial: &str, cmd: &str) -> Result<String, String> {
+    let exe = adb_exe().ok_or("未找到 adb，请先获取 Android Platform-Tools")?;
+    run_adb(&exe, &["-s", serial, "shell", cmd])
+}
+
+pub fn adb_power(serial: &str) -> Result<String, String> {
+    adb_shell(serial, "input keyevent 26")
+}
+
+pub fn adb_volume(serial: &str, up: bool) -> Result<String, String> {
+    adb_shell(serial, if up { "input keyevent 24" } else { "input keyevent 25" })
+}
+
+pub fn adb_download() -> Result<String, String> {
+    static DOWNLOAD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _lock = DOWNLOAD_LOCK.lock().map_err(|_| "ADB 下载状态不可用")?;
+    if let Some(exe) = adb_exe() {
+        return Ok(exe.display().to_string());
+    }
+
+    let root = adb_managed_dir().ok_or("无法确定用户目录")?;
+    let archive = root.join("platform-tools-macos.zip");
+    let temp = root.join(format!("extract-{}", std::process::id()));
+    let install_dir = root.join("platform-tools");
+    std::fs::create_dir_all(&root).map_err(|error| format!("创建 ADB 目录失败：{}", error))?;
+    let _ = std::fs::remove_file(&archive);
+    let _ = std::fs::remove_dir_all(&temp);
+    let result = (|| {
+        let archive_arg = archive.to_str().ok_or("ADB 下载路径编码无效")?;
+        run_cmd(
+            "/usr/bin/curl",
+            &[
+                "--fail", "--location", "--silent", "--show-error", "--connect-timeout",
+                "15", "--max-time", "300", "--output", archive_arg,
+                "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip",
+            ],
+        )
+        .map_err(|error| format!("下载 Google Android Platform-Tools 失败：{}", error))?;
+        std::fs::create_dir_all(&temp).map_err(|error| format!("创建临时目录失败：{}", error))?;
+        let archive_arg = archive.to_str().ok_or("ADB 下载路径编码无效")?;
+        let temp_arg = temp.to_str().ok_or("ADB 临时路径编码无效")?;
+        run_cmd("/usr/bin/unzip", &["-q", archive_arg, "-d", temp_arg])
+            .map_err(|error| format!("解压 Android Platform-Tools 失败：{}", error))?;
+        let extracted = temp.join("platform-tools");
+        let adb = extracted.join("adb");
+        if !adb.is_file() {
+            return Err("官方压缩包中未找到 macOS adb 可执行文件".into());
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&adb)
+            .map_err(|error| format!("读取 adb 文件权限失败：{}", error))?
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&adb, permissions)
+            .map_err(|error| format!("设置 adb 执行权限失败：{}", error))?;
+        if install_dir.exists() {
+            return Err("应用托管的 Platform-Tools 目录已存在；为保留现有工具，未覆盖它".into());
+        }
+        std::fs::rename(&extracted, &install_dir)
+            .map_err(|error| format!("安装 Android Platform-Tools 失败：{}", error))?;
+        let installed_adb = install_dir.join("adb");
+        run_adb(&installed_adb, &["version"])
+            .map_err(|error| format!("下载完成，但 adb 启动验证失败：{}", error))?;
+        Ok(installed_adb.display().to_string())
+    })();
+    let _ = std::fs::remove_file(&archive);
+    let _ = std::fs::remove_dir_all(&temp);
+    result
+}
+
+/// BetterDisplay may wait indefinitely for a monitor's DDC/CI bus. Bound power
+/// polling and writes so a missing display response cannot freeze the watcher.
+fn run_power_ddc(args: &[&str]) -> Result<String, String> {
+    let mut child = Command::new(BETTERDISPLAY)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("无法启动 BetterDisplay DDC 命令：{}", error))?;
+
+    let stdout = child.stdout.take().ok_or("无法读取 BetterDisplay 输出")?;
+    let stderr = child.stderr.take().ok_or("无法读取 BetterDisplay 错误")?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = std::io::BufReader::new(stdout).read_to_end(&mut bytes);
+        bytes
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = std::io::BufReader::new(stderr).read_to_end(&mut bytes);
+        bytes
+    });
+
+    let deadline = Instant::now() + POWER_DDC_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(format!(
+                    "BetterDisplay DDC 电源命令超过 {} 秒仍未响应；请检查 BetterDisplay、DDC/CI 和显示器连接",
+                    POWER_DDC_TIMEOUT.as_secs()
+                ));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(format!("读取 BetterDisplay DDC 命令状态失败：{}", error));
+            }
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&stdout_reader.join().unwrap_or_default()).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_reader.join().unwrap_or_default())
+        .trim()
+        .to_string();
+    if !status.success() && stdout.trim().is_empty() {
+        return Err(if stderr.is_empty() {
+            format!("BetterDisplay DDC 命令退出码：{}", status)
+        } else {
+            stderr
+        });
+    }
+    Ok(stdout)
+}
 
 pub fn platform_name() -> &'static str {
     "macos"
+}
+
+#[cfg(test)]
+mod battery_tests {
+    use super::{parse_adb_devices, parse_internal_battery};
+
+    #[test]
+    fn parses_ac_power_and_not_charging_state() {
+        let battery = parse_internal_battery(
+            "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t80%; AC attached; not charging present: true",
+        )
+        .expect("battery should be present");
+        assert_eq!(battery.percent, 80);
+        assert!(!battery.charging);
+        assert!(battery.on_ac);
+        assert_eq!(battery.conn, "内置");
+    }
+
+    #[test]
+    fn parses_battery_power_charging_state() {
+        let battery = parse_internal_battery(
+            "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t22%; charging; 1:20 remaining present: true",
+        )
+        .expect("battery should be present");
+        assert_eq!(battery.percent, 22);
+        assert!(battery.charging);
+        assert!(!battery.on_ac);
+    }
+
+    #[test]
+    fn ignores_missing_or_absent_battery() {
+        assert!(parse_internal_battery("Now drawing from 'AC Power'").is_none());
+        assert!(parse_internal_battery(
+            "Now drawing from 'AC Power'\n -InternalBattery-0\t0%; not charging present: false"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn adb_status_lists_only_connected_devices() {
+        let devices = parse_adb_devices(
+            "List of devices attached\n192.168.1.20:5555 device product:tv model:Display\n192.168.1.21:5555 offline\n192.168.1.22:5555 unauthorized\n* daemon started successfully\n",
+        );
+        assert_eq!(devices, vec!["192.168.1.20:5555"]);
+    }
+}
+
+/// Sleep the complete macOS display system without requiring a monitor-specific DDC command.
+pub fn screen_off() -> Result<(), String> {
+    run_cmd("/usr/bin/pmset", &["displaysleepnow"])
+        .map(|_| ())
+        .map_err(|error| format!("macOS 让显示器待机失败：{}", error))
+}
+
+/// Ask macOS to wake the displays by briefly asserting user activity.
+pub fn screen_wake() -> Result<(), String> {
+    run_cmd("/usr/bin/caffeinate", &["-u", "-t", "2"])
+        .map(|_| ())
+        .map_err(|error| format!("macOS 唤醒显示器失败：{}", error))
+}
+
+/// A DDC power write is available only when BetterDisplay exposes the monitor's VCP channel.
+pub fn set_display_power(display_id: &str, mode: u32) -> Result<(), String> {
+    if !matches!(mode, 1 | 2 | 4) {
+        return Err("显示器电源模式只支持 1（开）、2（待机）或 4（软关）".into());
+    }
+    ensure_betterdisplay()?;
+    let cgid = find_ddc_id(display_id)?;
+    let ddc_id = ddctl(cgid);
+    let value = format!("-value={}", mode);
+    run_power_ddc(&["set", &ddc_id, "-ddc", "-vcp=powerMode", &value])
+    .map(|_| ())
+    .map_err(|error| format!("无法设置显示器电源 VCP 0xD6：{}", error))
+}
+
+/// Read DDC VCP 0xD6 through BetterDisplay when the monitor and connection support it.
+pub fn get_display_power(display_id: &str) -> Result<u32, String> {
+    ensure_betterdisplay()?;
+    let cgid = find_ddc_id(display_id)?;
+    let ddc_id = ddctl(cgid);
+    let output = run_power_ddc(&["get", &ddc_id, "-ddc", "-vcp=powerMode", "-value"])
+    .map_err(|error| format!("无法读取显示器电源 VCP 0xD6：{}", error))?;
+    output
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter_map(|token| {
+            if let Some(hex) = token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")) {
+                u32::from_str_radix(hex, 16).ok()
+            } else {
+                token.parse::<u32>().ok()
+            }
+        })
+        .find(|value| matches!(value, 1 | 2 | 4 | 5))
+        .ok_or_else(|| format!("BetterDisplay 未返回有效的 VCP 0xD6 电源值：{}", output.trim()))
+}
+
+/// Stable active display identifiers used by the macOS attach/detach watcher.
+pub fn display_snapshot() -> Vec<String> {
+    let mut ids: Vec<String> = parse_screens()
+        .into_iter()
+        .filter(|screen| screen.enabled)
+        .map(|screen| screen.id)
+        .collect();
+    ids.sort();
+    ids
 }
 
 // ===== 开机自启（LaunchAgent）=====
@@ -311,6 +689,73 @@ fn parse_screens() -> Vec<Screen> {
         result.push(s);
     }
     result
+}
+
+/// Return the exact modes reported by displayplacer, including the active mode.
+pub fn get_display_modes(display_id: &str) -> Result<Vec<DisplayMode>, String> {
+    let screen = parse_screens()
+        .into_iter()
+        .find(|screen| screen.id == display_id && screen.enabled)
+        .ok_or_else(|| "未找到该显示器；请刷新显示器列表".to_string())?;
+    if screen.modes.is_empty() {
+        return Err("displayplacer 没有返回可用分辨率档位".into());
+    }
+    Ok(screen
+        .modes
+        .iter()
+        .map(|mode| DisplayMode {
+            mode: mode.index,
+            resolution: format!("{}x{}", mode.w, mode.h),
+            hz: mode.hz.unwrap_or(screen.hz.unwrap_or(60)),
+            color_depth: mode.depth,
+            scaled: mode.scaling,
+            current: mode.current,
+        })
+        .collect())
+}
+
+/// Apply a selected mode by its displayplacer index, then read it back and roll back on mismatch.
+pub fn set_display_mode(display_id: &str, mode_index: u32) -> Result<String, String> {
+    let mut screens = parse_screens();
+    let original = screens.clone();
+    let target = screens
+        .iter_mut()
+        .find(|screen| screen.id == display_id && screen.enabled)
+        .ok_or_else(|| "未找到该显示器；请刷新显示器列表".to_string())?;
+    let selected = target
+        .modes
+        .iter()
+        .find(|mode| mode.index == mode_index)
+        .cloned()
+        .ok_or_else(|| "所选显示模式已不可用；请刷新显示器列表".to_string())?;
+    target.requested_mode = Some(selected.clone());
+    apply_screen_layout(&screens)?;
+
+    let applied = parse_screens();
+    let matches = applied
+        .iter()
+        .find(|screen| screen.id == display_id && screen.enabled)
+        .and_then(Screen::active_mode)
+        .is_some_and(|actual| {
+            actual.index == selected.index
+                && actual.w == selected.w
+                && actual.h == selected.h
+                && actual.hz == selected.hz
+                && actual.depth == selected.depth
+                && actual.scaling == selected.scaling
+        });
+    if !matches {
+        return Err(match apply_screen_layout(&original) {
+            Ok(()) => "系统未应用所选显示模式，已恢复切换前的显示配置".into(),
+            Err(error) => format!("显示模式未核验，恢复原配置失败：{}", error),
+        });
+    }
+    Ok(format!(
+        "已核验显示模式 {}x{} @ {}Hz",
+        selected.w,
+        selected.h,
+        selected.hz.unwrap_or(60)
+    ))
 }
 
 /// 主屏 = 带 main display 标记的；副屏 = 其余第一块（本项目为双屏工具）
@@ -817,6 +1262,169 @@ fn apply_screen_layout(screens: &[Screen]) -> Result<(), String> {
     let specs: Vec<String> = screens.iter().map(screen_spec).collect();
     let args: Vec<&str> = specs.iter().map(String::as_str).collect();
     run_displayplacer(&args).map(|_| ())
+}
+
+/// BetterDisplay actions are restricted to the controls exposed by the UI.
+pub fn betterdisplay_action(
+    action: &str,
+    display_id: &str,
+    target_id: Option<&str>,
+    value: Option<&str>,
+) -> Result<String, String> {
+    let screens = parse_screens();
+    let source = screens
+        .iter()
+        .find(|screen| screen.id == display_id && screen.enabled)
+        .ok_or_else(|| "源显示器已断开；请刷新显示器列表".to_string())?;
+    let target = match target_id {
+        Some(id) => Some(
+            screens
+                .iter()
+                .find(|screen| screen.id == id && screen.enabled)
+                .ok_or_else(|| "目标显示器已断开；请刷新显示器列表".to_string())?,
+        ),
+        None => None,
+    };
+    if target.is_some_and(|screen| screen.id == source.id) {
+        return Err("源显示器和目标显示器不能相同".into());
+    }
+
+    if let Some(direction) = action.strip_prefix("place-") {
+        let anchor = target.ok_or("排列显示器需要选择目标显示器")?;
+        let (x, y) = match direction {
+            "left" => (anchor.ox - source.frame_w() as i32, anchor.oy),
+            "right" => (anchor.ox + anchor.frame_w() as i32, anchor.oy),
+            "above" => (anchor.ox, anchor.oy - source.frame_h() as i32),
+            "below" => (anchor.ox, anchor.oy + anchor.frame_h() as i32),
+            _ => return Err("不支持的显示器排列方向".into()),
+        };
+        let before = screens.clone();
+        let mut arranged = before.clone();
+        let moved = arranged
+            .iter_mut()
+            .find(|screen| screen.id == display_id)
+            .ok_or("源显示器已断开")?;
+        moved.ox = x;
+        moved.oy = y;
+        if let Err(error) = apply_screen_origins_only(&arranged) {
+            let rollback = apply_screen_origins_only(&before);
+            return Err(match rollback {
+                Ok(()) => format!("显示器排列未核验，已恢复原布局：{}", error),
+                Err(rollback_error) => format!(
+                    "显示器排列失败：{}；恢复原布局也失败：{}",
+                    error, rollback_error
+                ),
+            });
+        }
+        return Ok(format!("已将「{}」移到目标屏幕{}侧", source.type_raw, direction));
+    }
+
+    ensure_betterdisplay()?;
+    let cgid = source.ctx.ok_or("无法取得 BetterDisplay 显示器标识")?;
+    let display_arg = format!("-displayID={}", cgid);
+    let mut args = Vec::<String>::new();
+    match action {
+        "set-main" => args.extend(["set".into(), display_arg, "-main=on".into()]),
+        "mirror-on" | "pip-on" | "stream-on" => {
+            let target = target.ok_or("此操作需要选择目标显示器")?;
+            let target_cgid = target.ctx.ok_or("无法取得目标显示器标识")?;
+            let feature = match action {
+                "mirror-on" => "mirror",
+                "pip-on" => "pip",
+                _ => "stream",
+            };
+            args.extend([
+                "set".into(),
+                display_arg,
+                format!("-{}=on", feature),
+                format!("-targetDisplayID={}", target_cgid),
+            ]);
+        }
+        "mirror-off" | "pip-off" | "stream-off" |
+        "hdr-on" | "hdr-off" | "connect-on" | "connect-off" |
+        "protect-resolution-on" | "protect-resolution-off" |
+        "protect-refresh-on" | "protect-refresh-off" |
+        "protect-rotation-on" | "protect-rotation-off" |
+        "protect-main-on" | "protect-main-off" => {
+            let (feature, enabled) = match action {
+                "mirror-off" => ("mirror", false),
+                "pip-off" => ("pip", false),
+                "stream-off" => ("stream", false),
+                "hdr-on" => ("hdr", true),
+                "hdr-off" => ("hdr", false),
+                "connect-on" => ("connected", true),
+                "connect-off" => ("connected", false),
+                "protect-resolution-on" => ("protectResolution", true),
+                "protect-resolution-off" => ("protectResolution", false),
+                "protect-refresh-on" => ("protectRefreshRate", true),
+                "protect-refresh-off" => ("protectRefreshRate", false),
+                "protect-rotation-on" => ("protectRotation", true),
+                "protect-rotation-off" => ("protectRotation", false),
+                "protect-main-on" => ("protectAsMain", true),
+                _ => ("protectAsMain", false),
+            };
+            args.extend([
+                "set".into(),
+                display_arg,
+                format!("-{}={}", feature, if enabled { "on" } else { "off" }),
+            ]);
+        }
+        "input-source" => {
+            let code = value
+                .ok_or("请输入显示器支持的输入源 VCP 代码")?
+                .parse::<u32>()
+                .map_err(|_| "输入源代码必须是 1 到 255 的整数")?;
+            if !(1..=255).contains(&code) {
+                return Err("输入源代码必须是 1 到 255 的整数".into());
+            }
+            args.extend([
+                "set".into(),
+                display_arg,
+                "-ddc".into(),
+                "-vcp=0x60".into(),
+                format!("-value={}", code),
+            ]);
+        }
+        "virtual-16-9" | "virtual-21-9" => {
+            let (name, width, height) = if action == "virtual-21-9" {
+                ("Screenguard Virtual 21x9", 21, 9)
+            } else {
+                ("Screenguard Virtual 16x9", 16, 9)
+            };
+            run_cmd(
+                BETTERDISPLAY,
+                &[
+                    "create",
+                    "-deviceType=virtualScreen",
+                    &format!("-virtualScreenName={}", name),
+                    &format!("-aspectWidth={}", width),
+                    &format!("-aspectHeight={}", height),
+                ],
+            )?;
+            run_cmd(
+                BETTERDISPLAY,
+                &["set", &format!("-name={}", name), "-connected=on"],
+            )?;
+            return Ok(format!("已创建并连接「{}」；可在显示器设置中断开", name));
+        }
+        _ => return Err("不支持的 BetterDisplay 操作".into()),
+    }
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_cmd(BETTERDISPLAY, &args)?;
+    Ok(match action {
+        "set-main" => "已请求将所选显示器设为主屏".into(),
+        "mirror-on" => "已请求镜像到目标显示器".into(),
+        "mirror-off" => "已请求关闭显示器镜像".into(),
+        "pip-on" => "已请求在目标显示器打开画中画（需要 BetterDisplay Pro）".into(),
+        "pip-off" => "已请求关闭画中画".into(),
+        "stream-on" => "已请求开启屏幕串流（需要 BetterDisplay Pro）".into(),
+        "stream-off" => "已请求关闭屏幕串流".into(),
+        "connect-on" => "已请求连接所选显示器".into(),
+        "connect-off" => "已请求断开所选显示器；虚拟屏配置会保留".into(),
+        "hdr-on" | "hdr-off" => "已发送 HDR 设置请求；请检查显示器状态".into(),
+        "input-source" => "已发送输入源切换请求；实际输入源取决于显示器支持".into(),
+        _ => "已更新显示器配置保护设置".into(),
+    })
 }
 
 /// Apply only desktop origins through Quartz. This avoids resubmitting already
