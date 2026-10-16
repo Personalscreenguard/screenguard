@@ -6,8 +6,8 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | CI run `38914770919` 中 Windows 检查、Rust 单测、C# 桥接检查和 NSIS 构建全部成功；安装包 artifact 已回读并计算 SHA-256 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.38 本机 15 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验，DMG 校验有效 | 新提交全平台 CI；双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| Windows x64 | NSIS 安装包 | CI run `38919104377` 中 Windows Rust 检查和 NSIS 构建成功；0.4.38 安装包 artifact 已回读并计算 SHA-256 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | 0.4.38 本机 15 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；CI run `38919104377` macOS 检查和 DMG 构建成功，DMG 校验有效 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -37,7 +37,8 @@
 - 本机 Rust 单测 15/15 通过，包含是否恢复模式的决策及旧版 JSON 备份兼容覆盖；仓库自检、JS 语法、`git diff --check` 通过。
 - 本机 Release/DMG 构建已成功；`/tmp/screenguard-v0438-target/release/bundle/dmg/Screenguard_0.4.38_aarch64.dmg` 的 SHA-256 为 `9c930593026b1ed798456c10a5cbedf8ccb5da6682cd688f3b3ef9a7990b46ad`，`hdiutil verify` 为 `VALID`；副本 `/Users/nanyu/Desktop/Screenguard_0.4.38_aarch64.dmg` 的 sidecar 校验通过。
 - `/Applications/Screenguard.app` 已安装并运行 0.4.38；进程路径为 `/Applications/Screenguard.app/Contents/MacOS/screenguard`，可执行文件 SHA-256 `715a2e0951f2a4cee4e86ab65cce0141ff829c6f1f61cc5a0c45e0c24684469d`，与构建产物相同。安装前 0.4.37 App 备份在 `~/Library/Application Support/Screenguard/backups/pre-0.4.38-app-install-20261016/`。
-- 当前 PR head 的全平台 CI、macOS/Windows 安装包构建待新提交推送后核验。
+- 代码提交 CI run `38919104377` 全部成功：仓库自检、macOS/Windows/Ubuntu Rust 检查，以及 macOS DMG 和 Windows NSIS 构建。
+- CI 产物回读：macOS artifact `12053109203`（3,983,512 bytes），`hdiutil verify` 为 `VALID`，SHA-256 `309c733c2681b7b3df09de568fbb4f395c9eb3badc6a46eaefe7d83da07ee941`；Windows artifact `12053254261`（2,299,316 bytes），识别为 NSIS 自解压 GUI 安装包，SHA-256 `11b8c5c1345958ada3bd99b03c166aa0bf9c817a86ce841342d702e5cae107a5`。两者已复制到桌面并通过 SHA-256 sidecar 校验；Windows 安装尚未实机验收。
 - PR 保持 open/draft；电源联动、窗口铺满/还原仍需实体双屏及辅助功能权限验收。
 
 ## v0.4.37 历史交付核验（2026-10-16）
