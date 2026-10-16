@@ -366,12 +366,7 @@ pub fn set_display_power(display_id: &str, mode: u32) -> Result<(), String> {
 }
 
 /// Read DDC VCP 0xD6 through BetterDisplay when the monitor and connection support it.
-pub fn get_display_power(display_id: &str) -> Result<u32, String> {
-    ensure_betterdisplay()?;
-    let cgid = find_ddc_id(display_id)?;
-    let ddc_id = ddctl(cgid);
-    let output = run_power_ddc(&["get", &ddc_id, "-ddc", "-vcp=powerMode", "-value"])
-    .map_err(|error| format!("无法读取显示器电源 VCP 0xD6：{}", error))?;
+fn parse_display_power_mode(output: &str) -> Option<u32> {
     output
         .split(|ch: char| !ch.is_ascii_alphanumeric())
         .filter_map(|token| {
@@ -381,8 +376,36 @@ pub fn get_display_power(display_id: &str) -> Result<u32, String> {
                 token.parse::<u32>().ok()
             }
         })
-        .find(|value| matches!(value, 1 | 2 | 4 | 5))
+        .find(|value| matches!(value, 1 | 2 | 3 | 4 | 5))
+}
+
+pub fn get_display_power(display_id: &str) -> Result<u32, String> {
+    ensure_betterdisplay()?;
+    let cgid = find_ddc_id(display_id)?;
+    let ddc_id = ddctl(cgid);
+    let output = run_power_ddc(&["get", &ddc_id, "-ddc", "-vcp=powerMode", "-value"])
+        .map_err(|error| format!("无法读取显示器电源 VCP 0xD6：{}", error))?;
+    parse_display_power_mode(&output)
         .ok_or_else(|| format!("BetterDisplay 未返回有效的 VCP 0xD6 电源值：{}", output.trim()))
+}
+
+#[cfg(test)]
+mod display_power_mode_tests {
+    use super::parse_display_power_mode;
+
+    #[test]
+    fn parses_all_mccs_vcp_d6_power_modes() {
+        for mode in 1..=5 {
+            let output = format!("VCP 0xD6 current value = 0x{mode:02X}");
+            assert_eq!(parse_display_power_mode(&output), Some(mode), "{output}");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_power_modes_instead_of_matching_the_vcp_code() {
+        assert_eq!(parse_display_power_mode("VCP 0xD6 current value = 0x00"), None);
+        assert_eq!(parse_display_power_mode("VCP 0xD6 value unavailable"), None);
+    }
 }
 
 /// Stable active display identifiers used by the macOS attach/detach watcher.
