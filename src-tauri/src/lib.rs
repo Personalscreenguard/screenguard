@@ -950,9 +950,14 @@ fn macos_power_transition(
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn macos_should_fallback_to_system_power(source_id: &str, ddc_failures: usize) -> bool {
+    source_id.is_empty() || ddc_failures > 0
+}
+
 #[cfg(test)]
 mod macos_power_transition_tests {
-    use super::macos_power_transition;
+    use super::{macos_power_transition, macos_should_fallback_to_system_power};
     use std::collections::HashMap;
 
     fn readings(values: &[(&str, u32)]) -> HashMap<String, u32> {
@@ -1024,6 +1029,13 @@ mod macos_power_transition_tests {
             macos_power_transition(&before, &ids(&["secondary", "new"]), &power, &power),
             None
         );
+    }
+
+    #[test]
+    fn falls_back_to_system_power_when_source_disappears_or_ddc_control_fails() {
+        assert!(macos_should_fallback_to_system_power("", 0));
+        assert!(macos_should_fallback_to_system_power("main", 1));
+        assert!(!macos_should_fallback_to_system_power("main", 0));
     }
 }
 
@@ -1151,8 +1163,12 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
                 }
             }
 
-            // If the source vanished from the active display list, use the OS-wide fallback.
-            let fallback = if source_id.is_empty() {
+            // If the source vanished or per-display DDC control/read-back failed,
+            // use the OS-wide fallback. This covers displays whose power state is readable
+            // but whose peer rejects DDC writes; the system request affects all connected displays.
+            let fallback_requested =
+                macos_should_fallback_to_system_power(&source_id, errors.len());
+            let fallback = if fallback_requested {
                 if direction == "off" {
                     platform::screen_off()
                 } else {
@@ -1161,19 +1177,40 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
             } else {
                 Ok(())
             };
-            let message = match (applied, errors.is_empty(), fallback) {
-                (count, true, Ok(())) if count > 0 => format!(
-                    "检测到一台显示器{}，已同步{}台其他显示器。",
-                    if direction == "off" { "进入待机" } else { "已唤醒" },
-                    count
-                ),
-                (0, _, Ok(())) if source_id.is_empty() => format!(
-                    "检测到显示器{}，已发送 macOS 系统级{}请求。",
-                    if direction == "off" { "断开" } else { "重新连接" },
+            let message = if let Err(error) = fallback {
+                format!("macOS 电源联动失败：{}", error)
+            } else if fallback_requested && !errors.is_empty() {
+                format!(
+                    "逐屏 DDC 控制未全部确认（{}）；已发送 macOS 系统级{}请求，作用于全部当前显示器，请观察屏幕状态。",
+                    errors.join("；"),
                     if direction == "off" { "待机" } else { "唤醒" }
-                ),
-                (_, _, Err(error)) => format!("macOS 电源联动失败：{}", error),
-                (_, _, Ok(())) => format!("macOS 电源联动未完成：{}", errors.join("；")),
+                )
+            } else if fallback_requested {
+                format!(
+                    "检测到显示器{}，已发送 macOS 系统级{}请求。",
+                    if direction == "off" {
+                        "断开"
+                    } else {
+                        "重新连接"
+                    },
+                    if direction == "off" {
+                        "待机"
+                    } else {
+                        "唤醒"
+                    }
+                )
+            } else if errors.is_empty() && applied > 0 {
+                format!(
+                    "检测到一台显示器{}，已通过 DDC 同步并回读确认{}台其他显示器。",
+                    if direction == "off" {
+                        "进入待机"
+                    } else {
+                        "已唤醒"
+                    },
+                    applied
+                )
+            } else {
+                format!("macOS 电源联动未完成：{}", errors.join("；"))
             };
             eprintln!("[screenguard] {}", message);
             let _ = app.emit("power-link-status", message);
