@@ -1113,6 +1113,71 @@ fn union_bounds(screens: &[Screen]) -> Option<(i32, i32, i32, i32)> {
     Some((min_x, min_y, max_x, max_y))
 }
 
+#[cfg(test)]
+mod window_span_geometry_tests {
+    use super::{union_bounds, Screen, ScreenMode};
+
+    fn screen(id: &str, enabled: bool, origin: (i32, i32), size: (u32, u32), main: bool) -> Screen {
+        Screen {
+            id: id.into(),
+            type_raw: String::new(),
+            w: size.0,
+            h: size.1,
+            hz: Some(60),
+            ox: origin.0,
+            oy: origin.1,
+            enabled,
+            main,
+            degree: 0,
+            scaling: false,
+            color_depth: 8,
+            modes: vec![ScreenMode {
+                index: 1,
+                w: size.0,
+                h: size.1,
+                hz: Some(60),
+                depth: 8,
+                scaling: false,
+                current: true,
+            }],
+            requested_mode: None,
+            ctx: None,
+        }
+    }
+
+    #[test]
+    fn unions_side_by_side_landscape_and_portrait_displays() {
+        let screens = [
+            screen("main", true, (0, 0), (3840, 2160), true),
+            screen("portrait", true, (3840, 0), (2160, 3840), false),
+        ];
+
+        assert_eq!(union_bounds(&screens), Some((0, 0, 6000, 3840)));
+    }
+
+    #[test]
+    fn includes_negative_origins_and_ignores_disabled_displays() {
+        let mut disabled = screen("offline", false, (5000, 0), (4000, 2000), false);
+        disabled.modes.clear();
+        let screens = [
+            screen("main", true, (0, 0), (1920, 1080), true),
+            screen("left", true, (-1080, 0), (1080, 1920), false),
+            disabled,
+        ];
+
+        assert_eq!(union_bounds(&screens), Some((-1080, 0, 1920, 1920)));
+    }
+
+    #[test]
+    fn rejects_enabled_displays_without_a_known_desktop_mode() {
+        let mut unknown = screen("unknown", true, (0, 0), (1920, 1080), true);
+        unknown.modes.clear();
+
+        assert_eq!(union_bounds(&[unknown]), None);
+        assert_eq!(union_bounds(&[]), None);
+    }
+}
+
 // ===== 双屏逻辑高度对齐：保存完整布局，切换后重新枚举并校验 =====
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
