@@ -898,6 +898,124 @@ fn spawn_health_watch(app: tauri::AppHandle) {
 
 /// macOS 电源联动使用原生后台轮询，不依赖隐藏菜单栏 WebView 的 JavaScript 定时器。
 /// macOS 优先用 DDC VCP 0xD6 检测单屏电源变化，无法读到时回退到连接/断开事件。
+#[cfg(any(target_os = "macos", test))]
+fn macos_power_transition(
+    previous_online: &[String],
+    current_online: &[String],
+    previous_power: &std::collections::HashMap<String, u32>,
+    current_power: &std::collections::HashMap<String, u32>,
+) -> Option<(String, &'static str)> {
+    let mut ddc_changes = Vec::new();
+    for (id, previous_mode) in previous_power {
+        let Some(current_mode) = current_power.get(id) else {
+            continue;
+        };
+        let direction = if *previous_mode == 1 && matches!(*current_mode, 2 | 4 | 5) {
+            Some("off")
+        } else if matches!(*previous_mode, 2 | 4 | 5) && *current_mode == 1 {
+            Some("on")
+        } else {
+            None
+        };
+        if let Some(direction) = direction {
+            ddc_changes.push((id.clone(), direction));
+        }
+    }
+
+    match ddc_changes.len() {
+        1 => return ddc_changes.pop(),
+        count if count > 1 => return None,
+        _ => {}
+    }
+
+    let removed = previous_online
+        .iter()
+        .any(|id| !current_online.contains(id));
+    let added = current_online
+        .iter()
+        .any(|id| !previous_online.contains(id));
+    match (removed, added) {
+        (true, false) => Some((String::new(), "off")),
+        (false, true) => Some((String::new(), "on")),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod macos_power_transition_tests {
+    use super::macos_power_transition;
+    use std::collections::HashMap;
+
+    fn readings(values: &[(&str, u32)]) -> HashMap<String, u32> {
+        values
+            .iter()
+            .map(|(id, mode)| ((*id).to_string(), *mode))
+            .collect()
+    }
+
+    fn ids(values: &[&str]) -> Vec<String> {
+        values.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    #[test]
+    fn detects_single_ddc_off_and_wake_transitions() {
+        let online = ids(&["main", "secondary"]);
+        let before = readings(&[("main", 1), ("secondary", 1)]);
+        let off = readings(&[("main", 4), ("secondary", 1)]);
+        let awake = readings(&[("main", 1), ("secondary", 1)]);
+
+        assert_eq!(
+            macos_power_transition(&online, &online, &before, &off),
+            Some(("main".into(), "off"))
+        );
+        assert_eq!(
+            macos_power_transition(&online, &online, &off, &awake),
+            Some(("main".into(), "on"))
+        );
+    }
+
+    #[test]
+    fn ignores_unreadable_and_ambiguous_ddc_changes() {
+        let online = ids(&["main", "secondary"]);
+        let before = readings(&[("main", 1), ("secondary", 1)]);
+        let unreadable = readings(&[("main", 1)]);
+        let conflicting_before = readings(&[("main", 1), ("secondary", 4)]);
+        let conflicting = readings(&[("main", 4), ("secondary", 1)]);
+        let two_changes = readings(&[("main", 4), ("secondary", 2)]);
+
+        assert_eq!(
+            macos_power_transition(&online, &online, &before, &unreadable),
+            None
+        );
+        assert_eq!(
+            macos_power_transition(&online, &online, &conflicting_before, &conflicting),
+            None
+        );
+        assert_eq!(
+            macos_power_transition(&online, &online, &before, &two_changes),
+            None
+        );
+    }
+
+    #[test]
+    fn uses_only_unambiguous_display_disconnect_or_reconnect_events() {
+        let power = HashMap::new();
+        let before = ids(&["main", "secondary"]);
+        assert_eq!(
+            macos_power_transition(&before, &ids(&["main"]), &power, &power),
+            Some((String::new(), "off"))
+        );
+        assert_eq!(
+            macos_power_transition(&ids(&["main"]), &before, &power, &power),
+            Some((String::new(), "on"))
+        );
+        assert_eq!(
+            macos_power_transition(&before, &ids(&["secondary", "new"]), &power, &power),
+            None
+        );
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
     use std::collections::HashMap;
@@ -961,44 +1079,18 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
                 continue;
             }
 
-            let removed: Vec<String> = previous_online
-                .iter()
-                .filter(|id| !current.contains(id))
-                .cloned()
-                .collect();
-            let added: Vec<String> = current
-                .iter()
-                .filter(|id| !previous_online.contains(id))
-                .cloned()
-                .collect();
-
-            let mut transition: Option<(String, &'static str)> = None;
             let mut readings = HashMap::new();
             for id in &current {
                 let Ok(mode) = platform::get_display_power(id) else {
                     continue;
                 };
                 readings.insert(id.clone(), mode);
-                if let Some(previous_mode) = previous_power.get(id).copied() {
-                    let direction = if previous_mode == 1 && matches!(mode, 2 | 4 | 5) {
-                        Some("off")
-                    } else if matches!(previous_mode, 2 | 4 | 5) && mode == 1 {
-                        Some("on")
-                    } else {
-                        None
-                    };
-                    if let Some(direction) = direction {
-                        transition.get_or_insert_with(|| (id.clone(), direction));
-                    }
-                }
             }
 
-            // Older monitors may disappear from the active list when powered off.
-            let detached = !removed.is_empty() && added.is_empty();
-            let reattached = removed.is_empty() && !added.is_empty();
-            if transition.is_none() && (detached || reattached) {
-                transition = Some((String::new(), if detached { "off" } else { "on" }));
-            }
+            // 多屏同时出现相反/并发电源变化时不猜测来源，避免把其它屏幕也反向切换。
+            // 旧显示器关机后从在线列表消失时，helper 会回退到稳定的断开/重连事件。
+            let transition =
+                macos_power_transition(&previous_online, &current, &previous_power, &readings);
 
             let Some((source_id, direction)) = transition else {
                 previous_online = current.clone();
