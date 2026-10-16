@@ -184,7 +184,7 @@
   </div>
   <div class="hint" id="hotkey-line" style="padding:0 10px 6px">快捷键：读取中…</div>
 
-  <div class="sec-label">显示器健康 <span class="ver" id="health-badge"></span></div>
+  <div class="sec-label"><span id="health-title">显示器健康</span> <span class="ver" id="health-badge"></span></div>
   <div class="grid" id="healthgrid">
     <div class="cell" id="cell-hrepair"><span class="ico">🩺</span><span class="lbl">一键修复</span></div>
     <div class="cell" id="cell-hdeep"><span class="ico">🛠️</span><span class="lbl">深度修复</span></div>
@@ -1250,7 +1250,7 @@ document.getElementById('cell-adbconn').onclick = async (ev)=>{
   } catch(e){ adbSay('连接失败：' + (e && e.message ? e.message : e), true); }
 };
 
-// ============ 显示器健康（KVM 切换 / EDID 重新协商异常的记录与修复） ============
+// ============ 显示器健康（Windows 事件记录 / macOS 当前睡眠状态） ============
 // 背景：本机链路是「电脑 --USB-C→DP/HDMI-- KVM --DP/HDMI-- 两块屏」，KVM 切换、
 // 显示器开关、电脑重启时会重新协商 EDID，协商失败表现为黑屏不恢复 / 抖动花屏 /
 // 清晰度变差、画面发白发亮（色彩格式被降级）。这些是显示配置状态错了，重置即可恢复。
@@ -1259,6 +1259,41 @@ function hSay(t, err){ hHintEl.textContent = t || ''; hHintEl.style.color = err 
 const hEvtBox = document.getElementById('health-events');
 let hEvts = [];
 let healthSupported = true;
+let healthPlatform = '';
+
+function hShowMacActions(){
+  for (const id of ['cell-hrepair', 'cell-hdeep']) document.getElementById(id).style.display = 'none';
+  document.getElementById('cell-hscan').querySelector('.lbl').textContent = '读取状态';
+  document.getElementById('health-title').textContent = '显示器状态（macOS）';
+  document.getElementById('evt-fold-h').querySelector('span').firstChild.textContent = '🖥 当前系统状态 ';
+  document.getElementById('h-auto').parentElement.style.display = 'none';
+  document.getElementById('h-notify').parentElement.style.display = 'none';
+}
+
+async function hLoadMacStates(){
+  try {
+    const states = await invoke('get_display_sleep_states');
+    const rows = Array.isArray(states) ? states : [];
+    document.getElementById('health-badge').textContent = rows.length ? (rows.length + ' 屏') : '状态未知';
+    document.getElementById('evt-fold-n').textContent = '';
+    hEvtBox.replaceChildren();
+    if (!rows.length) {
+      const line = document.createElement('div');
+      line.className = 'hint'; line.style.padding = '0';
+      line.textContent = 'macOS 当前没有返回逐屏睡眠状态。';
+      hEvtBox.append(line);
+      hSay('系统逐屏睡眠状态不可用；这不表示显示器已关机。', true);
+      return;
+    }
+    for (const state of rows) {
+      const line = document.createElement('div');
+      line.className = 'hint'; line.style.padding = '2px 0';
+      line.textContent = (state.asleep ? '系统报告睡眠' : '系统报告唤醒') + ' · 显示器 ' + String(state.id);
+      hEvtBox.append(line);
+    }
+    hSay('这是 macOS Quartz 报告的系统睡眠状态，不代表面板物理断电。若系统仍报告唤醒，联动无法据此判断物理关屏。');
+  } catch(e){ hSay('读取 macOS 屏幕状态失败：' + (e && e.message ? e.message : e), true); }
+}
 
 function hPaintEvents(){
   const n = hEvts.length;
@@ -1285,6 +1320,7 @@ function hPaintEvents(){
 }
 
 async function hLoadEvents(){
+  if (healthPlatform === 'macos') return hLoadMacStates();
   if (!healthSupported) return;
   try {
     const raw = await invoke('health_events', { minutes: 1440 });
@@ -1346,6 +1382,15 @@ document.getElementById('h-notify').onchange = (ev)=>{
 };
 
 async function hInit(){
+  try { healthPlatform = await invoke('get_platform'); } catch(e) { healthPlatform = ''; }
+  if (healthPlatform === 'macos') {
+    healthSupported = false;
+    hShowMacActions();
+    document.getElementById('evt-fold-h').querySelector('span').firstChild.textContent = '🖥 当前系统状态 ';
+    await hLoadMacStates();
+    setInterval(hLoadMacStates, 60000);
+    return;
+  }
   try { healthSupported = await invoke('health_supported'); }
   catch(e) { healthSupported = false; }
   if (!healthSupported) {

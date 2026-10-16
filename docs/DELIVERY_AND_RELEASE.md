@@ -1,13 +1,13 @@
 # Screenguard 桌面端交付状态与发布流程
 
-状态快照：2026-10-17，源码版本 0.4.42。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
+状态快照：2026-10-17，源码版本 0.4.43。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
 
 ## 发布目标
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
 | Windows x64 | NSIS 安装包 | 0.4.42 CI run `38930181257` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包已下载回读并识别为 NSIS | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.42 本机 22 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；本地与 CI DMG 校验有效；CI run `38930181257` 三平台检查/测试及 Mac/Windows 打包成功 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| macOS Apple Silicon | DMG | 0.4.43 Mac 面板使用 Quartz 逐屏显示当前系统睡眠状态；隐藏 Windows 专属事件日志修复与自动修复设置。本机 Release/DMG 已构建、验证、安装并运行；PR CI 待本次推送后确认 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -19,7 +19,7 @@
 | 显示器枚举、模式与排列 | Windows/macOS 已实现 | 双平台编译和 Rust 单测 | 不同 GPU、扩展坞和混合 DPI 屏幕核验 |
 | 亮度/音量/色彩控制 | Windows/macOS 按 DDC、系统接口或 ICC 路径实现 | 编译/语法检查 | 按具体显示器确认写入与回读；不支持时 UI 必须明确报错 |
 | 系统音量 | Windows 可枚举并选择 CoreAudio 端点；macOS 读取/设置系统默认输出音量与静音，不提供应用内输出设备切换 | macOS 解析单测覆盖有效、缺失、越界数据；当前 Mac 实际接口返回 `missing value`，UI 停用控制且不发送设置 | 在提供系统输出音量的 Mac 上确认音量/静音生效及系统托盘同步；确认显示器音频等固定音量输出被如实禁用 |
-| 电源联动 | 默认关闭的用户开关、持久化状态和原生后台监听；macOS 结合 VCP `0xD6` 与 CoreGraphics 单屏睡眠状态检测，失败时使用系统级待机/唤醒兜底；面板可逐屏查看 Quartz 状态 | macOS DDC/Quartz 转换策略及诊断序列化单测；三平台 CI | 真实关闭主屏、确认副屏进入待机；再反向唤醒。物理断电但 macOS 仍报告显示器在线且唤醒时，系统没有可检测信号 |
+| 电源联动 | 默认关闭的用户开关、持久化状态和原生后台监听；macOS 结合 VCP `0xD6` 与 CoreGraphics 单屏睡眠状态检测，失败时使用系统级待机/唤醒兜底；面板可逐屏查看 Quartz 状态。Quartz 当前状态不等于物理电源状态 | macOS DDC/Quartz 转换策略及诊断序列化单测；三平台 CI | 真实关闭主屏、确认副屏进入待机；再反向唤醒。物理断电但 macOS 仍报告显示器在线且唤醒时，系统没有可检测信号 |
 | 窗口列表、双屏铺满与还原 | Windows/macOS 已实现；macOS 需辅助功能授权；macOS 屏幕联合包围盒有横竖屏、负坐标及禁用屏测试 | macOS 窗口边界 3 项测试；跨平台编译 | 分别选择普通应用和视频窗口，跨不同分辨率/方向屏幕铺满，再确认原窗口位置和大小恢复 |
 | BetterDisplay 控件 | macOS 命令集接入，部分能力取决于 BetterDisplay 版本、Pro 和显示器 | macOS 编译 | 对每条菜单命令核对执行结果与实际屏幕状态；当前 DDC 读取曾超时，不能宣称电源控制已实测通过 |
 | 电池、ADB、自启 | 按平台接入；ADB 下载需用户接受 SDK 条款 | CI 编译 | 有设备时验证电量/网络 ADB；检查登录启动、升级后设置保留 |
@@ -27,10 +27,10 @@
 
 ## 当前发布阻塞项
 
-1. 用户提到的新增 Windows 代码还没有出现在远端仓库分支或提交中，无法基于真实差异完成 Mac 移植。
+1. 用户提到的新增 Windows 代码还没有出现在远端仓库分支或提交中，无法基于真实差异完成 Mac 移植；本次只适配了 PR 中已有的 Windows 健康面板能力。
 2. Windows 和 macOS 物理显示器行为仍需设备验收。macOS 屏幕即使物理关闭仍留在系统在线列表、且 DDC 不可读时，系统无法判断该屏已关；未知状态必须保留为未知。
 3. 当前签名身份列表没有 Developer ID Application。现有 release workflow 不执行签名或公证，只会创建带明确警示的 GitHub Draft Release；不能把未签名/未公证 DMG 当正式 macOS 发布。
-4. 当前 GitHub 最新公开 Release 仍是 v0.2.9；Windows x64 旧安装包可以回滚，但它不包含 0.4.38 的新代码。
+4. 当前 GitHub 最新公开 Release 仍是 v0.2.9；Windows x64 旧安装包可以回滚，但它不包含 0.4.43 的新代码。
 
 ## v0.4.38 当前交付核验（2026-10-16）
 
@@ -64,6 +64,15 @@
 - 安装前 0.4.41 App 已备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.42-app-install-20261017/`；当前 `/Applications/Screenguard.app` 为 0.4.42，运行二进制 SHA-256 `040d700442fd12b01f73e2484ecbb03ccc0c10d9d9f17fe2c406c5741b2be84e` 与构建产物一致。
 - PR 代码 commit `fe9e98ca10def91a5a5316a7796c72eae0974c60` 对应 CI run `38930181257` 全部成功：仓库检查、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG 和 Windows NSIS 构建。macOS artifact `12057954740`（3,990,367 bytes），DMG SHA-256 `f9dcfcfbd01378327db95ff5107ffc093f1b95258324748f420b0ce4d058a080`，`hdiutil verify` 为 `VALID`；Windows artifact `12058572940`（2,303,948 bytes），识别为 Nullsoft NSIS 安装包，SHA-256 `eb03ee70a2fffbada6aeb30832f92cee5cfe9cda5fb88abe5f672955b3765859`。两包及 SHA-256 sidecar 已复制到桌面并校验通过；Windows 包尚未实机安装。
 - 修改前工作分支备份为 `backup/pre-v0442-power-sleep-diagnostic-20261017`。真实双屏电源联动行为仍待用户在面板开启开关并读取 Quartz 状态后实测。
+
+## v0.4.43 macOS 显示器状态面板适配（2026-10-17）
+
+- Windows 的事件编号、显示驱动重置日志和链路重协商操作不适用于 macOS。本版本在 Mac 上将该区域呈现为 Quartz 逐屏睡眠状态读取器，隐藏 Windows 专用修复按钮、自动修复和事件提醒设置，避免显示空的 Windows 事件日志或提供无效操作。
+- 状态直接调用既有 `get_display_sleep_states`，每分钟刷新一次；无状态时显示“状态未知”。明确说明 Quartz 只表示系统认定的睡眠/唤醒状态，不代表显示器面板物理断电。Windows 行为保持不变。
+- 本机 `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` 22/22 通过；`scripts/check_repo.py`、`node --check ui/main.js`、内嵌脚本语法和 `git diff --check` 通过。当前 Command Line Tools 默认 MacOSX27.0 SDK 与本机 linker 不兼容；显式使用 `/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk` 后测试及构建成功。
+- Apple Silicon Release/DMG 构建成功：`/tmp/screenguard-v0443-target/release/bundle/dmg/Screenguard_0.4.43_aarch64.dmg`，SHA-256 `947169c4d3548f1efef0ccf812426e10e0be4fd47c2a7a9a688ad69e949f53b0`，`hdiutil verify` 为 `VALID`。桌面副本 `/Users/nanyu/Desktop/Screenguard_0.4.43_aarch64.dmg` 和 sidecar 校验通过。
+- 修改前 `/Applications/Screenguard.app` 0.4.42 备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.43-app-install-20261017/`。当前已安装并运行 0.4.43；运行进程 `/Applications/Screenguard.app/Contents/MacOS/screenguard`，二进制 SHA-256 `b55c0d64ae2c124a96c33450e9d3c56809590cc62228cd1d8aa94f4d2a32534b` 与本机 Release 构建一致。
+- PR CI 尚待本次代码提交推送后运行。实体双屏电源跟随、跨屏窗口实测、Windows 真机验收、Developer ID 签名和公证仍待完成。
 
 ## v0.4.40 交付核验（2026-10-16）
 
