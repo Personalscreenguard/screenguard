@@ -6,8 +6,8 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | CI run `38895722071` 中 Windows 检查、Rust 单测、C# 桥接检查和 NSIS 构建全部成功 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | CI run `38895722071` 中 macOS 检查、Rust 单测、DMG 构建成功；本机 0.4.36 App 已安装并核验版本/二进制哈希，DMG 校验有效 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| Windows x64 | NSIS 安装包 | CI run `38897994905` 中 Windows 检查、Rust 单测、C# 桥接检查和 NSIS 构建全部成功；安装包 artifact 已回读并计算 SHA-256 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | CI run `38897994905` 中 macOS 检查、Rust 单测、DMG 构建成功；本机 0.4.36 App 已安装并核验版本/二进制哈希，CI 与本机 DMG 均校验有效 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -34,8 +34,9 @@
 ## 最新交付核验（2026-10-16）
 
 - 源码候选：PR #1 `codex/screenguard-v0.4.31-mac-adaptation`，电源修复 commit `963391b98b298531e4c9d6753c44d8bc64bdfa6b`；证据文档 commit `749f319581e83d5894e03e39f03989f0194e2372`；PR 保持 open/draft，未合入 `main`。
-- CI：run `38895722071` 的仓库检查、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG 和 Windows NSIS 构建全部成功；文档同步后的 run `38896724184` 也全部成功。
+- CI：PR head `c0d04c3cdf7c683393ec7252e9197870a0aa6ec8` 的 run `38897994905` 仓库检查、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG 和 Windows NSIS 构建全部成功；tag 发布工作流配置检查 run `38897995115` 也成功（该 PR 触发的发行包和 Draft Release 工作未运行）。
 - CI 产物回读：macOS artifact `12044228631`（3,980,567 bytes）下载后 `hdiutil verify` 为 `VALID`，SHA-256 `e43928571b772339dab541ba4a107d170af816456bd9e1c888c00eb66a4fc9f5`。Windows artifact `12045165124`（2,298,498 bytes）为 `Screenguard_0.4.36_x64-setup.exe`，识别为 NSIS 自解压安装包，SHA-256 `3fabac4317798cb7aae148eed7f0d2759c9451ce4fd5f782fd14b3ac0139a2bb`；已复制到用户桌面供 Windows 机器试装，但尚未在 Windows 实机安装/运行。
+- 当前 PR head 的 Windows installer 与 Mac DMG artifact 构建步骤也已通过；上述下载校验值对应 run `38896724184` 的独立 artifact，不能混同为 run `38897994905` 的文件哈希。
 - 本机安装：`/Applications/Screenguard.app` 的 `CFBundleShortVersionString` 为 `0.4.36`；可执行文件 SHA-256 为 `14125b10f7b967e0cf6b2306b10b7b0d4f09ad566e1443ddce2e822a15aa4294`，与本机构建产物一致。原 0.4.35 App 备份位于 `~/Library/Application Support/Screenguard/backups/pre-0.4.36-app-install-20261016/`。
 - 本机安装包：`Screenguard_0.4.36_aarch64.dmg` 的 SHA-256 为 `0650de92e73493b9d6e57debd1462bb445dffcf4e9c6dec846af1c9bfa5b4085`；`hdiutil verify` 返回 `VALID`。
 - 本次范围没有更改用户原始主工作区的既有改动；所有尚未完成的实机、签名、公证和公开发布门槛继续保持未完成状态。
