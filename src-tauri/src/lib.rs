@@ -910,9 +910,11 @@ fn macos_power_transition(
         let Some(current_mode) = current_power.get(id) else {
             continue;
         };
-        let direction = if *previous_mode == 1 && matches!(*current_mode, 2 | 4 | 5) {
+        // MCCS VCP 0xD6: 2=standby, 3=suspend, 4=soft off, 5=hard off.
+        // Every reported non-on power state is an off transition for screen-linking.
+        let direction = if *previous_mode == 1 && matches!(*current_mode, 2 | 3 | 4 | 5) {
             Some("off")
-        } else if matches!(*previous_mode, 2 | 4 | 5) && *current_mode == 1 {
+        } else if matches!(*previous_mode, 2 | 3 | 4 | 5) && *current_mode == 1 {
             Some("on")
         } else {
             None
@@ -958,20 +960,22 @@ mod macos_power_transition_tests {
     }
 
     #[test]
-    fn detects_single_ddc_off_and_wake_transitions() {
+    fn detects_single_ddc_off_and_wake_transitions_for_all_off_modes() {
         let online = ids(&["main", "secondary"]);
         let before = readings(&[("main", 1), ("secondary", 1)]);
-        let off = readings(&[("main", 4), ("secondary", 1)]);
-        let awake = readings(&[("main", 1), ("secondary", 1)]);
-
-        assert_eq!(
-            macos_power_transition(&online, &online, &before, &off),
-            Some(("main".into(), "off"))
-        );
-        assert_eq!(
-            macos_power_transition(&online, &online, &off, &awake),
-            Some(("main".into(), "on"))
-        );
+        for mode in [2, 3, 4, 5] {
+            let off = readings(&[("main", mode), ("secondary", 1)]);
+            assert_eq!(
+                macos_power_transition(&online, &online, &before, &off),
+                Some(("main".into(), "off")),
+                "mode {mode} should trigger off"
+            );
+            assert_eq!(
+                macos_power_transition(&online, &online, &off, &before),
+                Some(("main".into(), "on")),
+                "mode {mode} should trigger wake"
+            );
+        }
     }
 
     #[test]
