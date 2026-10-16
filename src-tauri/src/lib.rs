@@ -221,6 +221,12 @@ async fn display_snapshot() -> Vec<String> {
 
 // ---------- 显示器健康：KVM/EDID 异常检测与一键修复（无需管理员权限） ----------
 
+/// Whether this build includes the Windows event-log based display-health feature.
+#[tauri::command]
+fn health_supported() -> bool {
+    cfg!(target_os = "windows")
+}
+
 /// 读取最近的显示链路异常事件（KVM 切换、显示器突然离线、EDID 协商失败等）
 #[tauri::command]
 async fn health_events(minutes: Option<u32>) -> String {
@@ -799,6 +805,7 @@ fn show_notify(app: &tauri::AppHandle, icon: &str, title: &str, body: &str) {
 }
 
 /// 后台监控：链路掉线 → 提醒（+ 可选自动修复）
+#[cfg(target_os = "windows")]
 fn spawn_health_watch(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         use std::collections::HashSet;
@@ -1449,7 +1456,8 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // 显示器健康后台监控（掉线提醒 + 可选自动修复）
+            // Windows Event Log based health monitor (disconnect alerts + optional repair).
+            #[cfg(target_os = "windows")]
             spawn_health_watch(app.handle().clone());
 
             // macOS 电源联动由原生后台线程执行，面板隐藏或关闭时仍持续监测。
@@ -1513,6 +1521,7 @@ pub fn run() {
             get_display_power,
             display_snapshot,
             health_events,
+            health_supported,
             mode_detail,
             repair_display,
             health_get_config,

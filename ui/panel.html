@@ -1210,6 +1210,7 @@ const hHintEl = document.getElementById('health-hint');
 function hSay(t, err){ hHintEl.textContent = t || ''; hHintEl.style.color = err ? '#ef6a6a' : ''; }
 const hEvtBox = document.getElementById('health-events');
 let hEvts = [];
+let healthSupported = true;
 
 function hPaintEvents(){
   const n = hEvts.length;
@@ -1236,6 +1237,7 @@ function hPaintEvents(){
 }
 
 async function hLoadEvents(){
+  if (!healthSupported) return;
   try {
     const raw = await invoke('health_events', { minutes: 1440 });
     hEvts = [];
@@ -1250,6 +1252,10 @@ async function hLoadEvents(){
 }
 
 async function hRepair(level){
+  if (!healthSupported) {
+    hSay('显示器健康监测与修复目前仅支持 Windows。', true);
+    return;
+  }
   hSay(level >= 2 ? '深度修复中：强制重新协商 + 链路重握手（屏幕会黑一下再回来，约 5 秒）…'
                   : '修复中：重新协商显示配置（屏幕可能短暂闪一下）…');
   try {
@@ -1263,9 +1269,6 @@ async function hRepair(level){
 document.getElementById('cell-hrepair').onclick = (ev)=>{ flash(ev.currentTarget); hRepair(1); };
 document.getElementById('cell-hdeep').onclick   = (ev)=>{ flash(ev.currentTarget); hRepair(2); };
 document.getElementById('cell-hscan').onclick   = async (ev)=>{ flash(ev.currentTarget); hSay('正在读取链路记录…'); await hLoadEvents(); };
-
-setTimeout(hLoadEvents, 1200);
-setInterval(hLoadEvents, 60000);   // 每分钟刷新一次链路记录
 
 // 自动修复 / 掉线提醒 两个开关（存在 %APPDATA%\Screenguard\health.json）
 async function hLoadCfg(){
@@ -1293,7 +1296,28 @@ document.getElementById('h-notify').onchange = (ev)=>{
   hSaveCfg();
   hSay(ev.target.checked ? '掉线提醒已开：出现链路掉线会在右下角弹提示' : '掉线提醒已关');
 };
-hLoadCfg();
+
+async function hInit(){
+  try { healthSupported = await invoke('health_supported'); }
+  catch(e) { healthSupported = false; }
+  if (!healthSupported) {
+    document.getElementById('health-badge').textContent = '暂不支持';
+    hSay('显示器健康监测与修复目前仅支持 Windows。', true);
+    for (const id of ['cell-hrepair', 'cell-hdeep', 'cell-hscan']) {
+      const el = document.getElementById(id);
+      el.setAttribute('aria-disabled', 'true');
+      el.style.opacity = '.45';
+      el.style.pointerEvents = 'none';
+    }
+    document.getElementById('h-auto').disabled = true;
+    document.getElementById('h-notify').disabled = true;
+    return;
+  }
+  await hLoadCfg();
+  await hLoadEvents();
+  setInterval(hLoadEvents, 60000);   // 每分钟刷新一次链路记录
+}
+hInit();
 
 // 调试/自动化钩子：允许从外部（CDP）驱动联动状态机做验证，也方便排查"为什么没触发/误触发"
 window.__sg = {
