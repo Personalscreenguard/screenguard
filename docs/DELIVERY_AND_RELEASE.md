@@ -6,8 +6,8 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | CI run `38897994905` 中 Windows 检查、Rust 单测、C# 桥接检查和 NSIS 构建全部成功；安装包 artifact 已回读并计算 SHA-256 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | CI run `38897994905` 中 macOS 检查、Rust 单测、DMG 构建成功；本机 0.4.36 App 已安装并核验版本/二进制哈希，CI 与本机 DMG 均校验有效 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| Windows x64 | NSIS 安装包 | CI run `38900099781` 中 Windows 检查、Rust 单测、C# 桥接检查和 NSIS 构建全部成功；安装包 artifact 已回读并计算 SHA-256 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | CI run `38900099781` 中 macOS 检查、11 个 Rust 单测、DMG 构建成功；本机 0.4.36 App 已安装并核验版本/二进制哈希，CI 与本机 DMG 均校验有效 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -18,8 +18,8 @@
 |---|---|---|---|
 | 显示器枚举、模式与排列 | Windows/macOS 已实现 | 双平台编译和 Rust 单测 | 不同 GPU、扩展坞和混合 DPI 屏幕核验 |
 | 亮度/音量/色彩控制 | Windows/macOS 按 DDC、系统接口或 ICC 路径实现 | 编译/语法检查 | 按具体显示器确认写入与回读；不支持时 UI 必须明确报错 |
-| 电源联动 | 默认关闭的用户开关、持久化状态和原生后台监听；macOS 对 DDC suspend 状态 2/3/4/5 和 DDC 失败后的系统级兜底策略有单测 | macOS 8 个 Rust 单测；三平台 CI | 真实关闭主屏、确认副屏进入待机；再反向唤醒；覆盖 DDC 不可读、应用退出和权限场景 |
-| 窗口列表、双屏铺满与还原 | Windows/macOS 已实现；macOS 需辅助功能授权 | 跨平台编译 | 分别选择普通应用和视频窗口，跨不同分辨率/方向屏幕铺满，再确认原窗口位置和大小恢复 |
+| 电源联动 | 默认关闭的用户开关、持久化状态和原生后台监听；macOS 对 DDC suspend 状态 2/3/4/5 和 DDC 失败后的系统级兜底策略有单测 | macOS 电源转换 4 项 Rust 单测；三平台 CI | 真实关闭主屏、确认副屏进入待机；再反向唤醒；覆盖 DDC 不可读、应用退出和权限场景 |
+| 窗口列表、双屏铺满与还原 | Windows/macOS 已实现；macOS 需辅助功能授权；macOS 屏幕联合包围盒有横竖屏、负坐标及禁用屏测试 | macOS 窗口边界 3 项测试；跨平台编译 | 分别选择普通应用和视频窗口，跨不同分辨率/方向屏幕铺满，再确认原窗口位置和大小恢复 |
 | BetterDisplay 控件 | macOS 命令集接入，部分能力取决于 BetterDisplay 版本、Pro 和显示器 | macOS 编译 | 对每条菜单命令核对执行结果与实际屏幕状态；当前 DDC 读取曾超时，不能宣称电源控制已实测通过 |
 | 电池、ADB、自启 | 按平台接入；ADB 下载需用户接受 SDK 条款 | CI 编译 | 有设备时验证电量/网络 ADB；检查登录启动、升级后设置保留 |
 | 备份与一键还原 | 已有启动基线与恢复入口 | Rust/平台编译 | 对显示模式、窗口布局、色彩、电源逐项验证还原；测试中断与部分失败路径 |
@@ -34,9 +34,10 @@
 ## 最新交付核验（2026-10-16）
 
 - 源码候选：PR #1 `codex/screenguard-v0.4.31-mac-adaptation`，电源修复 commit `963391b98b298531e4c9d6753c44d8bc64bdfa6b`；证据文档 commit `749f319581e83d5894e03e39f03989f0194e2372`；PR 保持 open/draft，未合入 `main`。
-- CI：PR head `c0d04c3cdf7c683393ec7252e9197870a0aa6ec8` 的 run `38897994905` 仓库检查、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG 和 Windows NSIS 构建全部成功；tag 发布工作流配置检查 run `38897995115` 也成功（该 PR 触发的发行包和 Draft Release 工作未运行）。
+- CI：测试提交 `73958021ea2e6917bbc10c6d10cd615dd15e08cf` 的 run `38899909127` 成功；Node 24 Actions 更新提交 `1aea5b2250755f0e0a2f5a8ab776b33b69a636eb` 的 run `38900099781` 六项仓库检查、Mac/Windows/Ubuntu Rust 检查/测试以及双平台安装包构建全部成功；Draft desktop release 配置检查 run `38900099445` 成功（PR 触发时不执行发行包和 Draft Release job）。
 - CI 产物回读：macOS artifact `12044228631`（3,980,567 bytes）下载后 `hdiutil verify` 为 `VALID`，SHA-256 `e43928571b772339dab541ba4a107d170af816456bd9e1c888c00eb66a4fc9f5`。Windows artifact `12045165124`（2,298,498 bytes）为 `Screenguard_0.4.36_x64-setup.exe`，识别为 NSIS 自解压安装包，SHA-256 `3fabac4317798cb7aae148eed7f0d2759c9451ce4fd5f782fd14b3ac0139a2bb`；已复制到用户桌面供 Windows 机器试装，但尚未在 Windows 实机安装/运行。
 - 当前 PR head 的 Windows installer 与 Mac DMG artifact 构建步骤也已通过；上述下载校验值对应 run `38896724184` 的独立 artifact，不能混同为 run `38897994905` 的文件哈希。
+- 最新 run `38900099781` artifacts 已下载回读：Mac DMG `12046210139`（3,980,571 bytes），`hdiutil verify` 为 `VALID`，SHA-256 `340a43d20c48fe4e1ba965e9f342d5991248e6ae57c03e961f53a516f0837e85`；Windows installer `12044959989`（2,298,827 bytes），识别为 NSIS 自解压 PE32 安装包，SHA-256 `4623ad822fddbf2911e9fde48d409b2a7b1f484a0f097065829a566e2c4bf277`，并已复制至桌面供 Windows 实机试装。
 - 本机安装：`/Applications/Screenguard.app` 的 `CFBundleShortVersionString` 为 `0.4.36`；可执行文件 SHA-256 为 `14125b10f7b967e0cf6b2306b10b7b0d4f09ad566e1443ddce2e822a15aa4294`，与本机构建产物一致。原 0.4.35 App 备份位于 `~/Library/Application Support/Screenguard/backups/pre-0.4.36-app-install-20261016/`。
 - 本机安装包：`Screenguard_0.4.36_aarch64.dmg` 的 SHA-256 为 `0650de92e73493b9d6e57debd1462bb445dffcf4e9c6dec846af1c9bfa5b4085`；`hdiutil verify` 返回 `VALID`。
 - 本次范围没有更改用户原始主工作区的既有改动；所有尚未完成的实机、签名、公证和公开发布门槛继续保持未完成状态。
