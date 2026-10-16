@@ -76,9 +76,8 @@ pub fn which(program: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// 系统默认输出设备信息（CoreAudio 端点）
-/// 结构体放共享层：命令签名三平台一致，非 Windows 平台由下方存根返回明确错误
-/// （UI 侧音量卡也只在 Windows 显示，存根只是兜底）
+/// 系统默认输出设备信息（Windows CoreAudio 端点 / macOS 系统默认输出）
+/// 结构体放共享层：命令签名三平台一致，Linux 由下方存根返回明确错误。
 #[derive(Serialize, Clone, Debug)]
 pub struct SystemAudio {
     /// 端点友好名（如「扬声器 (2- Realtek(R) Audio)」「NE160QDM-NZ8 (NVIDIA High Definition Audio)」）
@@ -94,19 +93,19 @@ pub struct SystemAudio {
     pub form_factor: u32,
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn get_system_audio() -> Result<SystemAudio, String> {
-    Err("系统音量控制仅支持 Windows".to_string())
+    Err("Linux 系统音量控制尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_system_volume(_v: u32) -> Result<(), String> {
-    Err("系统音量控制仅支持 Windows".to_string())
+    Err("Linux 系统音量控制尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_system_mute(_on: bool) -> Result<(), String> {
-    Err("系统音量控制仅支持 Windows".to_string())
+    Err("Linux 系统静音控制尚未实现".to_string())
 }
 
 /// 带电池的连接设备（笔记本内电池 / USB·2.4G 无线键鼠 / 蓝牙耳机鼠标等）
@@ -189,7 +188,7 @@ pub fn match_dpi_restore() -> Result<String, String> {
     Err("跨屏缩放对齐仅支持 Windows".to_string())
 }
 
-/// 音频输出端点（Windows：CoreAudio 枚举；其它平台空）
+/// 音频输出端点（Windows 可枚举/切换；macOS 暴露系统默认端点）
 #[derive(Serialize, Clone, Debug)]
 pub struct AudioEndpoint {
     pub id: String,
@@ -214,24 +213,24 @@ pub fn span_window(_hwnd: i64, _mode: u32) -> Result<String, String> {
     Err("窗口铺满仅支持 macOS / Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn audio_endpoints() -> Result<Vec<AudioEndpoint>, String> {
-    Err("音频端点枚举仅支持 Windows".to_string())
+    Err("Linux 音频端点枚举尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_audio_device(_id: &str) -> Result<(), String> {
-    Err("音频端点选择仅支持 Windows".to_string())
+    Err("Linux 音频端点选择尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_system_volume_sel(_v: u32) -> Result<(), String> {
-    Err("系统音量控制仅支持 Windows".to_string())
+    Err("Linux 系统音量控制尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_system_mute_sel(_on: bool) -> Result<(), String> {
-    Err("系统静音控制仅支持 Windows".to_string())
+    Err("Linux 系统静音控制尚未实现".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

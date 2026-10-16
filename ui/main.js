@@ -364,7 +364,14 @@ async function loadAudio() {
   const muteBtn = document.getElementById('mute-btn');
   const sel = document.getElementById('audio-dev-sel');
   try {
+    const platform = await invoke('get_platform');
     card.style.display = '';
+    if (platform === 'macos') {
+      if (sel) sel.closest('.color-row').style.display = 'none';
+      document.getElementById('all-bri').closest('.slider-row').style.display = 'none';
+      document.getElementById('mitv-row').style.display = 'none';
+      document.getElementById('bri-reset').style.display = 'none';
+    }
     // v0.3.3：音量作用于「用户选定的输出端点」。默认输出若正好是固定音量的
     // HDMI/DP 显示器音频（Windows 自己的滑块也调不动），就自动落在一个可调的
     // 端点上，并把设备列出来让用户自己换 —— 不再出现「滑块动不了」的死路。
@@ -381,14 +388,18 @@ async function loadAudio() {
     if (!cur) { devEl.textContent = '没有可用的输出设备'; sl.disabled = true; return; }
     devEl.textContent = cur.name || '输出设备';
     sl.value = cur.volume;
-    val.textContent = cur.volume + '%';
+    val.textContent = cur.adjustable ? (cur.volume + '%') : '不可调';
     sysVol.muted = cur.mute;
     muteBtn.textContent = cur.mute ? '🔕 取消静音' : '🔇 静音';
     sl.disabled = !cur.adjustable;
     muteBtn.disabled = !cur.adjustable;
     hint.textContent = cur.adjustable
-      ? `控制的是上面选中的输出设备（与系统托盘音量同源）。总亮度作用于所有屏幕，不依赖 DDC。`
-      : '这个端点（显示器音频）是固定音量，Windows 自己的滑块也调不动 → 想调这块屏的喇叭，用下面的「小米音量」滑块（走显示器自己的系统）；或在上面的「输出设备」里换成扬声器/耳机。';
+      ? (platform === 'macos'
+        ? '控制 macOS 系统默认输出音量；输出设备切换请在系统设置中完成。'
+        : '控制的是上面选中的输出设备（与系统托盘音量同源）。总亮度作用于所有屏幕，不依赖 DDC。')
+      : (platform === 'macos'
+        ? 'macOS 当前未提供可读的默认输出音量，音量和静音控制已停用。'
+        : '这个端点（显示器音频）是固定音量，Windows 自己的滑块也调不动 → 想调这块屏的喇叭，用下面的「小米音量」滑块（走显示器自己的系统）；或在上面的「输出设备」里换成扬声器/耳机。');
   } catch (e) {
     card.style.display = '';
     devEl.textContent = '不可用';
@@ -985,10 +996,12 @@ document.getElementById('mute-btn').onclick = async () => {
     setBadge(names[p] || p);
     applyPlatformCopy(p);
     if (p === 'macos') document.getElementById('betterdisplay-card').style.display = '';
-    if (p === 'windows') {
-      // 系统音量卡：仅 Windows（CoreAudio 默认输出端点）
+    if (p === 'windows' || p === 'macos') {
+      // Windows 枚举 CoreAudio 端点；macOS 仅控制系统默认输出。
       document.getElementById('audio-card').style.display = '';
       await loadAudio();
+    }
+    if (p === 'windows') {
       // 电池设备卡：仅 Windows（Battery 设备类枚举）
       await loadBatteries();
     }

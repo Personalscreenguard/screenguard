@@ -1,4 +1,6 @@
-use super::{run_cmd, which, BatteryInfo, DisplayInfo, DisplayMode};
+use super::{
+    run_cmd, which, AudioEndpoint, BatteryInfo, DisplayInfo, DisplayMode, SystemAudio,
+};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -47,6 +49,101 @@ fn parse_internal_battery(output: &str) -> Option<BatteryInfo> {
         cap_mwh: 0,
         full_mwh: 0,
     })
+}
+
+/// Parse `osascript -e 'get volume settings'` without treating `missing value` as zero.
+fn parse_system_audio(output: &str) -> Result<SystemAudio, String> {
+    let mut volume = None;
+    let mut mute = None;
+    for field in output.split(',') {
+        let Some((key, value)) = field.trim().split_once(':') else {
+            continue;
+        };
+        match key.trim() {
+            "output volume" => {
+                volume = value.trim().parse::<u32>().ok().filter(|v| *v <= 100);
+            }
+            "output muted" => {
+                mute = match value.trim() {
+                    "true" => Some(true),
+                    "false" => Some(false),
+                    _ => None,
+                };
+            }
+            _ => {}
+        }
+    }
+    let adjustable = volume.is_some() && mute.is_some();
+    Ok(SystemAudio {
+        name: "macOS 系统默认输出".into(),
+        volume: volume.unwrap_or(0),
+        mute: mute.unwrap_or(false),
+        adjustable,
+        form_factor: 0,
+    })
+}
+
+fn require_adjustable_system_audio() -> Result<SystemAudio, String> {
+    let output = run_cmd("/usr/bin/osascript", &["-e", "get volume settings"])
+        .map_err(|error| format!("读取 macOS 系统音量失败：{}", error))?;
+    let audio = parse_system_audio(&output)?;
+    if !audio.adjustable {
+        return Err("macOS 当前没有提供可调节的系统默认输出音量".into());
+    }
+    Ok(audio)
+}
+
+/// Read the macOS system default output; no per-device routing is exposed by this control.
+pub fn get_system_audio() -> Result<SystemAudio, String> {
+    let output = run_cmd("/usr/bin/osascript", &["-e", "get volume settings"])
+        .map_err(|error| format!("读取 macOS 系统音量失败：{}", error))?;
+    parse_system_audio(&output)
+}
+
+pub fn set_system_volume(value: u32) -> Result<(), String> {
+    require_adjustable_system_audio()?;
+    let script = format!("set volume output volume {}", value.min(100));
+    run_cmd("/usr/bin/osascript", &["-e", &script])
+        .map(|_| ())
+        .map_err(|error| format!("设置 macOS 系统音量失败：{}", error))
+}
+
+pub fn set_system_mute(on: bool) -> Result<(), String> {
+    require_adjustable_system_audio()?;
+    let script = format!("set volume output muted {}", if on { "true" } else { "false" });
+    run_cmd("/usr/bin/osascript", &["-e", &script])
+        .map(|_| ())
+        .map_err(|error| format!("设置 macOS 系统静音失败：{}", error))
+}
+
+pub fn audio_endpoints() -> Result<Vec<AudioEndpoint>, String> {
+    let audio = get_system_audio()?;
+    Ok(vec![AudioEndpoint {
+        id: "macos-system-default".into(),
+        name: audio.name,
+        volume: audio.volume,
+        mute: audio.mute,
+        adjustable: audio.adjustable,
+        form_factor: audio.form_factor,
+        selected: true,
+        is_default: true,
+    }])
+}
+
+pub fn set_audio_device(id: &str) -> Result<(), String> {
+    if id == "macos-system-default" {
+        Ok(())
+    } else {
+        Err("macOS 输出设备切换请在系统设置中进行".into())
+    }
+}
+
+pub fn set_system_volume_sel(value: u32) -> Result<(), String> {
+    set_system_volume(value)
+}
+
+pub fn set_system_mute_sel(on: bool) -> Result<(), String> {
+    set_system_mute(on)
 }
 
 pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
@@ -294,7 +391,38 @@ pub fn platform_name() -> &'static str {
 
 #[cfg(test)]
 mod battery_tests {
-    use super::{parse_adb_devices, parse_internal_battery};
+    use super::{parse_adb_devices, parse_internal_battery, parse_system_audio};
+
+    #[test]
+    fn parses_adjustable_default_output_volume_and_mute() {
+        let audio = parse_system_audio(
+            "output volume:55, input volume:38, alert volume:100, output muted:false",
+        )
+        .expect("audio settings should parse");
+        assert_eq!(audio.volume, 55);
+        assert!(!audio.mute);
+        assert!(audio.adjustable);
+    }
+
+    #[test]
+    fn missing_default_output_values_are_not_faked_as_adjustable() {
+        let audio = parse_system_audio(
+            "output volume:missing value, input volume:38, alert volume:100, output muted:missing value",
+        )
+        .expect("missing values should be represented safely");
+        assert_eq!(audio.volume, 0);
+        assert!(!audio.mute);
+        assert!(!audio.adjustable);
+    }
+
+    #[test]
+    fn rejects_out_of_range_default_output_volume() {
+        let audio = parse_system_audio(
+            "output volume:101, input volume:38, alert volume:100, output muted:false",
+        )
+        .expect("unavailable values should still parse safely");
+        assert!(!audio.adjustable);
+    }
 
     #[test]
     fn parses_ac_power_and_not_charging_state() {

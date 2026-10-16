@@ -582,7 +582,13 @@ document.getElementById('bri-reset').onclick = async ()=>{
   catch(e){ pwHint('复位失败：' + (e && e.message ? e.message : e), true); }
 };
 document.getElementById('mute-btn2').onclick = async ()=>{
-  try { await invoke('set_system_mute', { on: true }); pwHint('已静音系统输出'); }
+  try {
+    const state = await invoke('get_system_audio');
+    const want = !state.mute;
+    await invoke('set_system_mute', { on: want });
+    document.getElementById('mute-btn2').textContent = want ? '🔕 取消静音' : '🔇 静音';
+    pwHint(want ? '已静音系统输出' : '已取消静音');
+  }
   catch(e){ pwHint('静音失败：' + (e && e.message ? e.message : e), true); }
 };
 
@@ -669,10 +675,18 @@ function sendSysVol(val){
 async function loadAudio(){
   try {
     const p = await invoke('get_platform');
-    if (p !== 'windows') return;
+    if (p !== 'windows' && p !== 'macos') return;
     document.getElementById('audio-sec').style.display = '';
     document.getElementById('audio-grp').style.display = '';
     const sl = document.getElementById('sys-vol');
+    const devRow = document.getElementById('audio-dev-sel').closest('.srow');
+    const brightnessRow = document.getElementById('all-bri').closest('.srow');
+    const brightnessReset = document.getElementById('bri-reset');
+    if (p === 'macos') {
+      devRow.style.display = 'none';
+      brightnessRow.style.display = 'none';
+      brightnessReset.style.display = 'none';
+    }
     // v0.3.3：音量作用于「用户选定的输出端点」。默认输出若是固定音量的 HDMI/DP
     // 显示器音频（Windows 滑块也调不动），自动落到一个可调端点上并列出设备供切换。
     const eps = await invoke('audio_endpoints');
@@ -695,10 +709,15 @@ async function loadAudio(){
     if (!cur) { document.getElementById('audio-dev').textContent = '没有可用的输出设备'; return; }
     sl.disabled = !cur.adjustable;
     sl.value = cur.volume;
-    document.getElementById('sys-vol-val').textContent = cur.volume + '%';
+    document.getElementById('sys-vol-val').textContent = cur.adjustable ? (cur.volume + '%') : '不可调';
     let txt = cur.name || '输出设备';
-    if (!cur.adjustable) txt += '｜此端点固定音量（Windows 也调不动）→ 在上面的「设备」里换一个';
+    if (!cur.adjustable) txt += p === 'macos'
+      ? '｜macOS 未提供可读的默认输出音量，控制已停用'
+      : '｜此端点固定音量（Windows 也调不动）→ 在上面的「设备」里换一个';
     document.getElementById('audio-dev').textContent = txt;
+    const muteButton = document.getElementById('mute-btn2');
+    muteButton.disabled = !cur.adjustable;
+    muteButton.textContent = cur.mute ? '🔕 取消静音' : '🔇 静音';
     if (!sl.dataset.bound) {
       sl.dataset.bound = '1';
       sl.addEventListener('input', ev=>{

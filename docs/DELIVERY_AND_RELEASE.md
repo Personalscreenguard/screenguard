@@ -1,13 +1,13 @@
 # Screenguard 桌面端交付状态与发布流程
 
-状态快照：2026-10-16，源码版本 0.4.38。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
+状态快照：2026-10-16，源码版本 0.4.39。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
 
 ## 发布目标
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | CI run `38919104377` 中 Windows Rust 检查和 NSIS 构建成功；0.4.38 安装包 artifact 已回读并计算 SHA-256 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.38 本机 15 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；CI run `38919104377` macOS 检查和 DMG 构建成功，DMG 校验有效 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| Windows x64 | NSIS 安装包 | 0.4.38 的 CI run `38919104377` 中 Windows Rust 检查和 NSIS 构建成功；0.4.39 跨平台 CI 待验证 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | 0.4.39 本机 18 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；DMG 校验有效；0.4.39 CI 待验证 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -18,6 +18,7 @@
 |---|---|---|---|
 | 显示器枚举、模式与排列 | Windows/macOS 已实现 | 双平台编译和 Rust 单测 | 不同 GPU、扩展坞和混合 DPI 屏幕核验 |
 | 亮度/音量/色彩控制 | Windows/macOS 按 DDC、系统接口或 ICC 路径实现 | 编译/语法检查 | 按具体显示器确认写入与回读；不支持时 UI 必须明确报错 |
+| 系统音量 | Windows 可枚举并选择 CoreAudio 端点；macOS 读取/设置系统默认输出音量与静音，不提供应用内输出设备切换 | macOS 解析单测覆盖有效、缺失、越界数据；当前 Mac 实际接口返回 `missing value`，UI 停用控制且不发送设置 | 在提供系统输出音量的 Mac 上确认音量/静音生效及系统托盘同步；确认显示器音频等固定音量输出被如实禁用 |
 | 电源联动 | 默认关闭的用户开关、持久化状态和原生后台监听；macOS VCP `0xD6` 读取器解析模式 1–5，电源转换识别模式 2/3/4/5 | macOS 电源转换与 DDC 解析 Rust 单测；三平台 CI | 真实关闭主屏、确认副屏进入待机；再反向唤醒；覆盖 DDC 不可读、应用退出和权限场景 |
 | 窗口列表、双屏铺满与还原 | Windows/macOS 已实现；macOS 需辅助功能授权；macOS 屏幕联合包围盒有横竖屏、负坐标及禁用屏测试 | macOS 窗口边界 3 项测试；跨平台编译 | 分别选择普通应用和视频窗口，跨不同分辨率/方向屏幕铺满，再确认原窗口位置和大小恢复 |
 | BetterDisplay 控件 | macOS 命令集接入，部分能力取决于 BetterDisplay 版本、Pro 和显示器 | macOS 编译 | 对每条菜单命令核对执行结果与实际屏幕状态；当前 DDC 读取曾超时，不能宣称电源控制已实测通过 |
@@ -40,6 +41,13 @@
 - 代码提交 CI run `38919104377` 全部成功：仓库自检、macOS/Windows/Ubuntu Rust 检查，以及 macOS DMG 和 Windows NSIS 构建。
 - CI 产物回读：macOS artifact `12053109203`（3,983,512 bytes），`hdiutil verify` 为 `VALID`，SHA-256 `309c733c2681b7b3df09de568fbb4f395c9eb3badc6a46eaefe7d83da07ee941`；Windows artifact `12053254261`（2,299,316 bytes），识别为 NSIS 自解压 GUI 安装包，SHA-256 `11b8c5c1345958ada3bd99b03c166aa0bf9c817a86ce841342d702e5cae107a5`。两者已复制到桌面并通过 SHA-256 sidecar 校验；Windows 安装尚未实机验收。
 - PR 保持 open/draft；电源联动、窗口铺满/还原仍需实体双屏及辅助功能权限验收。
+
+## v0.4.39 当前交付核验（2026-10-16）
+
+- macOS 新增系统默认输出音量/静音读取与设置；不伪装设备列表或输出路由切换。`osascript get volume settings` 的 `missing value` 被视为不可调，UI 禁用音量/静音，并且设置命令在确认当前端点可调前不会执行。
+- 本地 `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` 18/18 通过；`cargo check --locked`、仓库自检、前端脚本语法检查、版本一致性和 `git diff --check` 通过。
+- Apple Silicon Release/DMG 构建成功；DMG SHA-256 `4daf97f4ce83bc783d81934f66e221e9abfdafd4b40e3e77e999e86b40542c4a`，`hdiutil verify` 为 `VALID`。安装前 0.4.38 App 已完整备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.39-app-install-20261016/`；当前 `/Applications/Screenguard.app` 为 0.4.39，运行二进制哈希 `489b79c0882db5af29284c06efdc123933760c450666813598fcc81a82c60c49` 与构建产物一致。
+- 当前 Mac 返回 `output volume:missing value`、`output muted:missing value`，因此仅证明安全停用路径；实际音量变化、双屏电源联动、窗口跨屏和辅助功能仍未做硬件/交互验收。代码 CI 与 Windows 产物待提交后验证。
 
 ## v0.4.37 历史交付核验（2026-10-16）
 
