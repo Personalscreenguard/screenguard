@@ -4,6 +4,8 @@
 
 面向**双屏日常用户**：主屏 27" 4K + 便携副屏（横/竖切换）的亮度/音量/色彩/布局一体化控制，支持跨屏看电影（VLC 无边框铺满）。
 
+桌面端发布门槛、平台验收矩阵与 Draft Release 流程见 [交付与发布说明](docs/DELIVERY_AND_RELEASE.md)。
+
 ## 功能
 
 | 模块 | 说明 | macOS | Windows | Linux |
