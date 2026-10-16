@@ -7,7 +7,7 @@
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
 | Windows x64 | NSIS 安装包 | 0.4.42 CI run `38930181257` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包已下载回读并识别为 NSIS | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.43 Mac 面板使用 Quartz 逐屏显示当前系统睡眠状态；隐藏 Windows 专属事件日志修复与自动修复设置。本机 Release/DMG 已构建、验证、安装并运行；PR CI 待本次推送后确认 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| macOS Apple Silicon | DMG | 0.4.43 Mac 面板使用 Quartz 逐屏显示当前系统睡眠状态；隐藏 Windows 专属事件日志修复与自动修复设置。本机及 CI Release/DMG 均构建成功、CI 包验证回读；本机版本已安装运行 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -72,7 +72,10 @@
 - 本机 `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` 22/22 通过；`scripts/check_repo.py`、`node --check ui/main.js`、内嵌脚本语法和 `git diff --check` 通过。当前 Command Line Tools 默认 MacOSX27.0 SDK 与本机 linker 不兼容；显式使用 `/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk` 后测试及构建成功。
 - Apple Silicon Release/DMG 构建成功：`/tmp/screenguard-v0443-target/release/bundle/dmg/Screenguard_0.4.43_aarch64.dmg`，SHA-256 `947169c4d3548f1efef0ccf812426e10e0be4fd47c2a7a9a688ad69e949f53b0`，`hdiutil verify` 为 `VALID`。桌面副本 `/Users/nanyu/Desktop/Screenguard_0.4.43_aarch64.dmg` 和 sidecar 校验通过。
 - 修改前 `/Applications/Screenguard.app` 0.4.42 备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.43-app-install-20261017/`。当前已安装并运行 0.4.43；运行进程 `/Applications/Screenguard.app/Contents/MacOS/screenguard`，二进制 SHA-256 `b55c0d64ae2c124a96c33450e9d3c56809590cc62228cd1d8aa94f4d2a32534b` 与本机 Release 构建一致。
-- PR CI 尚待本次代码提交推送后运行。实体双屏电源跟随、跨屏窗口实测、Windows 真机验收、Developer ID 签名和公证仍待完成。
+- PR 代码 commit `7d6be10a10f477a2e741b83cb9c409d8197df695` 对应 CI run `38954826601` 全部成功：仓库自检、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG 和 Windows NSIS 构建。Draft desktop release workflow run `38954826540` 成功。
+- CI artifact `12070547413`（ZIP 3,989,253 bytes，GitHub digest `cc1e764a18dc6392f5071c5e40f020ee7f0e9108799084a43f18cf04d3f1bcf2`）解出 DMG 4,020,193 bytes，SHA-256 `adacae454b280b4ba22df5e4594ca2cff4255314fb569285ee7856116b5e7599`，`hdiutil verify` 为 `VALID`；桌面副本 `Screenguard_0.4.43_aarch64-ci-38954826601.dmg` sidecar 校验通过。
+- CI artifact `12070522871`（ZIP 2,305,136 bytes，GitHub digest `b19408d6af51b8a300fa03df9ce286d02cd5cf58918ed01f0da8c69dbf0b4168`）解出 Windows 安装包 2,325,340 bytes，SHA-256 `c10b36320806611d48ffdf27438c9069e952a9720f8e33cb3d99f4e566529cd5`，识别为 NSIS 自解压 GUI 安装包；桌面副本 `Screenguard_0.4.43_x64-setup-ci-38954826601.exe` sidecar 校验通过。Windows 安装和运行仍未在 Windows 实机验收。
+- 实体双屏电源跟随、跨屏窗口实测、Windows 真机验收、Developer ID 签名和公证仍待完成。
 
 ## v0.4.40 交付核验（2026-10-16）
 
