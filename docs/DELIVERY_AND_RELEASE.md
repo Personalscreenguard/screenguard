@@ -33,8 +33,9 @@
 
 ## 最新交付核验（2026-10-16）
 
-- 源码候选：PR #1 `codex/screenguard-v0.4.31-mac-adaptation`，commit `963391b98b298531e4c9d6753c44d8bc64bdfa6b`；PR 保持 open/draft，未合入 `main`。
-- CI：run `38895722071` 的仓库检查、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG 和 Windows NSIS 构建全部成功。
+- 源码候选：PR #1 `codex/screenguard-v0.4.31-mac-adaptation`，电源修复 commit `963391b98b298531e4c9d6753c44d8bc64bdfa6b`；证据文档 commit `749f319581e83d5894e03e39f03989f0194e2372`；PR 保持 open/draft，未合入 `main`。
+- CI：run `38895722071` 的仓库检查、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG 和 Windows NSIS 构建全部成功；文档同步后的 run `38896724184` 也全部成功。
+- CI 产物回读：macOS artifact `12044228631`（3,980,567 bytes）下载后 `hdiutil verify` 为 `VALID`，SHA-256 `e43928571b772339dab541ba4a107d170af816456bd9e1c888c00eb66a4fc9f5`。Windows artifact `12045165124`（2,298,498 bytes）为 `Screenguard_0.4.36_x64-setup.exe`，识别为 NSIS 自解压安装包，SHA-256 `3fabac4317798cb7aae148eed7f0d2759c9451ce4fd5f782fd14b3ac0139a2bb`；已复制到用户桌面供 Windows 机器试装，但尚未在 Windows 实机安装/运行。
 - 本机安装：`/Applications/Screenguard.app` 的 `CFBundleShortVersionString` 为 `0.4.36`；可执行文件 SHA-256 为 `14125b10f7b967e0cf6b2306b10b7b0d4f09ad566e1443ddce2e822a15aa4294`，与本机构建产物一致。原 0.4.35 App 备份位于 `~/Library/Application Support/Screenguard/backups/pre-0.4.36-app-install-20261016/`。
 - 本机安装包：`Screenguard_0.4.36_aarch64.dmg` 的 SHA-256 为 `0650de92e73493b9d6e57debd1462bb445dffcf4e9c6dec846af1c9bfa5b4085`；`hdiutil verify` 返回 `VALID`。
 - 本次范围没有更改用户原始主工作区的既有改动；所有尚未完成的实机、签名、公证和公开发布门槛继续保持未完成状态。
