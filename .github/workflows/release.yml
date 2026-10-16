@@ -12,7 +12,7 @@ permissions:
 jobs:
   workflow-check:
     name: 发布工作流配置检查
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: 校验版本和仓库完整性
@@ -138,7 +138,7 @@ jobs:
 
   create-draft-release:
     name: Create or update GitHub draft release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [package-macos, package-windows]
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
