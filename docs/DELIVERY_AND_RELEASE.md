@@ -1,13 +1,13 @@
 # Screenguard 桌面端交付状态与发布流程
 
-状态快照：2026-10-16，源码版本 0.4.39。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
+状态快照：2026-10-16，源码版本 0.4.40。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
 
 ## 发布目标
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | 0.4.38 的 CI run `38919104377` 中 Windows Rust 检查和 NSIS 构建成功；0.4.39 跨平台 CI 待验证 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.39 本机 18 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；DMG 校验有效；0.4.39 CI 待验证 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| Windows x64 | NSIS 安装包 | 0.4.39 CI run `38922598089` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包 artifact 已下载回读、识别为 NSIS 并计算 SHA-256 | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | 0.4.40 本机 21 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；DMG 校验有效；0.4.40 CI 待验证 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -19,7 +19,7 @@
 | 显示器枚举、模式与排列 | Windows/macOS 已实现 | 双平台编译和 Rust 单测 | 不同 GPU、扩展坞和混合 DPI 屏幕核验 |
 | 亮度/音量/色彩控制 | Windows/macOS 按 DDC、系统接口或 ICC 路径实现 | 编译/语法检查 | 按具体显示器确认写入与回读；不支持时 UI 必须明确报错 |
 | 系统音量 | Windows 可枚举并选择 CoreAudio 端点；macOS 读取/设置系统默认输出音量与静音，不提供应用内输出设备切换 | macOS 解析单测覆盖有效、缺失、越界数据；当前 Mac 实际接口返回 `missing value`，UI 停用控制且不发送设置 | 在提供系统输出音量的 Mac 上确认音量/静音生效及系统托盘同步；确认显示器音频等固定音量输出被如实禁用 |
-| 电源联动 | 默认关闭的用户开关、持久化状态和原生后台监听；macOS VCP `0xD6` 读取器解析模式 1–5，电源转换识别模式 2/3/4/5 | macOS 电源转换与 DDC 解析 Rust 单测；三平台 CI | 真实关闭主屏、确认副屏进入待机；再反向唤醒；覆盖 DDC 不可读、应用退出和权限场景 |
+| 电源联动 | 默认关闭的用户开关、持久化状态和原生后台监听；macOS 结合 VCP `0xD6` 与 CoreGraphics 单屏睡眠状态检测，失败时使用系统级待机/唤醒兜底 | macOS DDC/Quartz 转换策略单测；三平台 CI | 真实关闭主屏、确认副屏进入待机；再反向唤醒。物理断电但 macOS 仍报告显示器在线且唤醒时，系统没有可检测信号 |
 | 窗口列表、双屏铺满与还原 | Windows/macOS 已实现；macOS 需辅助功能授权；macOS 屏幕联合包围盒有横竖屏、负坐标及禁用屏测试 | macOS 窗口边界 3 项测试；跨平台编译 | 分别选择普通应用和视频窗口，跨不同分辨率/方向屏幕铺满，再确认原窗口位置和大小恢复 |
 | BetterDisplay 控件 | macOS 命令集接入，部分能力取决于 BetterDisplay 版本、Pro 和显示器 | macOS 编译 | 对每条菜单命令核对执行结果与实际屏幕状态；当前 DDC 读取曾超时，不能宣称电源控制已实测通过 |
 | 电池、ADB、自启 | 按平台接入；ADB 下载需用户接受 SDK 条款 | CI 编译 | 有设备时验证电量/网络 ADB；检查登录启动、升级后设置保留 |
@@ -47,7 +47,15 @@
 - macOS 新增系统默认输出音量/静音读取与设置；不伪装设备列表或输出路由切换。`osascript get volume settings` 的 `missing value` 被视为不可调，UI 禁用音量/静音，并且设置命令在确认当前端点可调前不会执行。
 - 本地 `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` 18/18 通过；`cargo check --locked`、仓库自检、前端脚本语法检查、版本一致性和 `git diff --check` 通过。
 - Apple Silicon Release/DMG 构建成功；DMG SHA-256 `4daf97f4ce83bc783d81934f66e221e9abfdafd4b40e3e77e999e86b40542c4a`，`hdiutil verify` 为 `VALID`。安装前 0.4.38 App 已完整备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.39-app-install-20261016/`；当前 `/Applications/Screenguard.app` 为 0.4.39，运行二进制哈希 `489b79c0882db5af29284c06efdc123933760c450666813598fcc81a82c60c49` 与构建产物一致。
-- 当前 Mac 返回 `output volume:missing value`、`output muted:missing value`，因此仅证明安全停用路径；实际音量变化、双屏电源联动、窗口跨屏和辅助功能仍未做硬件/交互验收。代码 CI 与 Windows 产物待提交后验证。
+- 当前 Mac 返回 `output volume:missing value`、`output muted:missing value`，因此仅证明安全停用路径；实际音量变化和硬件/交互验收仍未完成。
+- 代码提交 `570bb50d5c111694a99c3da5cc879bfceffb051d` 的 CI run `38922598089` 全部成功。Mac artifact `12054578968`（3,985,907 bytes）DMG SHA-256 `86bd15787b81a3589802612c9b175b4b285ddd487c71cc5c6a4a8e587b6b47ae`，`hdiutil verify` 为 `VALID`；Windows artifact `12054549822`（2,297,257 bytes）NSIS 安装包 SHA-256 `4569e6c160486318ea2ecc77c75f6fbea850bedf84f67a33f9d8e1d74a263050`。两包均复制到桌面并通过 SHA-256 sidecar 校验；Windows 包尚未实机安装。
+
+## v0.4.40 当前交付核验（2026-10-16）
+
+- macOS 原生后台联动新增 CoreGraphics `CGDisplayIsAsleep` 单屏睡眠传感器，在 DDC VCP `0xD6` 无法读取时作为独立来源；单屏状态变化可触发同步，多屏并发或与 DDC 冲突时不猜测来源。DDC 目标控制失败仍走 macOS 系统级待机/唤醒兜底。
+- 本地 Rust 单测 21/21、`cargo check`、仓库自检、前端脚本语法检查和版本一致性通过；Apple Silicon Release/DMG 构建成功。DMG SHA-256 `e6b241b1cbec338f0175de385b6e1c9ddaeb651bf1d9475f7d9a8b55bd49a9f5`，`hdiutil verify` 为 `VALID`；桌面副本及 sidecar 校验通过。
+- 已将原 0.4.39 安装备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.40-app-install-20261016/`；当前 `/Applications/Screenguard.app` 为 0.4.40，运行二进制 SHA-256 `ec21022c1208e68afd4bd5fe92c15c4e1fb6868fe3dfb9230280c4122e290993` 与构建产物一致。
+- 该 API 反映 macOS 认定的显示器睡眠状态；若外接屏物理断电后仍在线且系统仍报告唤醒，仍无法得知硬件电源变化。真实关屏/唤醒跟随仍需双屏实测。
 
 ## v0.4.37 历史交付核验（2026-10-16）
 

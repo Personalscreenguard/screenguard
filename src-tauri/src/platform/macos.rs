@@ -14,6 +14,7 @@ extern "C" {
     fn CGCancelDisplayConfiguration(config: CGDisplayConfigRef) -> i32;
     fn CGConfigureDisplayOrigin(config: CGDisplayConfigRef, display: u32, x: i32, y: i32) -> i32;
     fn CGCompleteDisplayConfiguration(config: CGDisplayConfigRef, option: u32) -> i32;
+    fn CGDisplayIsAsleep(display: u32) -> u32;
 }
 
 const BETTERDISPLAY: &str = "/Applications/BetterDisplay.app/Contents/MacOS/BetterDisplay";
@@ -545,6 +546,20 @@ pub fn display_snapshot() -> Vec<String> {
         .collect();
     ids.sort();
     ids
+}
+
+/// Per-display macOS sleep state reported by Quartz, independent of DDC/CI.
+pub fn display_sleep_states() -> Vec<(String, bool)> {
+    parse_screens()
+        .into_iter()
+        .filter(|screen| screen.enabled)
+        .filter_map(|screen| {
+            screen.ctx.map(|display| {
+                let asleep = unsafe { CGDisplayIsAsleep(display) != 0 };
+                (screen.id, asleep)
+            })
+        })
+        .collect()
 }
 
 // ===== 开机自启（LaunchAgent）=====

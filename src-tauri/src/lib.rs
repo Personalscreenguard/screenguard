@@ -950,6 +950,41 @@ fn macos_power_transition(
     }
 }
 
+/// Use macOS Quartz sleep state as a second per-display sensor when VCP 0xD6 is unreadable.
+#[cfg(any(target_os = "macos", test))]
+fn macos_display_sleep_transition(
+    previous: &std::collections::HashMap<String, bool>,
+    current: &std::collections::HashMap<String, bool>,
+) -> Option<(String, &'static str)> {
+    let mut changes = Vec::new();
+    for (id, was_asleep) in previous {
+        let Some(is_asleep) = current.get(id) else {
+            continue;
+        };
+        if was_asleep != is_asleep {
+            changes.push((id.clone(), if *is_asleep { "off" } else { "on" }));
+        }
+    }
+    if changes.len() == 1 {
+        changes.pop()
+    } else {
+        None
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn combine_macos_power_transitions(
+    ddc: Option<(String, &'static str)>,
+    system_sleep: Option<(String, &'static str)>,
+) -> Option<(String, &'static str)> {
+    match (ddc, system_sleep) {
+        (Some(ddc), Some(system_sleep)) if ddc == system_sleep => Some(ddc),
+        (Some(_), Some(_)) => None,
+        (Some(transition), None) | (None, Some(transition)) => Some(transition),
+        (None, None) => None,
+    }
+}
+
 #[cfg(any(target_os = "macos", test))]
 fn macos_should_fallback_to_system_power(source_id: &str, ddc_failures: usize) -> bool {
     source_id.is_empty() || ddc_failures > 0
@@ -957,7 +992,10 @@ fn macos_should_fallback_to_system_power(source_id: &str, ddc_failures: usize) -
 
 #[cfg(test)]
 mod macos_power_transition_tests {
-    use super::{macos_power_transition, macos_should_fallback_to_system_power};
+    use super::{
+        combine_macos_power_transitions, macos_display_sleep_transition,
+        macos_power_transition, macos_should_fallback_to_system_power,
+    };
     use std::collections::HashMap;
 
     fn readings(values: &[(&str, u32)]) -> HashMap<String, u32> {
@@ -1037,6 +1075,54 @@ mod macos_power_transition_tests {
         assert!(macos_should_fallback_to_system_power("main", 1));
         assert!(!macos_should_fallback_to_system_power("main", 0));
     }
+
+    #[test]
+    fn detects_single_coregraphics_display_sleep_and_wake() {
+        let awake = readings_bool(&[("main", false), ("secondary", false)]);
+        let main_asleep = readings_bool(&[("main", true), ("secondary", false)]);
+        assert_eq!(
+            macos_display_sleep_transition(&awake, &main_asleep),
+            Some(("main".into(), "off"))
+        );
+        assert_eq!(
+            macos_display_sleep_transition(&main_asleep, &awake),
+            Some(("main".into(), "on"))
+        );
+    }
+
+    #[test]
+    fn ignores_ambiguous_or_new_coregraphics_sleep_states() {
+        let awake = readings_bool(&[("main", false), ("secondary", false)]);
+        let both_asleep = readings_bool(&[("main", true), ("secondary", true)]);
+        let new_display = readings_bool(&[("main", false), ("new", true)]);
+        assert_eq!(macos_display_sleep_transition(&awake, &both_asleep), None);
+        assert_eq!(macos_display_sleep_transition(&awake, &new_display), None);
+    }
+
+    #[test]
+    fn rejects_conflicting_ddc_and_coregraphics_transitions() {
+        assert_eq!(
+            combine_macos_power_transitions(
+                Some(("main".into(), "off")),
+                Some(("secondary".into(), "on")),
+            ),
+            None
+        );
+        assert_eq!(
+            combine_macos_power_transitions(
+                Some(("main".into(), "off")),
+                Some(("main".into(), "off")),
+            ),
+            Some(("main".into(), "off"))
+        );
+    }
+
+    fn readings_bool(values: &[(&str, bool)]) -> std::collections::HashMap<String, bool> {
+        values
+            .iter()
+            .map(|(id, asleep)| ((*id).to_string(), *asleep))
+            .collect()
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1049,6 +1135,7 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
         let mut was_enabled = false;
         let mut previous_online: Vec<String> = Vec::new();
         let mut previous_power: HashMap<String, u32> = HashMap::new();
+        let mut previous_sleep: HashMap<String, bool> = HashMap::new();
         let mut pending: Option<(String, u8)> = None;
 
         loop {
@@ -1065,6 +1152,7 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
                 was_enabled = false;
                 previous_online.clear();
                 previous_power.clear();
+                previous_sleep.clear();
                 pending = None;
                 continue;
             }
@@ -1075,6 +1163,7 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
                 was_enabled = true;
                 previous_online = current.clone();
                 previous_power.clear();
+                previous_sleep = platform::display_sleep_states().into_iter().collect();
                 for id in &current {
                     if let Ok(mode) = platform::get_display_power(id) {
                         previous_power.insert(id.clone(), mode);
@@ -1093,7 +1182,7 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
                     )
                 } else {
                     format!(
-                        "macOS 后台联动已启动；仅 {}/{} 台显示器可读取 DDC 电源状态。请启动 BetterDisplay，并在 设置 > Application > Integration 中开启 CLI access and notification based integration；同时检查显示器的 DDC Control。不可读的屏幕只能在 macOS 检测到断开/重连时联动；若物理关屏后仍留在显示器列表中，macOS 无法识别其关屏状态。",
+                        "macOS 后台联动已启动；{}/{} 台显示器可读取 DDC 电源状态，另监测 macOS Quartz 单屏睡眠状态。请启动 BetterDisplay 并检查 DDC Control。若显示器物理断电后仍在线、DDC 不可读且 macOS 仍报告唤醒，则系统没有可用信号识别这次物理关屏。",
                         readable,
                         current.len(),
                     )
@@ -1109,14 +1198,20 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
                 };
                 readings.insert(id.clone(), mode);
             }
+            let sleep_readings: HashMap<String, bool> =
+                platform::display_sleep_states().into_iter().collect();
 
             // 多屏同时出现相反/并发电源变化时不猜测来源，避免把其它屏幕也反向切换。
             // 旧显示器关机后从在线列表消失时，helper 会回退到稳定的断开/重连事件。
-            let transition =
+            let ddc_transition =
                 macos_power_transition(&previous_online, &current, &previous_power, &readings);
+            let sleep_transition =
+                macos_display_sleep_transition(&previous_sleep, &sleep_readings);
+            let transition = combine_macos_power_transitions(ddc_transition, sleep_transition);
 
             let Some((source_id, direction)) = transition else {
                 previous_online = current.clone();
+                previous_sleep = sleep_readings;
                 for (id, mode) in readings {
                     previous_power.insert(id, mode);
                 }
@@ -1139,6 +1234,7 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
 
             pending = None;
             previous_online = current.clone();
+            previous_sleep = sleep_readings;
             for (id, mode) in readings {
                 previous_power.insert(id, mode);
             }
