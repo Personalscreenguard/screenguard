@@ -1,0 +1,181 @@
+name: Draft desktop release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  workflow-check:
+    name: 发布工作流配置检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验版本和仓库完整性
+        run: python scripts/check_repo.py
+
+  package-macos:
+    name: Apple Silicon macOS DMG
+    runs-on: macos-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - name: 确认 tag 版本与应用版本一致
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python3 - "$VERSION" <<'PY'
+          import json, sys, tomllib
+          version = sys.argv[1]
+          with open("package.json", encoding="utf-8") as f:
+              package = json.load(f)["version"]
+          with open("src-tauri/tauri.conf.json", encoding="utf-8") as f:
+              app = json.load(f)["version"]
+          with open("src-tauri/Cargo.toml", "rb") as f:
+              cargo = tomllib.load(f)["package"]["version"]
+          if {version, package, app, cargo} != {version}:
+              raise SystemExit(f"tag={version}, package={package}, tauri={app}, cargo={cargo}")
+          PY
+      - name: 运行仓库自检与 Rust 单测
+        run: |
+          python3 scripts/check_repo.py
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: 安装前端依赖
+        run: npm ci
+      - name: 构建 Apple Silicon App 与 DMG
+        run: npm run build -- --target aarch64-apple-darwin
+      - name: 生成安装包与 SHA-256
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          shopt -s nullglob
+          files=(src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+          test "${#files[@]}" -eq 1
+          name="Screenguard_${GITHUB_REF_NAME#v}_aarch64.dmg"
+          cp "${files[0]}" "release-assets/$name"
+          shasum -a 256 "release-assets/$name" > "release-assets/$name.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-aarch64
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  package-windows:
+    name: Windows x64 NSIS installer
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 确认 tag 版本与应用版本一致
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import json, os, tomllib
+          from pathlib import Path
+          expected = os.environ["TAG_VERSION"]
+          if not expected.startswith("v"):
+              raise SystemExit(f"release tag must start with v: {expected}")
+          expected = expected[1:]
+          package = json.loads(Path("package.json").read_text())["version"]
+          tauri = json.loads(Path("src-tauri/tauri.conf.json").read_text())["version"]
+          with Path("src-tauri/Cargo.toml").open("rb") as f:
+              cargo = tomllib.load(f)["package"]["version"]
+          if any(value != expected for value in (package, tauri, cargo)):
+              raise SystemExit(f"tag={expected}, package={package}, tauri={tauri}, cargo={cargo}")
+          PY
+      - name: 仓库自检、C# 桥接检查与 Rust 单测
+        run: |
+          python scripts/check_repo.py
+          python scripts/check_cs.py
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: 安装前端依赖
+        run: npm ci
+      - name: 构建 Windows x64 安装包
+        run: npm run build:win
+      - name: 生成安装包与 SHA-256
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          $files = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if ($files.Count -ne 1) { throw "Expected one NSIS installer, found $($files.Count)" }
+          $name = "Screenguard_$($env:GITHUB_REF_NAME.TrimStart('v'))_x64-setup.exe"
+          $dest = Join-Path release-assets $name
+          Copy-Item $files[0].FullName $dest
+          $hash = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content -Encoding ascii "$dest.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x64
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  create-draft-release:
+    name: Create or update GitHub draft release
+    runs-on: ubuntu-latest
+    needs: [package-macos, package-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 只允许发布已合入 main 的 tag
+        env:
+          TAG_COMMIT: ${{ github.sha }}
+        run: |
+          git fetch origin main --quiet
+          git merge-base --is-ancestor "$TAG_COMMIT" origin/main
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: release-*
+          merge-multiple: true
+      - name: 汇总 SHA-256
+        run: |
+          cd release-assets
+          cat *.sha256 > SHA256SUMS.txt
+      - name: 创建或更新草稿 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes=$(mktemp)
+          cat > "$notes" <<'NOTES'
+          本草稿仅在 tag 已合入 main 且 macOS 与 Windows 安装包构建完成后生成。
+
+          附件包含 Apple Silicon macOS DMG、Windows x64 NSIS 安装包及 SHA-256 校验文件。
+
+          发布前人工确认：双平台真实设备验收完成；macOS Developer ID 签名与公证状态已核验；安装、升级、卸载和回滚路径已验证。当前 workflow 不配置 Developer ID 签名/公证，因此不得将此草稿视为已签名公证的正式 macOS 发行版。
+          NOTES
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+            gh release edit "$TAG" --draft --title "Screenguard $TAG" --notes-file "$notes"
+          else
+            gh release create "$TAG" release-assets/* --draft --verify-tag --title "Screenguard $TAG" --notes-file "$notes"
+          fi
