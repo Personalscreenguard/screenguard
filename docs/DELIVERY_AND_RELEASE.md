@@ -6,8 +6,8 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | 0.4.41 CI run `38926691248` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包 artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.42 本机 22 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；DMG 校验有效；0.4.41 CI run `38926691248` 的三平台检查和 Mac/Windows 打包成功 | 0.4.42 CI；双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| Windows x64 | NSIS 安装包 | 0.4.42 CI run `38930181257` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包已下载回读并识别为 NSIS | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | 0.4.42 本机 22 项 Rust 单测、Release/DMG 构建、安装版本与运行进程均已核验；本地与 CI DMG 校验有效；CI run `38930181257` 三平台检查/测试及 Mac/Windows 打包成功 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -62,7 +62,8 @@
 - 诊断入口用于查看 macOS 是否观测到用户操作对应的睡眠转换。若外接屏物理断电后仍显示在线且系统报告唤醒，界面会如实显示该状态，不把物理电源猜成关闭。
 - 本机 Rust 单测 22/22、`cargo check`、仓库自检和前端语法检查通过；Apple Silicon Release/DMG 构建成功。DMG SHA-256 `52b1800f07ca8545c66385401be8c4e1261c8cb48eb7dc751d55f7997a9525bf`，`hdiutil verify` 为 `VALID`，桌面副本的 sidecar 校验通过。
 - 安装前 0.4.41 App 已备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.42-app-install-20261017/`；当前 `/Applications/Screenguard.app` 为 0.4.42，运行二进制 SHA-256 `040d700442fd12b01f73e2484ecbb03ccc0c10d9d9f17fe2c406c5741b2be84e` 与构建产物一致。
-- 修改前工作分支备份为 `backup/pre-v0442-power-sleep-diagnostic-20261017`；0.4.42 三平台 CI 和 Windows/macOS CI 安装包待验证。真实双屏行为仍待用户在面板开启电源联动后实测。
+- PR 代码 commit `fe9e98ca10def91a5a5316a7796c72eae0974c60` 对应 CI run `38930181257` 全部成功：仓库检查、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG 和 Windows NSIS 构建。macOS artifact `12057954740`（3,990,367 bytes），DMG SHA-256 `f9dcfcfbd01378327db95ff5107ffc093f1b95258324748f420b0ce4d058a080`，`hdiutil verify` 为 `VALID`；Windows artifact `12058572940`（2,303,948 bytes），识别为 Nullsoft NSIS 安装包，SHA-256 `eb03ee70a2fffbada6aeb30832f92cee5cfe9cda5fb88abe5f672955b3765859`。两包及 SHA-256 sidecar 已复制到桌面并校验通过；Windows 包尚未实机安装。
+- 修改前工作分支备份为 `backup/pre-v0442-power-sleep-diagnostic-20261017`。真实双屏电源联动行为仍待用户在面板开启开关并读取 Quartz 状态后实测。
 
 ## v0.4.40 交付核验（2026-10-16）
 
