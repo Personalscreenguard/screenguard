@@ -6,8 +6,8 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | 0.4.40 CI run `38924784040` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包 artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.41 本机 Release/DMG 构建、安装版本与运行进程均已核验；DMG 校验有效；0.4.40 CI run `38924784040` 的三平台检查和 Mac/Windows 打包成功 | 0.4.41 CI；双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| Windows x64 | NSIS 安装包 | 0.4.41 CI run `38926691248` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包 artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | 0.4.41 本机 Release/DMG 构建、安装版本与运行进程均已核验；DMG 校验有效；0.4.41 CI run `38926691248` 的三平台检查和 Mac/Windows 打包成功 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -53,7 +53,8 @@
 ## v0.4.41 当前交付核验（2026-10-16）
 
 - 修正 macOS 电源联动开启后的面板提示：DDC 不可读时明确说明后台仍监测 Quartz 单屏睡眠及显示器断开/重连，并准确说明物理断电但系统仍报告唤醒时的限制。
-- 基于 v0.4.40 已验证代码，版本升至 0.4.41；本机 Release/DMG 构建成功，DMG SHA-256 `4406e55cb78e1e6b3486007565c34c8f6ec97e795c328ec3c23638084afaec18` 且 `hdiutil verify` 为 `VALID`。安装前 0.4.40 App 已备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.41-app-install-20261016/`；当前 `/Applications/Screenguard.app` 为 0.4.41，运行二进制 SHA-256 `2b002ab54ab9bc6f2f466279ebb83fbf9bdae02b7597adb16d7890a7969cc07b` 与构建产物一致。0.4.41 三平台 CI 待验证。
+- 基于 v0.4.40 已验证代码，版本升至 0.4.41；本机 Release/DMG 构建成功，DMG SHA-256 `4406e55cb78e1e6b3486007565c34c8f6ec97e795c328ec3c23638084afaec18` 且 `hdiutil verify` 为 `VALID`。安装前 0.4.40 App 已备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.41-app-install-20261016/`；当前 `/Applications/Screenguard.app` 为 0.4.41，运行二进制 SHA-256 `2b002ab54ab9bc6f2f466279ebb83fbf9bdae02b7597adb16d7890a7969cc07b` 与构建产物一致。
+- PR 代码提交 `b32c9a7dfc9c1e41f84c4623267cf0caee0ddc90` 的 CI run `38926691248` 全部成功，覆盖 macOS/Windows/Ubuntu 检查和测试、macOS DMG、Windows NSIS 构建。Mac artifact `12057451798`（3,987,631 bytes）DMG SHA-256 `21ca0a5ae53f57f5c2b3212fce219f1edd53a95e8b72bf7ba6dda676108bc579`，`hdiutil verify` 为 `VALID`；Windows artifact `12057806131`（2,297,228 bytes）NSIS SHA-256 `1533eac8536429a8e80802c4245a61cb80d82234babd39cccae5f176b4c4caea`。CI 包均复制至桌面并通过 SHA-256 sidecar 校验；Windows 包尚未实机安装。
 
 ## v0.4.40 交付核验（2026-10-16）
 
