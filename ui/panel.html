@@ -1041,7 +1041,12 @@ async function startLink(){
     return;
   }
   if (link.platform === 'macos') {
-    pwHint('联动已开启：macOS 原生后台服务优先读取 BetterDisplay DDC VCP 0xD6，同步其它屏幕；读不到时回退到系统断开/重连事件。请保持 Screenguard 和 BetterDisplay 运行，实际效果取决于显示器与连接链路。');
+    const unreadable = initial.unreadable.length;
+    if (unreadable) {
+      pwHint('联动已开启，但当前有 '+unreadable+' 台屏幕读不到 DDC VCP 0xD6。请启动 BetterDisplay，在 Settings > Application > Integration 开启 CLI access 和 notification based integration，并确认该屏的 DDC Control 已开启。否则只能检测 macOS 显示器断开/重连；物理关屏后若仍留在系统显示器列表中，macOS 无法识别其电源状态。', true);
+    } else {
+      pwHint('联动已开启：当前显示器可读取 BetterDisplay DDC VCP 0xD6。请保持 Screenguard 和 BetterDisplay 运行；显示器是否响应电源命令仍取决于 DDC/CI 和连接链路。');
+    }
     return;
   }
   pwHint('电源联动已开启：Windows 原生后台服务会检测 DDC/CI VCP 0xD6 与显示器连接状态；保持 Screenguard 运行即可');

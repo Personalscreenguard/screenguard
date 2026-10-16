@@ -940,14 +940,24 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
                     }
                 }
                 pending = None;
-                let _ = app.emit(
-                    "power-link-status",
+                let readable = previous_power.len();
+                let status = if current.is_empty() {
+                    "macOS 电源联动已开启，但当前没有在线显示器；连接显示器后会自动开始检测。"
+                        .to_string()
+                } else if readable == current.len() {
                     format!(
-                        "macOS 后台联动已启动；当前检测到 {} 台显示器，{} 台支持读取 DDC 电源状态。请保持 Screenguard 运行。",
+                        "macOS 后台联动已启动；{}/{} 台显示器可读取 DDC 电源状态。请保持 Screenguard 和 BetterDisplay 运行。",
+                        readable,
                         current.len(),
-                        previous_power.len(),
-                    ),
-                );
+                    )
+                } else {
+                    format!(
+                        "macOS 后台联动已启动；仅 {}/{} 台显示器可读取 DDC 电源状态。请启动 BetterDisplay，并在 设置 > Application > Integration 中开启 CLI access and notification based integration；同时检查显示器的 DDC Control。不可读的屏幕只能在 macOS 检测到断开/重连时联动；若物理关屏后仍留在显示器列表中，macOS 无法识别其关屏状态。",
+                        readable,
+                        current.len(),
+                    )
+                };
+                let _ = app.emit("power-link-status", status);
                 continue;
             }
 

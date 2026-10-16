@@ -28,7 +28,7 @@
 
 ## 依赖
 
-- **macOS**：`displayplacer`（`brew install displayplacer`）、[BetterDisplay](https://betterdisplay.pro)（DDC 读写，需保持运行）；任意窗口跨屏首次使用需在“系统设置 → 隐私与安全性 → 辅助功能”允许 Screenguard 控制窗口；如窗口标题无法读取，检查“屏幕与系统音频录制”权限。
+- **macOS**：`displayplacer`（`brew install displayplacer`）、[BetterDisplay](https://betterdisplay.pro)（DDC 读写，需保持运行；电源联动还需在 Settings > Application > Integration 开启 CLI access 和 notification based integration，并启用目标屏的 DDC Control）；任意窗口跨屏首次使用需在“系统设置 → 隐私与安全性 → 辅助功能”允许 Screenguard 控制窗口；如窗口标题无法读取，检查“屏幕与系统音频录制”权限。
 - **Windows**：DDC 走系统 `dxva2.dll`（PowerShell 注入，无需额外软件）；VLC 可选
 - **Linux**：`ddcutil`（`apt install ddcutil`）；VLC 可选
 
@@ -60,6 +60,7 @@ npm run build:linux    # Linux 打包
 - **v0.4.29**（2026-10-16）：macOS BetterDisplay DDC 电源读取和写入增加 6 秒超时，避免显示器无响应时阻塞原生联动线程；主窗口开始显示后台电源联动状态与错误。此改进提升可诊断性，不改变 macOS 对“不掉线且 DDC 不可读”的物理关屏检测边界。
 - **v0.4.30**（2026-10-16）：macOS 面板接入 `pmset -g batt` 内置电池电量与供电状态，复用电池历史图表；面板显示期间每分钟采样并支持手动刷新；明确不显示尚未采集的蓝牙/USB 电池和健康度。
 - **v0.4.31**（2026-10-16）：macOS 接入 ADB 发现、网络连接及显示器电源/音量按键控制；可从 Google 官方下载 Platform-Tools 到应用数据目录，下载前由用户确认 SDK 条款，解压后运行 `adb version` 验证。
+- **v0.4.32**（2026-10-16）：macOS 电源联动明确显示当前无法读取 DDC 电源状态的屏幕数量，并给出 BetterDisplay CLI 集成与 DDC Control 设置路径；说明物理关屏但显示器仍留在 macOS 在线列表时无法仅靠系统连接事件识别。
 - **v0.4.27**（2026-10-14）：macOS 对齐组合在相同密度/比例候选间优先保留显示器当前刷新率与缩放状态，避免无必要地切到更高或不同刷新率档。
 - **v0.4.26**（2026-10-14）：macOS 对齐体检可应用推荐模式组合；切换前持久备份两屏分辨率和布局，切换后回读核验，失败自动尝试回滚；跨屏前重新读取屏幕坐标，提供原分辨率还原。应用前需用户确认，实际屏幕切换仍需在目标设备验收。
 - **v0.4.25**（2026-10-14）：修正 macOS 双屏体检当前像素密度差的计算，按竖向逻辑分辨率除以物理高度，避免误用横向像素宽度。
