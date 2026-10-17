@@ -48,7 +48,10 @@ try {
   }
 
   Write-Host "开始静默卸载：$($uninstaller.FullName)"
-  Invoke-WaitedProcess -FilePath $uninstaller.FullName -ArgumentList @('/S') -Label 'NSIS 卸载'
+  # NSIS normally copies the uninstaller to %TEMP% and exits the original
+  # process before the copied process finishes. `_?=<install dir>` keeps it
+  # in-place so WaitForExit observes completion before the file assertion.
+  Invoke-WaitedProcess -FilePath $uninstaller.FullName -ArgumentList @('/S', "_?=$installDir") -Label 'NSIS 卸载'
   $uninstalled = $true
   if (Test-Path -LiteralPath $appExe) {
     throw "卸载后主程序仍然存在：$appExe"
