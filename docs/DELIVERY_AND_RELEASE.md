@@ -6,8 +6,8 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | CI run `38999872386` 完成临时目录静默安装、主程序文件检查、同步静默卸载和主程序删除断言；Windows NSIS artifact 已下载并校验摘要 | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.44 Mac 面板同时显示电源联动开关、Quartz 逐屏睡眠状态和 DDC VCP 0xD6 只读读数；本机 Apple Silicon Release DMG 已构建并通过 hdiutil verify，当前 ad-hoc 签名。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；尚无签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
+| Windows x64 | NSIS 安装包 | CI run `39033430993` 的 Windows 静默安装/卸载 smoke 和 NSIS 构建均成功；artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | CI run `39033430993` 的 DMG 已下载回读，`hdiutil verify` 为 VALID；0.4.44 面板同时显示电源联动开关、Quartz 逐屏睡眠状态和 DDC VCP 0xD6 只读读数。本机 Release DMG 为 ad-hoc 签名。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；尚无签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -97,7 +97,10 @@
 - 现有“读取 macOS 屏幕状态”入口扩展为同时读取联动开关、Quartz 逐屏睡眠状态和每屏 DDC VCP 0xD6 电源值；DDC 失败逐屏展示错误，所有请求均为只读，不调用关屏/唤醒命令。
 - 当前 Mac 在线设备为 Mi Monitor 主屏（CoreGraphics ID 3，1920x1080@60）与 HDMI TO USB 副屏（ID 2，1080x1920@60，竖屏）。只读 Quartz 查询显示两屏 online 且 awake；当前持久化联动开关为关闭。BetterDisplay VCP 0xD6 读取主屏返回 Failed.，副屏超时。以上是当前传感器状态，不是开启联动后的行为验收。
 - 本机 Apple Silicon Release/DMG 构建成功：`src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Screenguard_0.4.44_aarch64.dmg`，SHA-256 `b984858ff77fffb97493e68d7e8be72416509a8a9ed767250c9f20a3e480c8a5`，`hdiutil verify` 为 `VALID`；App 仍为 ad-hoc 签名，不能作为正式 Mac 发布包。
-- 修改前工作区备份分支：`backup/pre-ddc-diagnostic-20261017`。仓库自检、22 项 Rust 单测与 `git diff --check` 已通过；完整跨平台 CI 和 Windows 包待当前版本提交后验证。
+- 修改前工作区备份分支：`backup/pre-ddc-diagnostic-20261017`。仓库自检、22 项 Rust 单测与 `git diff --check` 已通过。代码 commit `e5c3f7600c27ec3a6c13157330f12ddc86521ffb` 对应 CI run `39033430993` 全部成功：macOS/Windows/Ubuntu Rust 检查与测试、Windows C# bridge、Windows NSIS 静默安装/卸载 smoke、macOS DMG、Windows NSIS 构建及仓库自检；Draft release workflow run `39033431007` 成功。
+- CI artifact 回读：Mac artifact `12101616375`（归档 3,991,419 bytes，GitHub digest `254230a479547ff90af027c470480b12c10edc2c87f7c116c7614ab2206ed611`），DMG SHA-256 `f2e3bb47308b5f91ec2d657ed4ff34e29f3f19dc92aaf9852b90d267950eda43`，`hdiutil verify` 为 `VALID`；Windows artifact `12101721184`（归档 2,305,893 bytes，GitHub digest `c62125ddb6f34c917fab547249e4dd5556820f2e8403799647608f8f6db1d657`），解出 `Screenguard_0.4.44_x64-setup.exe`，识别为 Nullsoft NSIS 安装包，SHA-256 `05aaff8687456bc0185a31296b39cf00fa7b251f87466cef81abcb89fa7aac71`。CI Windows smoke 通过不等于 Windows 实机完整验收。
+- 两份 CI 安装包和独立 SHA-256 sidecar 已复制到桌面：`Screenguard_0.4.44_aarch64-ci-39033430993.dmg` 与 `Screenguard_0.4.44_x64-setup-ci-39033430993.exe`；两个 sidecar 回读校验均通过。CI DMG 在无人值守 `hdiutil attach` 时显示内嵌 MIT license 并取消挂载，因此没有把 CI 包误记为已安装。安装验证使用相同 commit 的本机 Apple Silicon Release App。
+- 当前 `/Applications/Screenguard.app` 已运行 0.4.44；可执行文件 SHA-256 `0f9779ebceba5f26361000f302ac6bcb751b2ef6931aa8b4c3e0c0474d5e087f`，`codesign` 显示 ad-hoc 且无 Team ID。安装前 0.4.43 App 已备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.44-app-install-20261017/`；未更改用户的屏幕电源联动开关。运行和版本已核对，不代表 UI 诊断或双屏物理关/唤醒通过。
 
 ## v0.4.40 交付核验（2026-10-16）
 
