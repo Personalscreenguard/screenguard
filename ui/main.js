@@ -74,8 +74,8 @@ function paintPowerLinkButton(enabled) {
   powerLinkBtn.classList.toggle('primary', enabled);
   powerLinkBtn.classList.toggle('ghost', !enabled);
   powerLinkBtn.title = enabled
-    ? '已开启。后台监测显示器电源状态，并在连接变化时同步其它屏幕'
-    : '开启后，后台监测显示器电源状态；macOS 的 DDC 不可读时使用连接变化兜底';
+    ? '已开启。后台监测显示器电源与连接变化；macOS 还监测 Quartz 单屏睡眠状态。'
+    : '开启后监测显示器电源、Quartz 睡眠与连接变化；若物理关屏不改变任何系统可见状态，macOS 无法检测。';
 }
 async function refreshPowerLinkButton() {
   paintPowerLinkButton(await readPowerLinkPreference());

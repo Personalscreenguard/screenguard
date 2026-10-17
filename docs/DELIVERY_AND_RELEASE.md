@@ -1,6 +1,6 @@
 # Screenguard 桌面端交付状态与发布流程
 
-状态快照：2026-10-17，源码版本 0.4.45。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
+状态快照：2026-10-17，源码版本 0.4.46。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
 
 ## 发布目标
 
@@ -11,6 +11,15 @@
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
+
+## v0.4.46 电源联动可观测性提示（2026-10-17）
+
+- 修正主窗口电源联动按钮的提示文案：列出 macOS 后台可用的 DDC、Quartz 单屏睡眠和显示器连接变化信号，并明确物理关屏若未改变任何系统可见状态则无法检测。
+- 本次仅调整提示和版本号，不改变联动开关默认关闭、后台监听逻辑或显示器电源命令。验收仍需用户开启开关并在目标双屏上执行关/开测试。
+- 修改前可恢复分支：`backup/pre-v046-powerlink-tooltip-20261017`。`scripts/check_repo.py`、`node --check ui/main.js`、`git diff --check`、MacOSX26.5 SDK 下 `cargo check --offline` 与 Rust 单测 22/22 通过；编译仅有 3 个既存 dead-code warning。
+- Apple Silicon Release 构建成功；App 经本机 ad-hoc 重签后 `codesign --verify --deep --strict` 通过。已安装运行 `/Applications/Screenguard.app` 0.4.46，二进制 SHA-256 `48dff4598eb8ebd3ece62a5c6091e88cbd56010fb602e14873221d2aea64174f`；安装前 App 备份位于 `~/Library/Application Support/Screenguard/backups/pre-0.4.46-app-install-20261017/`。
+- 本机安装 DMG 位于桌面 `Screenguard_0.4.46_aarch64-local-20261017.dmg`，SHA-256 `92f5af8c95c1cd7a321069b3c7ac92ed81ccf2cf735c502dd69d781ea89390c9`，`hdiutil verify` 为 `VALID`。挂载后确认其中 App 版本为 0.4.46，严格签名校验通过，二进制哈希与已安装 App 一致。ad-hoc 签名没有 Team ID，也未公证。
+- 当前 PR/CI 尚未包含 0.4.46；本机包和静态/单测结果不代表 CI、双屏实体验收或公开发行。正式签名公证、真实双屏验收及公开发行仍未完成。
 
 ## v0.4.45 macOS 跨屏窗口还原路径修复（2026-10-17）
 
