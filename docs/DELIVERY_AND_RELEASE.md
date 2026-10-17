@@ -6,7 +6,7 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | 0.4.42 CI run `38930181257` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包已下载回读并识别为 NSIS | Windows 实机完整回归、安装升级/卸载验收、安装包签名状态确认 |
+| Windows x64 | NSIS 安装包 | 0.4.43 CI run `38954826601` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包已下载回读并识别为 NSIS。后续 CI 将增加安装到临时目录、检查主程序、静默卸载的 smoke gate | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认；新 smoke gate 尚待 CI 执行 |
 | macOS Apple Silicon | DMG | 0.4.43 Mac 面板使用 Quartz 逐屏显示当前系统睡眠状态；隐藏 Windows 专属事件日志修复与自动修复设置。本机及 CI Release/DMG 均构建成功、CI 包验证回读；本机版本已安装运行 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 

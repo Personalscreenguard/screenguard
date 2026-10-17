@@ -115,6 +115,12 @@ jobs:
         run: npm ci
       - name: 构建 Windows x64 安装包
         run: npm run build:win
+      - name: 静默安装与卸载 NSIS 包烟雾检查
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          if (-not $installer) { throw "NSIS 安装包不存在" }
+          ./scripts/smoke_windows_installer.ps1 -InstallerPath $installer.FullName
       - name: 生成安装包与 SHA-256
         shell: pwsh
         run: |
