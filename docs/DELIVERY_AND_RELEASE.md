@@ -6,8 +6,8 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | CI run `39033430993` 的 Windows 静默安装/卸载 smoke 和 NSIS 构建均成功；artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 本机 0.4.45 DMG 已重建，`hdiutil verify` 为 VALID；单独生成的 `.app` 已 ad-hoc 签名并安装运行。CI run `39033430993` 的上一源码 DMG 也已下载回读。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；尚无 Developer ID 签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
+| Windows x64 | NSIS 安装包 | CI run `39036186416` 的 Windows NSIS 构建和静默安装/卸载 smoke 通过；artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | 本机 0.4.45 DMG 已重建，`hdiutil verify` 为 VALID；单独生成的 `.app` 已 ad-hoc 签名并安装运行。CI run `39036186416` 的 Mac DMG 已下载回读，`hdiutil verify` 为 VALID。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；尚无 Developer ID 签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -17,7 +17,8 @@
 - 修复 `restore_foreground` 的平台分工：macOS 原生还原器已依据窗口备份中的 `alignment_applied` 决定是否恢复显示器模式；上层 Tauri 命令不再在 macOS 额外无条件调用 `align_restore_modes`，避免把另一项操作遗留的布局备份误当成本次窗口铺满产生的变更。Windows 仍由上层独立还原窗口与显示模式。
 - 修改前可恢复分支：`backup/pre-macos-window-restore-wrapper-20261017`。版本升至 0.4.45；Mac `cargo check --offline`、指定 MacOSX26.5 SDK 的 `cargo test --locked --lib`（22/22）、仓库自检、`node --check ui/main.js` 与 `git diff --check` 已通过。默认 MacOSX27.0 SDK 的 linker 无法解析其 `.tbd` 架构标签，因此本机检查与构建显式使用 26.5 SDK。
 - 本机 Apple Silicon Release App/DMG 重建成功。Tauri App 的 linker 签名起初未通过严格 bundle 校验；本地 ad-hoc 重签后 `codesign --verify --deep --strict` 通过。该签名没有 Team ID，也未公证。桌面 DMG 从这份已验证的 App、Applications 快捷入口和许可证重新组装，`hdiutil verify` 为 VALID，SHA-256 `91b86a5b5cc50321b6d0bb701d33cbc482ea42338036ce7c48ec8635a703104f`，sidecar 回读一致。`/Applications/Screenguard.app` 正运行 0.4.45，安装二进制 SHA-256 `58f073a79b5cbae286cd368db85e3bae3830e36b5775c6f8cb924651fb8ebfcd`。安装前 0.4.44 已备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.45-app-install-20261017/`；电源联动偏好仍为关闭。
-- 完整跨平台 CI 与 Windows 安装包仍待本提交推送后验证；这项源码回滚修复尚无真实多屏窗口 UI 实测。DMG 镜像校验只证明镜像完整性，不代替对其内 App 的签名与运行验收；本地组装包中的 App 已单独验证并与安装副本匹配，但仍不是正式签名公证包。
+- PR head `2943a2b9fc8e9245dab0c107576369dec1e7d4d0` 的 CI run `39036186416` 全部成功，覆盖三平台 Rust check/test、仓库检查、macOS DMG、Windows NSIS 构建和 Windows 安装/卸载 smoke；Draft release config run `39036186419` 成功。Mac artifact `12102083875` GitHub ZIP digest `dfe388d4a42b43c4a217095dbbfcb8ea0e21dcfacdd4c8aad318395dc3f04c61`，内层 DMG SHA-256 `5e239925eb1ced205368870fd071ef90f8ec43b2293ce98a551ad539d6861e42`，`hdiutil verify` 为 VALID。Windows artifact `12102053925` GitHub ZIP digest `8c1119a29a969ddfa21128ea61ae13d8022eb71f7a14f2078dc6a59972b2c25b`，内层 NSIS EXE SHA-256 `ed3838227668b6a177f8dddc294a8a6323e26464b9b6beed1c3b8666982b2ea8`。
+- 两个 CI 包及 sidecar 已复制桌面：`Screenguard_0.4.45_aarch64-ci-39036186416.dmg` 与 `Screenguard_0.4.45_x64-setup-ci-39036186416.exe`，sidecar 回读匹配。此源码回滚修复尚无真实多屏窗口 UI 实测。DMG 镜像校验只证明镜像完整性，不代替对其内 App 的签名与运行验收；本地组装包中的 App 已单独验证并与安装副本匹配，但仍不是正式签名公证包。
 
 ## 功能验收矩阵
 
