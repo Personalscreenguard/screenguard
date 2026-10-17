@@ -6,7 +6,7 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | 0.4.43 CI run `38954826601` 的 Windows 检查、Rust 测试和 NSIS 构建成功；安装包已下载回读并识别为 NSIS。后续 CI 将增加安装到临时目录、检查主程序、静默卸载的 smoke gate | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认；新 smoke gate 尚待 CI 执行 |
+| Windows x64 | NSIS 安装包 | CI run `38999872386` 完成临时目录静默安装、主程序文件检查、同步静默卸载和主程序删除断言；Windows NSIS artifact 已下载并校验摘要 | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认 |
 | macOS Apple Silicon | DMG | 0.4.43 Mac 面板使用 Quartz 逐屏显示当前系统睡眠状态；隐藏 Windows 专属事件日志修复与自动修复设置。本机及 CI Release/DMG 均构建成功、CI 包验证回读；本机版本已安装运行 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
@@ -76,6 +76,12 @@
 - CI artifact `12070547413`（ZIP 3,989,253 bytes，GitHub digest `cc1e764a18dc6392f5071c5e40f020ee7f0e9108799084a43f18cf04d3f1bcf2`）解出 DMG 4,020,193 bytes，SHA-256 `adacae454b280b4ba22df5e4594ca2cff4255314fb569285ee7856116b5e7599`，`hdiutil verify` 为 `VALID`；桌面副本 `Screenguard_0.4.43_aarch64-ci-38954826601.dmg` sidecar 校验通过。
 - CI artifact `12070522871`（ZIP 2,305,136 bytes，GitHub digest `b19408d6af51b8a300fa03df9ce286d02cd5cf58918ed01f0da8c69dbf0b4168`）解出 Windows 安装包 2,325,340 bytes，SHA-256 `c10b36320806611d48ffdf27438c9069e952a9720f8e33cb3d99f4e566529cd5`，识别为 NSIS 自解压 GUI 安装包；桌面副本 `Screenguard_0.4.43_x64-setup-ci-38954826601.exe` sidecar 校验通过。Windows 安装和运行仍未在 Windows 实机验收。
 - 实体双屏电源跟随、跨屏窗口实测、Windows 真机验收、Developer ID 签名和公证仍待完成。
+
+## v0.4.43 Windows NSIS 安装卸载 smoke gate（2026-10-17）
+
+- CI 修复提交 `7eeabefba93f47b726be12814de02e2471b06450` 对应 run `38999872386` 全部成功；仓库自检、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG 构建均通过。Windows job 的临时目录静默安装、主程序存在检查、同步静默卸载和主程序删除断言全部通过。Draft desktop release workflow run `38999872276` 配置检查成功，tag-only 打包和发布步骤按预期跳过。
+- Windows artifact `12089115392`（ZIP 2,302,942 bytes，GitHub digest `ef22ae7201a34a050075981577ebfd5d218ed8a42c7dbcfe0914a80410d35617`）已下载回读；解出 NSIS 安装包 2,323,144 bytes，SHA-256 `f32a7f31c898bcc1d2656746fb08dc7551b2f9518751150b4ad87b8bff2e70b6`。macOS artifact `12088955856`（ZIP 3,989,250 bytes，GitHub digest `2f3af29d56bba584578fd5b29879abe647cc24f17206fb190920904a83a53310`）解出 Apple Silicon DMG 4,020,194 bytes，SHA-256 `cb8aba5bae2565fe5ede74bb79cea403302260885098b1f86e5b188e97003a80`，`hdiutil verify` 为 `VALID`。
+- 这项 Windows 安装卸载检查运行在 GitHub Actions runner，不代表用户 Windows 设备的安装、启动、设置迁移或卸载回归已验收；真机验证仍待完成。
 
 ## v0.4.40 交付核验（2026-10-16）
 
