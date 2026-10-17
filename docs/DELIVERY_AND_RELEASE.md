@@ -7,7 +7,7 @@
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
 | Windows x64 | NSIS 安装包 | CI run `38999872386` 完成临时目录静默安装、主程序文件检查、同步静默卸载和主程序删除断言；Windows NSIS artifact 已下载并校验摘要 | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.43 Mac 面板使用 Quartz 逐屏显示当前系统睡眠状态；隐藏 Windows 专属事件日志修复与自动修复设置。本机及 CI Release/DMG 均构建成功、CI 包验证回读；本机版本已安装运行 | 双屏电源联动和窗口跨屏实测；Developer ID 签名、公证和另一台干净 Mac 安装验证 |
+| macOS Apple Silicon | DMG | 0.4.43 Mac 面板使用 Quartz 逐屏显示当前系统睡眠状态；PR CI 的普通 DMG 已构建并验证回读。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；由于仓库尚未配置 Apple 发布 secrets，尚无签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -29,7 +29,7 @@
 
 1. 用户提到的新增 Windows 代码还没有出现在远端仓库分支或提交中，无法基于真实差异完成 Mac 移植；本次只适配了 PR 中已有的 Windows 健康面板能力。
 2. Windows 和 macOS 物理显示器行为仍需设备验收。macOS 屏幕即使物理关闭仍留在系统在线列表、且 DDC 不可读时，系统无法判断该屏已关；未知状态必须保留为未知。
-3. 当前签名身份列表没有 Developer ID Application。现有 release workflow 不执行签名或公证，只会创建带明确警示的 GitHub Draft Release；不能把未签名/未公证 DMG 当正式 macOS 发布。
+3. 当前签名身份列表没有 Developer ID Application，GitHub 仓库也未配置 Apple 发布 secrets。tag 工作流现要求证书、签名身份、Apple ID 公证凭据和临时 keychain 密码；缺少任一项就会停止，且签名、公证、Gatekeeper 检查全部成功前不会上传 macOS 包。当前仍没有已签名/公证 DMG。
 4. 当前 GitHub 最新公开 Release 仍是 v0.2.9；Windows x64 旧安装包可以回滚，但它不包含 0.4.43 的新代码。
 
 ## v0.4.38 当前交付核验（2026-10-16）
@@ -83,6 +83,13 @@
 - Windows artifact `12089115392`（ZIP 2,302,942 bytes，GitHub digest `ef22ae7201a34a050075981577ebfd5d218ed8a42c7dbcfe0914a80410d35617`）已下载回读；解出 NSIS 安装包 2,323,144 bytes，SHA-256 `f32a7f31c898bcc1d2656746fb08dc7551b2f9518751150b4ad87b8bff2e70b6`。macOS artifact `12088955856`（ZIP 3,989,250 bytes，GitHub digest `2f3af29d56bba584578fd5b29879abe647cc24f17206fb190920904a83a53310`）解出 Apple Silicon DMG 4,020,194 bytes，SHA-256 `cb8aba5bae2565fe5ede74bb79cea403302260885098b1f86e5b188e97003a80`，`hdiutil verify` 为 `VALID`。
 - 这项 Windows 安装卸载检查运行在 GitHub Actions runner，不代表用户 Windows 设备的安装、启动、设置迁移或卸载回归已验收；真机验证仍待完成。
 
+## v0.4.43 macOS Developer ID 发布门禁（2026-10-17）
+
+- tag 发布工作流现在先导入并核验 Developer ID Application `.p12` 身份，再让 Tauri 对 Apple Silicon App/DMG 签名并执行 Apple 公证；产物挂载后还会检查 App 的深层代码签名、签名者身份、公证票据和 Gatekeeper 接受状态。
+- 发布所需 GitHub Actions secrets：`APPLE_CERTIFICATE`（base64 编码的 `.p12`）、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`（必须以 `Developer ID Application:` 开头）、`KEYCHAIN_PASSWORD`、`APPLE_ID`、`APPLE_PASSWORD`（Apple app-specific password）和 `APPLE_TEAM_ID`。只应通过仓库 Actions secrets 配置，不要提交到源码或聊天。
+- PR 构建仍不读取这些 secrets；正式 tag 构建在 secrets 缺少、证书无法导入、签名不匹配、公证/装订失败或 Gatekeeper 拒绝时会失败，因而不会进入双平台 Draft Release 汇总。
+- 本轮只完成工作流源码与文档变更。当前没有 Developer ID Application 证书，也没有配置仓库 secrets；未运行 tag 构建，未生成已签名/公证的候选包，不能据此声称发布验收通过。
+
 ## v0.4.40 交付核验（2026-10-16）
 
 - macOS 原生后台联动新增 CoreGraphics `CGDisplayIsAsleep` 单屏睡眠传感器，在 DDC VCP `0xD6` 无法读取时作为独立来源；单屏状态变化可触发同步，多屏并发或与 DDC 冲突时不猜测来源。DDC 目标控制失败仍走 macOS 系统级待机/唤醒兜底。
@@ -119,10 +126,10 @@
 `.github/workflows/release.yml` 只处理 `v*` tag：
 
 1. tag 对应的版本必须与 `package.json`、`src-tauri/tauri.conf.json` 和 `Cargo.toml` 一致。
-2. macOS 运行仓库检查和 Rust 单测，构建 Apple Silicon DMG；Windows 运行仓库检查、C# 桥接检查和 Rust 单测，构建 x64 NSIS 包。
+2. macOS 运行仓库检查和 Rust 单测，导入 Developer ID Application 身份，构建并签名 Apple Silicon App/DMG，向 Apple 公证并装订票据，然后验证签名、公证和 Gatekeeper；Windows 运行仓库检查、C# 桥接检查和 Rust 单测，构建 x64 NSIS 包。macOS 发布需预先配置本节列出的七项 GitHub Actions secrets。
 3. 两个安装包均生成 SHA-256 文件。
 4. 仅当 tag 的提交已合入 `main` 且双平台构建成功时，自动创建或更新 GitHub Draft Release。
-5. Draft 不会自动公开。只有实机验收、签名/公证和升级/回滚检查均有证据后，维护者才可手动发布。
+5. Draft 不会自动公开。只有实机验收、升级/回滚检查均有证据后，维护者才可手动发布；macOS 的 Developer ID 签名、公证和 Gatekeeper 检查是 tag 构建的硬门槛。
 
 正式打 tag 前要先完成 PR 审核并合入 `main`，确认仓库版本字段一致，再创建 `vX.Y.Z` tag 并推送。不要在未合入 main 的 PR commit 上创建正式版本 tag；工作流会拒绝这种 tag。
 
