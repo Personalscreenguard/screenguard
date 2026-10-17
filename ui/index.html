@@ -30,11 +30,73 @@
     <section class="card">
       <div class="card-head">
         <h2>🖥️ 显示器控制</h2>
-        <button class="ghost" id="refresh-btn" title="刷新显示器列表">⟳ 刷新</button>
+        <div class="btn-row" style="margin:0;padding:0;justify-content:flex-end">
+          <button class="ghost" id="open-panel-btn" title="打开菜单栏快捷控制面板">快捷面板</button>
+          <button class="ghost" id="refresh-btn" title="刷新显示器列表">⟳ 刷新</button>
+        </div>
       </div>
       <div class="displays" id="displays">
         <div class="empty">正在读取显示器…</div>
       </div>
+    </section>
+
+    <!-- BetterDisplay 风格的 macOS 高级显示控制，命令由本机 BetterDisplay CLI 执行。 -->
+    <section class="card" id="betterdisplay-card" style="display:none">
+      <div class="card-head">
+        <h2>🧰 高级显示器控制</h2>
+        <span class="hint">BetterDisplay 集成</span>
+      </div>
+      <div class="color-row">
+        <label for="bd-source">操作屏幕</label>
+        <select id="bd-source"><option value="">读取中…</option></select>
+      </div>
+      <div class="color-row">
+        <label for="bd-target">目标屏幕</label>
+        <select id="bd-target"><option value="">读取中…</option></select>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="set-main">设为主屏</button>
+        <button class="ghost" data-bd-action="protect-main-on">保护主屏身份</button>
+        <button class="ghost" data-bd-action="protect-main-off">取消主屏保护</button>
+        <button class="ghost" data-bd-action="mirror-on">镜像到目标</button>
+        <button class="ghost" data-bd-action="mirror-off">停止镜像</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="place-left">排列到左侧</button>
+        <button class="ghost" data-bd-action="place-right">排列到右侧</button>
+        <button class="ghost" data-bd-action="place-above">排列到上方</button>
+        <button class="ghost" data-bd-action="place-below">排列到下方</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="pip-on">画中画到目标</button>
+        <button class="ghost" data-bd-action="pip-off">关闭画中画</button>
+        <button class="ghost" data-bd-action="stream-on">屏幕串流</button>
+        <button class="ghost" data-bd-action="stream-off">停止串流</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="hdr-on">开启 HDR</button>
+        <button class="ghost" data-bd-action="hdr-off">关闭 HDR</button>
+        <button class="ghost" data-bd-action="protect-resolution-on">保护分辨率</button>
+        <button class="ghost" data-bd-action="protect-resolution-off">取消保护</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="protect-refresh-on">保护刷新率</button>
+        <button class="ghost" data-bd-action="protect-refresh-off">取消刷新率保护</button>
+        <button class="ghost" data-bd-action="protect-rotation-on">保护旋转</button>
+        <button class="ghost" data-bd-action="protect-rotation-off">取消旋转保护</button>
+      </div>
+      <div class="color-row">
+        <label for="bd-input-code">输入源代码</label>
+        <input id="bd-input-code" inputmode="numeric" placeholder="显示器 VCP 代码" style="max-width:180px">
+        <button class="ghost" data-bd-action="input-source">切换输入源</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="virtual-16-9">创建并连接 16:9 虚拟屏</button>
+        <button class="ghost" data-bd-action="virtual-21-9">创建并连接 21:9 虚拟屏</button>
+        <button class="ghost" data-bd-action="connect-on">重新连接所选屏</button>
+        <button class="ghost" data-bd-action="connect-off">断开所选屏</button>
+      </div>
+      <div class="hint" id="bd-hint">镜像、画中画、串流与虚拟屏由 BetterDisplay CLI 执行；部分功能需要 BetterDisplay Pro。排列与 HDR 命令会直接改变显示设置，请确认所选屏幕。输入源代码由显示器型号决定（常见 VCP 0x60）。</div>
     </section>
 
     <!-- ===== 屏幕电源 ===== -->
@@ -47,7 +109,10 @@
         <button class="primary" id="pw-off">全部待机</button>
         <button class="ghost" id="pw-wake">唤醒屏幕</button>
       </div>
-      <div class="hint" id="pw-note">一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。单独控制某台屏、或启用「按遥控器联动」，请打开控制面板。</div>
+      <div class="btn-row">
+        <button class="ghost" id="power-link-btn" aria-pressed="false">🔗 电源联动：关</button>
+      </div>
+      <div class="hint" id="pw-note">一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。开启电源联动后需保持 Screenguard 运行。Windows 按 DDC/CI VCP 0xD6 同步；macOS 原生后台服务优先经 BetterDisplay 读取/设置 VCP 0xD6，并以显示器断开/重连事件兜底。具体效果取决于显示器和连接链路是否支持 DDC；不支持时不能检测物理关屏状态。</div>
       <div class="hint" id="hk-note" style="margin-top:6px">全局快捷键：读取中…</div>
     </section>
 
@@ -146,18 +211,18 @@
     <section class="card">
       <div class="card-head">
         <h2>📐 双屏对齐体检</h2>
-        <span class="hint">只读分析 · 不改任何显示设置</span>
+        <span class="hint">先体检，再由你确认是否应用分辨率组合</span>
       </div>
-      <div class="btn-row">
-        <button class="primary" id="align-apply">⚡ 应用对齐组合</button>
-        <button class="ghost" id="align-restore">↩ 还原两块屏原始清晰度（4K）</button>
+      <div class="btn-row" id="align-mode-actions">
+        <button class="primary" id="align-apply">⚡ 应用推荐对齐组合</button>
+        <button class="ghost" id="align-restore">↩ 还原两块屏原始分辨率</button>
       </div>
       <div class="btn-row">
         <button class="ghost" id="align-run">🩺 开始体检</button>
         <button class="ghost" id="align-copy">📋 复制结论</button>
       </div>
       <pre id="align-out" style="max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:Consolas,ui-monospace,monospace;font-size:12px;line-height:1.55;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:10px;padding:10px;margin:10px 0 6px;color:var(--foreground);">两块屏跨屏拼画面要对得齐，唯一的条件是「竖向像素高度 ≈ 与各自物理高度成正比」（即竖向像素密度一致）。点「开始体检」会读取每块屏的物理尺寸、当前分辨率、全部可用分辨率，算出：谁会被切掉多少画面、PPI 差多少、哪些分辨率组合能对上、以及推荐方案。</pre>
-      <div class="color-row">
+      <div class="color-row" id="align-manual-size">
         <label>屏幕尺寸</label>
         <input id="align-manuf" placeholder="厂商代码" style="width:110px;margin-right:6px">
         <input id="align-inches" placeholder="对角线英寸" style="width:96px;margin-right:6px">
@@ -207,7 +272,7 @@
         <button class="ghost" id="span-fg">铺满当前前台窗口</button>
         <button class="ghost" id="restore-fg">↩ 还原</button>
       </div>
-      <div class="hint">推荐：点「刷新窗口列表」→ 在「目标窗口」里选中 → 点「铺满选中窗口」。<b>任何窗口都能铺满</b>（浏览器里的抖音全屏、PotPlayer、VLC…）。铺满后若界面被盖住，按 <b>Ctrl+Alt+R</b> 或右键托盘「还原铺满的窗口」即可还原 —— 不会再有「点不到按钮」的情况。</div>
+      <div class="hint">推荐：点「刷新窗口列表」→ 在「目标窗口」里选中 → 点「铺满选中窗口」。<b>任何窗口都能铺满</b>（浏览器里的抖音全屏、PotPlayer、VLC…）。铺满后点「还原」即可回到原位置；Windows 也可按 <b>Ctrl+Alt+R</b>。macOS 需要允许 Screenguard 使用「辅助功能」调整窗口；如窗口标题显示为未命名，可在「屏幕与系统音频录制」中授权以读取完整窗口信息。不同屏幕的边框仍是物理间隔，跨屏画面只能按两屏布局延展。</div>
     </section>
 
     <!-- ===== 一键恢复默认（安全阀） ===== -->

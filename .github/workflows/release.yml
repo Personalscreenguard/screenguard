@@ -1,0 +1,271 @@
+name: Draft desktop release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-check:
+    name: 发布工作流配置检查
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: 校验版本和仓库完整性
+        run: python scripts/check_repo.py
+
+  package-macos:
+    name: Apple Silicon macOS DMG
+    runs-on: macos-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - name: 确认 tag 版本与应用版本一致
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python3 - "$VERSION" <<'PY'
+          import json, sys, tomllib
+          version = sys.argv[1]
+          with open("package.json", encoding="utf-8") as f:
+              package = json.load(f)["version"]
+          with open("src-tauri/tauri.conf.json", encoding="utf-8") as f:
+              app = json.load(f)["version"]
+          with open("src-tauri/Cargo.toml", "rb") as f:
+              cargo = tomllib.load(f)["package"]["version"]
+          if {version, package, app, cargo} != {version}:
+              raise SystemExit(f"tag={version}, package={package}, tauri={app}, cargo={cargo}")
+          PY
+      - name: 运行仓库自检与 Rust 单测
+        run: |
+          python3 scripts/check_repo.py
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: 安装前端依赖
+        run: npm ci
+      - name: 导入并验证 Developer ID Application 证书
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY KEYCHAIN_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::缺少 GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+
+          if [[ "$APPLE_SIGNING_IDENTITY" != "Developer ID Application:"* ]]; then
+            echo "::error::APPLE_SIGNING_IDENTITY 必须是 Developer ID Application 身份"
+            exit 1
+          fi
+
+          certificate_path="$RUNNER_TEMP/screenguard-developer-id.p12"
+          keychain_path="$RUNNER_TEMP/screenguard-build.keychain-db"
+          trap 'rm -f "$certificate_path"' EXIT
+          printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security default-keychain -d user -s "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+
+          identity_line="$(security find-identity -v -p codesigning "$keychain_path" | grep -F "\"$APPLE_SIGNING_IDENTITY\"" || true)"
+          if [[ -z "$identity_line" ]]; then
+            echo "::error::导入的 keychain 中找不到指定的 Developer ID Application 身份"
+            exit 1
+          fi
+          echo "Developer ID Application 身份已导入并验证。"
+      - name: 构建 Apple Silicon App 与 DMG
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run build -- --target aarch64-apple-darwin
+      - name: 验证 DMG 中的签名、公证与 Gatekeeper 状态
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmg_files=(src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+          if [[ "${#dmg_files[@]}" -ne 1 ]]; then
+            echo "::error::应生成恰好一个 DMG，实际数量: ${#dmg_files[@]}"
+            exit 1
+          fi
+
+          mountpoint="$RUNNER_TEMP/screenguard-dmg"
+          mkdir -p "$mountpoint"
+          printf 'y\n' | hdiutil attach -nobrowse -readonly -mountpoint "$mountpoint" "${dmg_files[0]}"
+          cleanup() { hdiutil detach -quiet "$mountpoint" || true; }
+          trap cleanup EXIT
+
+          app_path="$(find "$mountpoint" -maxdepth 2 -name 'Screenguard.app' -print -quit)"
+          if [[ -z "$app_path" ]]; then
+            echo "::error::DMG 中找不到 Screenguard.app"
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          signature_info="$(codesign -dv --verbose=4 "$app_path" 2>&1)"
+          if ! grep -Fq "Authority=$APPLE_SIGNING_IDENTITY" <<< "$signature_info"; then
+            echo "::error::App 签名者与配置的 Developer ID Application 不匹配"
+            exit 1
+          fi
+          if ! grep -Fq "TeamIdentifier=$APPLE_TEAM_ID" <<< "$signature_info"; then
+            echo "::error::App 签名 Team ID 与公证账户 Team ID 不匹配"
+            exit 1
+          fi
+          xcrun stapler validate "$app_path"
+          spctl --assess --type execute --verbose=2 "$app_path"
+      - name: 生成安装包与 SHA-256
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          shopt -s nullglob
+          files=(src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+          test "${#files[@]}" -eq 1
+          name="Screenguard_${GITHUB_REF_NAME#v}_aarch64.dmg"
+          cp "${files[0]}" "release-assets/$name"
+          shasum -a 256 "release-assets/$name" > "release-assets/$name.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-aarch64
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  package-windows:
+    name: Windows x64 NSIS installer
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: 确认 tag 版本与应用版本一致
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import json, os, tomllib
+          from pathlib import Path
+          expected = os.environ["TAG_VERSION"]
+          if not expected.startswith("v"):
+              raise SystemExit(f"release tag must start with v: {expected}")
+          expected = expected[1:]
+          package = json.loads(Path("package.json").read_text())["version"]
+          tauri = json.loads(Path("src-tauri/tauri.conf.json").read_text())["version"]
+          with Path("src-tauri/Cargo.toml").open("rb") as f:
+              cargo = tomllib.load(f)["package"]["version"]
+          if any(value != expected for value in (package, tauri, cargo)):
+              raise SystemExit(f"tag={expected}, package={package}, tauri={tauri}, cargo={cargo}")
+          PY
+      - name: 仓库自检、C# 桥接检查与 Rust 单测
+        run: |
+          python scripts/check_repo.py
+          python scripts/check_cs.py
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: 安装前端依赖
+        run: npm ci
+      - name: 构建 Windows x64 安装包
+        run: npm run build:win
+      - name: 静默安装与卸载 NSIS 包烟雾检查
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          if (-not $installer) { throw "NSIS 安装包不存在" }
+          ./scripts/smoke_windows_installer.ps1 -InstallerPath $installer.FullName
+      - name: 生成安装包与 SHA-256
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          $files = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if ($files.Count -ne 1) { throw "Expected one NSIS installer, found $($files.Count)" }
+          $name = "Screenguard_$($env:GITHUB_REF_NAME.TrimStart('v'))_x64-setup.exe"
+          $dest = Join-Path release-assets $name
+          Copy-Item $files[0].FullName $dest
+          $hash = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content -Encoding ascii "$dest.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x64
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  create-draft-release:
+    name: Create or update GitHub draft release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    needs: [package-macos, package-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: 只允许发布已合入 main 的 tag
+        env:
+          TAG_COMMIT: ${{ github.sha }}
+        run: |
+          git fetch origin main --quiet
+          git merge-base --is-ancestor "$TAG_COMMIT" origin/main
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: release-*
+          merge-multiple: true
+      - name: 汇总 SHA-256
+        run: |
+          cd release-assets
+          cat *.sha256 > SHA256SUMS.txt
+      - name: 创建或更新草稿 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes=$(mktemp)
+          cat > "$notes" <<'NOTES'
+          本草稿仅在 tag 已合入 main 且 macOS 与 Windows 安装包构建完成后生成。
+
+          附件包含 Apple Silicon macOS DMG、Windows x64 NSIS 安装包及 SHA-256 校验文件。
+
+          本草稿中的 macOS DMG 只有在 Developer ID 签名、公证票据装订和 Gatekeeper 检查通过后才会进入附件。发布前仍需人工确认双平台真实设备验收、安装升级卸载和回滚路径；Draft 不代表公开发行或实机验收完成。
+          NOTES
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+            gh release edit "$TAG" --draft --title "Screenguard $TAG" --notes-file "$notes"
+          else
+            gh release create "$TAG" release-assets/* --draft --verify-tag --title "Screenguard $TAG" --notes-file "$notes"
+          fi

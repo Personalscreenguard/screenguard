@@ -8,13 +8,13 @@ on:
 jobs:
   repo-check:
     name: 仓库自检（版本 / JSON / JS 语法）
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: check_repo（版本一致性 / bundle 引用 / JS 语法 / C# 单引号）
@@ -25,13 +25,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest, macos-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: 安装 Linux 系统依赖（Tauri 官方清单）
         if: runner.os == 'Linux'
         run: |
@@ -42,7 +42,57 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: cargo check
         run: cargo check --locked
+      - name: cargo test
+        run: cargo test --locked
       - name: 内嵌 C# 桥接编译检查（仅 Windows）
         if: runner.os == 'Windows'
         working-directory: .
         run: python scripts/check_cs.py
+
+  package-macos:
+    name: macOS DMG 构建
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 安装前端依赖
+        run: npm ci
+      - name: 构建 macOS App 与 DMG
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenguard-macos-${{ github.sha }}
+          path: src-tauri/target/**/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  package-windows:
+    name: Windows NSIS 安装包构建
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 安装前端依赖
+        run: npm ci
+      - name: 构建 Windows NSIS 安装包
+        run: npm run build:win
+      - name: 静默安装与卸载 NSIS 包烟雾检查
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          if (-not $installer) { throw "NSIS 安装包不存在" }
+          ./scripts/smoke_windows_installer.ps1 -InstallerPath $installer.FullName
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenguard-windows-${{ github.sha }}
+          path: src-tauri/target/**/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14
