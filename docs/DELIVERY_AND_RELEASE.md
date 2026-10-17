@@ -85,7 +85,7 @@
 
 ## v0.4.43 macOS Developer ID 发布门禁（2026-10-17）
 
-- tag 发布工作流现在先导入并核验 Developer ID Application `.p12` 身份，再让 Tauri 对 Apple Silicon App/DMG 签名并执行 Apple 公证；产物挂载后还会检查 App 的深层代码签名、签名者身份、公证票据和 Gatekeeper 接受状态。
+- tag 发布工作流现在先导入并核验 Developer ID Application `.p12` 身份，再让 Tauri 对 Apple Silicon App 签名并执行 Apple 公证；产物挂载后还会检查 App 的深层代码签名、签名者与 Team ID、公证票据和 Gatekeeper 接受状态。
 - 发布所需 GitHub Actions secrets：`APPLE_CERTIFICATE`（base64 编码的 `.p12`）、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`（必须以 `Developer ID Application:` 开头）、`KEYCHAIN_PASSWORD`、`APPLE_ID`、`APPLE_PASSWORD`（Apple app-specific password）和 `APPLE_TEAM_ID`。只应通过仓库 Actions secrets 配置，不要提交到源码或聊天。
 - PR 构建仍不读取这些 secrets；正式 tag 构建在 secrets 缺少、证书无法导入、签名不匹配、公证/装订失败或 Gatekeeper 拒绝时会失败，因而不会进入双平台 Draft Release 汇总。
 - 本轮只完成工作流源码与文档变更。当前没有 Developer ID Application 证书，也没有配置仓库 secrets；未运行 tag 构建，未生成已签名/公证的候选包，不能据此声称发布验收通过。
@@ -126,7 +126,7 @@
 `.github/workflows/release.yml` 只处理 `v*` tag：
 
 1. tag 对应的版本必须与 `package.json`、`src-tauri/tauri.conf.json` 和 `Cargo.toml` 一致。
-2. macOS 运行仓库检查和 Rust 单测，导入 Developer ID Application 身份，构建并签名 Apple Silicon App/DMG，向 Apple 公证并装订票据，然后验证签名、公证和 Gatekeeper；Windows 运行仓库检查、C# 桥接检查和 Rust 单测，构建 x64 NSIS 包。macOS 发布需预先配置本节列出的七项 GitHub Actions secrets。
+2. macOS 运行仓库检查和 Rust 单测，导入 Developer ID Application 身份，构建 DMG 并对 App 签名，向 Apple 公证并装订票据，然后验证签名、Team ID、公证和 Gatekeeper；Windows 运行仓库检查、C# 桥接检查和 Rust 单测，构建 x64 NSIS 包。macOS 发布需预先配置本节列出的七项 GitHub Actions secrets。
 3. 两个安装包均生成 SHA-256 文件。
 4. 仅当 tag 的提交已合入 `main` 且双平台构建成功时，自动创建或更新 GitHub Draft Release。
 5. Draft 不会自动公开。只有实机验收、升级/回滚检查均有证据后，维护者才可手动发布；macOS 的 Developer ID 签名、公证和 Gatekeeper 检查是 tag 构建的硬门槛。

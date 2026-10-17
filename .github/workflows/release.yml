@@ -80,6 +80,7 @@ jobs:
 
           certificate_path="$RUNNER_TEMP/screenguard-developer-id.p12"
           keychain_path="$RUNNER_TEMP/screenguard-build.keychain-db"
+          trap 'rm -f "$certificate_path"' EXIT
           printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$certificate_path"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
           security default-keychain -d user -s "$keychain_path"
@@ -107,6 +108,7 @@ jobs:
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -131,6 +133,10 @@ jobs:
           signature_info="$(codesign -dv --verbose=4 "$app_path" 2>&1)"
           if ! grep -Fq "Authority=$APPLE_SIGNING_IDENTITY" <<< "$signature_info"; then
             echo "::error::App 签名者与配置的 Developer ID Application 不匹配"
+            exit 1
+          fi
+          if ! grep -Fq "TeamIdentifier=$APPLE_TEAM_ID" <<< "$signature_info"; then
+            echo "::error::App 签名 Team ID 与公证账户 Team ID 不匹配"
             exit 1
           fi
           xcrun stapler validate "$app_path"
