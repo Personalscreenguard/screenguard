@@ -89,6 +89,8 @@
 - 发布所需 GitHub Actions secrets：`APPLE_CERTIFICATE`（base64 编码的 `.p12`）、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`（必须以 `Developer ID Application:` 开头）、`KEYCHAIN_PASSWORD`、`APPLE_ID`、`APPLE_PASSWORD`（Apple app-specific password）和 `APPLE_TEAM_ID`。只应通过仓库 Actions secrets 配置，不要提交到源码或聊天。
 - PR 构建仍不读取这些 secrets；正式 tag 构建在 secrets 缺少、证书无法导入、签名不匹配、公证/装订失败或 Gatekeeper 拒绝时会失败，因而不会进入双平台 Draft Release 汇总。
 - 本轮只完成工作流源码与文档变更。当前没有 Developer ID Application 证书，也没有配置仓库 secrets；未运行 tag 构建，未生成已签名/公证的候选包，不能据此声称发布验收通过。
+- 提交 `e4162aff12478b80e79ce7c2706533ea543fb6db` 的 CI run `39001798036` 全部成功：仓库自检、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG、Windows NSIS 构建及 Windows 静默安装/卸载 smoke。Draft workflow 检查 run `39001798041` 成功；tag-only 打包与 Draft Release job 按 PR 事件跳过。
+- CI artifact：Mac `12089995376`（归档 3,989,255 bytes，GitHub digest `77c4f8f3e566463425123b22e454a1acbbe7a2090f378ad493e65e40ba2fc651`），DMG SHA-256 `54be839d2abf51b3bc6dc2a2fcb05bcb317f4d3dc45530b863e77055f29023cb`，`hdiutil verify` 为 `VALID`；Windows `12089980600`（归档 2,302,751 bytes，GitHub digest `d447daaa3452afdaa1e40199109b3d84eb98f8dafbd5e887afa42110f9eb99e1`），解出 NSIS 安装包 SHA-256 `4a6274e2f5c01137fab07b5cd29e52551abdb341eef30f0e260ea5db244a4938`。下载的 Mac app 显示 `adhoc,linker-signed`；这次 PR artifact 未签名/公证，不可当作正式 Mac 发布包。
 
 ## v0.4.40 交付核验（2026-10-16）
 
