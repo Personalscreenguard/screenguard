@@ -6,8 +6,8 @@
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
-| Windows x64 | NSIS 安装包 | CI run `39038494477` 的 Windows NSIS 构建和静默安装/卸载 smoke 通过；artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 本机 0.4.46 DMG 已重建，`hdiutil verify` 为 VALID；单独生成的 `.app` 已 ad-hoc 签名并安装运行。CI run `39038494477` 的 Mac DMG 已下载回读，`hdiutil verify` 为 VALID。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；尚无 Developer ID 签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
+| Windows x64 | NSIS 安装包 | CI run `39039220743` 的 Windows NSIS 构建和静默安装/卸载 smoke 通过；artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认 |
+| macOS Apple Silicon | DMG | 本机 0.4.46 DMG 已重建，`hdiutil verify` 为 VALID；单独生成的 `.app` 已 ad-hoc 签名并安装运行。CI run `39039220743` 的 Mac DMG 已下载回读，`hdiutil verify` 为 VALID。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；尚无 Developer ID 签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -22,6 +22,8 @@
 - PR #1 保持 open/draft，head `7e070d22d99fa6a1917846b0670efc99ca0b4209`。同一 head 的 CI run `39038494477` 与 Draft desktop release 配置检查 run `39038494473` 均成功。CI 覆盖仓库自检、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG、Windows NSIS 构建及 Windows 静默安装/卸载 smoke；Draft 检查通过，PR 事件下 tag 发布步骤按设计跳过。
 - Mac artifact `12102483695`（ZIP 3,989,253 bytes，GitHub archive digest `d3292ff9a6e3fa95271237a2303048c4bad6f18bccc46c8a084293b0cab05f42`）解出 DMG SHA-256 `8ca731d1d831f8a125b3410b93f6de15a2dcfe5fc01ccbd704a585abff1d0d90`，`hdiutil verify` 为 `VALID`。Windows artifact `12103605610`（ZIP 2,305,136 bytes，GitHub archive digest `13a0cb9209fe35feacdb7487edd7cbd896bd1a49eef0fb327fa7d4241a4ee146`）解出 NSIS 安装包 SHA-256 `d07eae76f673389d8e8e4a2f6ecdfd8cff61b9cf2e57f86d1ec6a7570feafe20`，识别为 PE32/NSIS GUI 安装包。
 - 两份 CI 安装包和 SHA-256 sidecar 已复制到桌面：`Screenguard_0.4.46_aarch64-ci-39038494477.dmg` 与 `Screenguard_0.4.46_x64-setup-ci-39038494477.exe`；桌面副本 sidecar 回读通过，Mac DMG 再次验证为 `VALID`。Windows runner 的安装/卸载 smoke 不代表 Windows 实机完整安装验收。
+- 文档证据 head `cef770616c927359a02b74790c888aa8714212b8` 的 CI run `39039220743` 与 Draft desktop release 配置 run `39039220732` 均成功；该 PR-head CI 再次通过仓库自检、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG、Windows NSIS 构建及 Windows runner 静默安装/卸载 smoke。CI artifact Mac `12103139468`（ZIP 3,986,986 bytes，GitHub archive digest `2971a1bfa2542d5d5f578026e3e49eaef372cad6e7702cf5a8346fb313225bd2`），内层 DMG 4,017,455 bytes，SHA-256 `680630b25589f647f2781aedede04c56bf0f6bade4547eb4fb724119c756ae89`，`hdiutil verify` 为 `VALID`。Windows artifact `12103686717`（ZIP 2,306,625 bytes，GitHub archive digest `7f55b537f05b04e12307b482e606c9135d8547ef5ced65d7ececf5a2c4b8389e`），内层 NSIS 安装包 2,326,833 bytes，SHA-256 `7a417a56314831309518baccf37f5e71176635245aa3c54f785f2ea74157d25b`。
+- 该 run 的两份安装包和 SHA-256 sidecar 已复制至桌面：`Screenguard_0.4.46_aarch64-ci-39039220743.dmg` 与 `Screenguard_0.4.46_x64-setup-ci-39039220743.exe`；副本校验通过。Windows smoke 在 GitHub runner 执行，不等于用户 Windows 实机安装验收。
 - 本地 0.4.46 包、本地静态/单测、CI artifact 与 runner smoke 证据均不能代替双屏实体验收或公开发行。Developer ID 签名公证、真实双屏电源联动和跨屏窗口验收、Windows 实机回归及公开发行仍未完成。
 
 ## v0.4.45 macOS 跨屏窗口还原路径修复（2026-10-17）
