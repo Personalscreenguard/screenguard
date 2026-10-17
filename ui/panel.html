@@ -180,7 +180,7 @@
   <div class="hint" id="power-hint" style="padding:0 10px 2px"></div>
   <div class="btnrow" id="mac-sleep-diagnostic" style="display:none;align-items:center">
     <button class="ibtn" id="read-mac-sleep-state">读取 macOS 屏幕状态</button>
-    <span class="hint" id="mac-sleep-state-hint" style="flex:2;padding:0 4px">显示 macOS 报告的睡眠状态；不代表显示器物理断电状态。</span>
+    <span class="hint" id="mac-sleep-state-hint" style="flex:2;padding:0 4px">只读检查联动开关、Quartz 睡眠状态与 DDC VCP 0xD6；不代表显示器物理断电状态。</span>
   </div>
   <div class="hint" id="hotkey-line" style="padding:0 10px 6px">快捷键：读取中…</div>
 
@@ -852,20 +852,31 @@ const sleepDiagnostic = document.getElementById('mac-sleep-diagnostic');
 const sleepDiagnosticHint = document.getElementById('mac-sleep-state-hint');
 document.getElementById('read-mac-sleep-state').onclick = async ev => {
   flash(ev.currentTarget);
-  sleepDiagnosticHint.textContent = '正在读取 macOS Quartz 屏幕睡眠状态…';
+  sleepDiagnosticHint.textContent = '正在只读检查 Quartz 睡眠状态与 DDC 电源状态…';
   sleepDiagnosticHint.style.color = '';
   try {
-    const [states, displays] = await Promise.all([
+    const [states, displays, linkEnabled] = await Promise.all([
       invoke('get_display_sleep_states'),
-      invoke('get_displays')
+      invoke('get_displays'),
+      invoke('get_power_link_preference').catch(() => null)
     ]);
-    if (!Array.isArray(states) || !states.length) {
-      sleepDiagnosticHint.textContent = 'macOS 当前没有返回可用的显示器睡眠状态。';
-      return;
-    }
     const names = new Map((displays || []).map(display => [display.id, display.name || display.id]));
-    const summary = states.map(state => `${names.get(state.id) || state.id}：${state.asleep ? '系统报告睡眠' : '系统报告唤醒'}`).join('；');
-    sleepDiagnosticHint.textContent = `${summary}。这是 macOS 睡眠状态，不等同于物理电源状态。`;
+    const powerModes = new Map([[1, '开'], [2, '待机'], [3, '挂起'], [4, '软关'], [5, '硬关']]);
+    const powerReadings = await Promise.all((displays || []).map(async display => {
+      try {
+        const mode = await invoke('get_display_power', { displayId: display.id });
+        return `${display.name || display.id}：VCP 0xD6 ${powerModes.get(Number(mode)) || `未知值 ${mode}`}`;
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        return `${display.name || display.id}：VCP 0xD6 不可读（${message.slice(0, 96)}）`;
+      }
+    }));
+    const sleepSummary = (Array.isArray(states) ? states : []).map(state => `${names.get(state.id) || state.id}：Quartz 报告${state.asleep ? '睡眠' : '唤醒'}`);
+    const sleepText = sleepSummary.length ? sleepSummary.join('；') : 'macOS 未返回可用的逐屏 Quartz 状态';
+    const linkText = linkEnabled === null ? '读取失败' : linkEnabled ? '开' : '关';
+    const linkSummary = `电源联动开关：${linkText}`;
+    const ddcSummary = powerReadings.length ? powerReadings.join('；') : '当前没有可查询的 DDC 显示器';
+    sleepDiagnosticHint.textContent = `${linkSummary}；${sleepText}；${ddcSummary}。本次仅读取状态，不会发送关屏/唤醒命令；Quartz 睡眠状态不等同于物理电源状态。`;
   } catch (error) {
     sleepDiagnosticHint.textContent = `读取失败：${error && error.message ? error.message : error}`;
     sleepDiagnosticHint.style.color = '#ef6a6a';

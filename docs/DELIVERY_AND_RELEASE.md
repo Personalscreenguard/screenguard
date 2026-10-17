@@ -1,13 +1,13 @@
 # Screenguard 桌面端交付状态与发布流程
 
-状态快照：2026-10-17，源码版本 0.4.43。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
+状态快照：2026-10-17，源码版本 0.4.44。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
 
 ## 发布目标
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
 | Windows x64 | NSIS 安装包 | CI run `38999872386` 完成临时目录静默安装、主程序文件检查、同步静默卸载和主程序删除断言；Windows NSIS artifact 已下载并校验摘要 | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | 0.4.43 Mac 面板使用 Quartz 逐屏显示当前系统睡眠状态；PR CI 的普通 DMG 已构建并验证回读。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；由于仓库尚未配置 Apple 发布 secrets，尚无签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
+| macOS Apple Silicon | DMG | 0.4.44 Mac 面板同时显示电源联动开关、Quartz 逐屏睡眠状态和 DDC VCP 0xD6 只读读数；本机 Apple Silicon Release DMG 已构建并通过 hdiutil verify，当前 ad-hoc 签名。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；尚无签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
@@ -91,6 +91,13 @@
 - 本轮只完成工作流源码与文档变更。当前没有 Developer ID Application 证书，也没有配置仓库 secrets；未运行 tag 构建，未生成已签名/公证的候选包，不能据此声称发布验收通过。
 - 提交 `e4162aff12478b80e79ce7c2706533ea543fb6db` 的 CI run `39001798036` 全部成功：仓库自检、macOS/Windows/Ubuntu Rust 检查与测试、macOS DMG、Windows NSIS 构建及 Windows 静默安装/卸载 smoke。Draft workflow 检查 run `39001798041` 成功；tag-only 打包与 Draft Release job 按 PR 事件跳过。
 - CI artifact：Mac `12089995376`（归档 3,989,255 bytes，GitHub digest `77c4f8f3e566463425123b22e454a1acbbe7a2090f378ad493e65e40ba2fc651`），DMG SHA-256 `54be839d2abf51b3bc6dc2a2fcb05bcb317f4d3dc45530b863e77055f29023cb`，`hdiutil verify` 为 `VALID`；Windows `12089980600`（归档 2,302,751 bytes，GitHub digest `d447daaa3452afdaa1e40199109b3d84eb98f8dafbd5e887afa42110f9eb99e1`），解出 NSIS 安装包 SHA-256 `4a6274e2f5c01137fab07b5cd29e52551abdb341eef30f0e260ea5db244a4938`。下载的 Mac app 显示 `adhoc,linker-signed`；这次 PR artifact 未签名/公证，不可当作正式 Mac 发布包。
+
+## v0.4.44 macOS 电源联动只读诊断（2026-10-17）
+
+- 现有“读取 macOS 屏幕状态”入口扩展为同时读取联动开关、Quartz 逐屏睡眠状态和每屏 DDC VCP 0xD6 电源值；DDC 失败逐屏展示错误，所有请求均为只读，不调用关屏/唤醒命令。
+- 当前 Mac 在线设备为 Mi Monitor 主屏（CoreGraphics ID 3，1920x1080@60）与 HDMI TO USB 副屏（ID 2，1080x1920@60，竖屏）。只读 Quartz 查询显示两屏 online 且 awake；当前持久化联动开关为关闭。BetterDisplay VCP 0xD6 读取主屏返回 Failed.，副屏超时。以上是当前传感器状态，不是开启联动后的行为验收。
+- 本机 Apple Silicon Release/DMG 构建成功：`src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Screenguard_0.4.44_aarch64.dmg`，SHA-256 `b984858ff77fffb97493e68d7e8be72416509a8a9ed767250c9f20a3e480c8a5`，`hdiutil verify` 为 `VALID`；App 仍为 ad-hoc 签名，不能作为正式 Mac 发布包。
+- 修改前工作区备份分支：`backup/pre-ddc-diagnostic-20261017`。仓库自检、22 项 Rust 单测与 `git diff --check` 已通过；完整跨平台 CI 和 Windows 包待当前版本提交后验证。
 
 ## v0.4.40 交付核验（2026-10-16）
 
