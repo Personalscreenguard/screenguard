@@ -308,19 +308,33 @@ async fn span_foreground(mode: Option<u32>) -> Result<String, String> {
 /// 还原上一次被铺满的窗口
 #[tauri::command]
 async fn restore_foreground() -> Result<(), String> {
-    // 关闭「双屏铺满」时把两块屏的分辨率也还原回原始 4K（用户要求：关了双屏拓展就自动恢复）
     let window_restore = tauri::async_runtime::spawn_blocking(platform::restore_foreground)
         .await
         .map_err(|e| format!("后台任务失败：{}", e))?;
-    let display_restore = tauri::async_runtime::spawn_blocking(platform::align_restore_modes)
-        .await
-        .map_err(|e| format!("后台任务失败：{}", e))?;
-    match (window_restore, display_restore) {
-        (Ok(()), Ok(_)) => Ok(()),
-        (Err(window), Err(display)) => Err(format!("窗口还原失败：{}；显示器还原失败：{}", window, display)),
-        (Err(window), Ok(_)) => Err(window),
-        (Ok(()), Err(display)) => Err(display),
+
+    // macOS stores whether this specific window-span operation changed display modes
+    // in its recovery record and restores them conditionally inside restore_foreground.
+    // An unconditional second restore here could consume an unrelated pending alignment backup.
+    #[cfg(target_os = "macos")]
+    return window_restore;
+
+    // Windows' foreground restore only restores the app window; screen alignment is a
+    // separate operation and must be rolled back alongside it.
+    #[cfg(target_os = "windows")]
+    {
+        let display_restore = tauri::async_runtime::spawn_blocking(platform::align_restore_modes)
+            .await
+            .map_err(|e| format!("后台任务失败：{}", e))?;
+        match (window_restore, display_restore) {
+            (Ok(()), Ok(_)) => Ok(()),
+            (Err(window), Err(display)) => Err(format!("窗口还原失败：{}；显示器还原失败：{}", window, display)),
+            (Err(window), Ok(_)) => Err(window),
+            (Ok(()), Err(display)) => Err(display),
+        }
     }
+
+    #[cfg(target_os = "linux")]
+    window_restore
 }
 
 /// 注册全局快捷键（Ctrl+Alt+L：全部屏幕待机/唤醒 切换）

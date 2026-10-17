@@ -1,16 +1,23 @@
 # Screenguard 桌面端交付状态与发布流程
 
-状态快照：2026-10-17，源码版本 0.4.44。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
+状态快照：2026-10-17，源码版本 0.4.45。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
 
 ## 发布目标
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
 | Windows x64 | NSIS 安装包 | CI run `39033430993` 的 Windows 静默安装/卸载 smoke 和 NSIS 构建均成功；artifact 已下载回读并识别为 NSIS | Windows 实机完整回归、升级保留设置/卸载行为验收、安装包签名状态确认 |
-| macOS Apple Silicon | DMG | CI run `39033430993` 的 DMG 已下载回读，`hdiutil verify` 为 VALID；0.4.44 面板同时显示电源联动开关、Quartz 逐屏睡眠状态和 DDC VCP 0xD6 只读读数。本机 Release DMG 为 ad-hoc 签名。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；尚无签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
+| macOS Apple Silicon | DMG | 本机 0.4.45 DMG 已重建，`hdiutil verify` 为 VALID；单独生成的 `.app` 已 ad-hoc 签名并安装运行。CI run `39033430993` 的上一源码 DMG 也已下载回读。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；尚无 Developer ID 签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
 本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
+
+## v0.4.45 macOS 跨屏窗口还原路径修复（2026-10-17）
+
+- 修复 `restore_foreground` 的平台分工：macOS 原生还原器已依据窗口备份中的 `alignment_applied` 决定是否恢复显示器模式；上层 Tauri 命令不再在 macOS 额外无条件调用 `align_restore_modes`，避免把另一项操作遗留的布局备份误当成本次窗口铺满产生的变更。Windows 仍由上层独立还原窗口与显示模式。
+- 修改前可恢复分支：`backup/pre-macos-window-restore-wrapper-20261017`。版本升至 0.4.45；Mac `cargo check --offline`、指定 MacOSX26.5 SDK 的 `cargo test --locked --lib`（22/22）、仓库自检、`node --check ui/main.js` 与 `git diff --check` 已通过。默认 MacOSX27.0 SDK 的 linker 无法解析其 `.tbd` 架构标签，因此本机检查与构建显式使用 26.5 SDK。
+- 本机 Apple Silicon Release App/DMG 重建成功。App 本地 ad-hoc 重签后 `codesign --verify --deep --strict` 通过；该签名没有 Team ID，也未公证。DMG `hdiutil verify` 为 VALID，SHA-256 `80df68a59ab39e74b772403b324df8d3626fdd4bb72bf433fa27211a2664918e`，桌面副本及 `.sha256` sidecar 已生成。安装验证使用同次源码构建出的独立 `.app` bundle（DMG 内的许可确认界面未代用户接受）；`/Applications/Screenguard.app` 正运行 0.4.45，安装二进制 SHA-256 `58f073a79b5cbae286cd368db85e3bae3830e36b5775c6f8cb924651fb8ebfcd`。安装前 0.4.44 已备份至 `~/Library/Application Support/Screenguard/backups/pre-0.4.45-app-install-20261017/`；电源联动偏好仍为关闭。
+- 完整跨平台 CI 与 Windows 安装包仍待本提交推送后验证；这项源码回滚修复尚无真实多屏窗口 UI 实测。DMG 镜像校验只证明镜像完整性，不代替挂载后对其内 App 的独立签名与运行验收。
 
 ## 功能验收矩阵
 
