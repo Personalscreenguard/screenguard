@@ -1,8 +1,27 @@
 # Screenguard 桌面端交付状态与发布流程
 
-状态快照：2026-10-17，源码版本 0.4.46。本文区分代码存在、自动化构建、安装、真实设备验收和公开发布；其中一项通过不能代替其他项。
+## 当前状态快照（2026-10-19，源码版本 0.4.47）
 
-## 发布目标
+当前工作分支 `codex/screenguard-single-app` 对应 Draft PR #3。该分支上一轮 CI 的 Windows 构建/静默安装卸载 smoke、macOS ARM/Intel DMG 构建和跨平台 Rust 检查均通过，但随后对 ARM DMG 实际检查发现包内缺少 `displayplacer` 可执行文件（许可证文件存在）。本轮已将架构固定、SHA-256 校验的下载脚本接入 macOS npm 构建前置步骤，并移除对用户 Homebrew/MacPorts/PATH 中独立 `displayplacer` 的回退；修复后的干净 runner 包尚待新 CI 验证。
+
+Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。BetterDisplay 不再是运行依赖；窗口跨屏不再提供要求 VLC/PotPlayer 的专用播放器入口；Linux 不在支持范围。Windows 的 WebView2 缺失时由 NSIS 安装程序引导安装，ADB Platform-Tools 只在用户使用兼容显示器联网增强时由应用内获取。上述代码和 CI 结果仍不代替真实设备验收、签名公证或正式发布。
+
+本文后续历史记录按当时日期与源码版本保留；不要把下方旧快照的状态误认为当前状态。
+
+## 当前发布目标
+
+| 平台 | 当前目标 | 最近自动化证据 | 尚缺证据 |
+|---|---|---|---|
+| Windows x64 | Screenguard NSIS 安装包 | PR #3 上一轮 CI：Rust 检查/测试、NSIS 构建、runner 静默安装卸载 smoke 通过 | 修复后重跑 CI；用户 Windows 实机安装、启动与功能验收；签名状态确认 |
+| macOS Apple Silicon / Intel | Screenguard DMG | PR #3 上一轮两种架构均构建成功；DMG 内容检查发现布局二进制遗漏，本轮已修复构建钩子，待重跑 CI | 修复后确认两架构 DMG 均含正确架构二进制；Mac 实机回归；Developer ID 签名与公证 |
+
+历史发布记录：下方条目保留当时证据，不自动继承为当前版本结论。
+
+---
+
+### 历史快照：2026-10-17，源码版本 0.4.46
+
+### 历史发布目标（2026-10-17）
 
 | 平台 | 当前自动化安装包 | 已验证范围 | 未完成的发布证据 |
 |---|---|---|---|
@@ -10,7 +29,7 @@
 | macOS Apple Silicon | DMG | 本机 0.4.46 DMG 已重建，`hdiutil verify` 为 VALID；单独生成的 `.app` 已 ad-hoc 签名并安装运行。CI run `39039872566` 的 Mac DMG 已下载回读，`hdiutil verify` 为 VALID。本轮为 tag 发布工作流加入 Developer ID 证书导入、签名身份、公证票据和 Gatekeeper 检查；尚无 Developer ID 签名/公证包 | 双屏电源联动和窗口跨屏实测；配置 Apple 发布 secrets 后运行 tag 发布并验证干净 Mac 安装 |
 | Linux | 暂不发布 | CI 编译和单测 | 没有面向用户的打包、安装与验收流程 |
 
-本项目当前 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
+截至该历史快照，本项目 Release 目标为 Windows x64 和 Apple Silicon Mac；不将 CI 产物称作通过设备验收的正式发行版。
 
 ## v0.4.46 电源联动可观测性提示（2026-10-17）
 

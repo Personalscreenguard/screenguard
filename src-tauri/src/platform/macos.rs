@@ -1,6 +1,4 @@
-use super::{
-    run_cmd, which, AudioEndpoint, BatteryInfo, DisplayInfo, DisplayMode, SystemAudio,
-};
+use super::{run_cmd, AudioEndpoint, BatteryInfo, DisplayInfo, DisplayMode, SystemAudio};
 use core_foundation::base::{CFType, TCFType};
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::CFString;
@@ -507,7 +505,7 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
     }
 }
 
-/// Prefer the layout helper bundled inside the app, then a developer copy.
+/// Use the layout helper bundled inside the app, or the repository copy for development.
 fn displayplacer_path() -> Option<std::path::PathBuf> {
     if let Ok(executable) = std::env::current_exe() {
         if let Some(contents) = executable.parent().and_then(|p| p.parent()) {
@@ -518,24 +516,12 @@ fn displayplacer_path() -> Option<std::path::PathBuf> {
     let development = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("resources/displayplacer/displayplacer");
     if development.is_file() { return Some(development); }
-    [
-        "/opt/homebrew/bin/displayplacer",
-        "/usr/local/bin/displayplacer",
-        "/opt/local/bin/displayplacer",
-    ]
-    .into_iter()
-    .find(|p| std::path::Path::new(p).exists())
-    .map(std::path::PathBuf::from)
-    .or_else(|| which("displayplacer").then(|| "displayplacer".into()))
+    None
 }
 
 fn run_displayplacer(args: &[&str]) -> Result<String, String> {
     let path = displayplacer_path().ok_or_else(|| "Screenguard 内置布局组件缺失；请重新安装 Screenguard".to_string())?;
     run_cmd(&path.to_string_lossy(), args).map_err(|e| format!("显示器布局操作失败：{}", e.trim()))
-}
-
-fn displayplacer_available() -> bool {
-    displayplacer_path().is_some()
 }
 
 fn mode_property<'a>(prop: &'a str, prefix: &str, props: &'a [&'a str], index: usize) -> Option<&'a str> {
@@ -2343,114 +2329,4 @@ pub fn restore_foreground() -> Result<(), String> {
         return Err(format!("窗口未能完全还原：原位置 ({},{}) {}x{}，当前 ({},{}) {}x{}；还原信息已保留", saved.x, saved.y, saved.w, saved.h, actual.x, actual.y, actual.w, actual.h));
     }
     std::fs::remove_file(path).map_err(|e| format!("窗口已还原，但清除状态失败：{}", e))
-}
-
-// ===== 视频跨屏（VLC）= 按当前真实布局铺满所有屏的并集 =====
-pub fn span_video() -> Result<(), String> {
-    let installed =
-        which("vlc") || std::path::Path::new("/Applications/VLC.app/Contents/MacOS/VLC").exists();
-    if !installed {
-        return Err("未安装 VLC".into());
-    }
-    let screens = parse_screens();
-    if screens.iter().filter(|s| s.enabled).count() < 2 {
-        return Err("需要至少两块屏幕才能双屏铺满".into());
-    }
-    let (x0, y0, x1, y1) = union_bounds(&screens).ok_or("无法计算屏幕布局")?;
-
-    // 用 osascript 统一处理：activate 启动 VLC → 等主窗口出现 → 铺到包围盒
-    let script = format!(
-        r#"
-on run
-  tell application "VLC" to activate
-  delay 2.0
-  set bx1 to {}
-  set by1 to {}
-  set bx2 to {}
-  set by2 to {}
-  tell application "VLC"
-    set targetWindow to missing value
-    set maxArea to 0
-    repeat 30 times
-      try
-        set targetWindow to missing value
-        set maxArea to 0
-        repeat with wnd in windows
-          try
-            set {{x1, y1, x2, y2}} to bounds of wnd
-            set area to (x2 - x1) * (y2 - y1)
-            if area > maxArea then
-              set maxArea to area
-              set targetWindow to wnd
-            end if
-          end try
-        end repeat
-        if targetWindow is not missing value then
-          set bounds of targetWindow to {{bx1, by1, bx2, by2}}
-          delay 0.4
-        end if
-      end try
-    end repeat
-  end tell
-end run
-"#,
-        x0, y0, x1, y1
-    );
-    run_cmd("osascript", &["-e", &script])?;
-    Ok(())
-}
-
-pub fn restore_video() -> Result<(), String> {
-    // 把 VLC 主窗口恢复为铺满主屏（退出跨屏状态）
-    let screens = parse_screens();
-    let main = screens
-        .iter()
-        .find(|s| s.enabled && s.main)
-        .ok_or("未找到主屏")?;
-    if main.layout_mode().is_none() {
-        return Err("无法识别主屏当前桌面尺寸；请更新 displayplacer 后重试，未调整 VLC 窗口".into());
-    }
-    let x0 = main.ox;
-    let y0 = main.oy;
-    let x1 = x0 + main.frame_w() as i32;
-    let y1 = y0 + main.frame_h() as i32;
-    let script = format!(
-        r#"
-on run
-  tell application "VLC" to activate
-  delay 1.0
-  set bx1 to {}
-  set by1 to {}
-  set bx2 to {}
-  set by2 to {}
-  tell application "VLC"
-    set targetWindow to missing value
-    set maxArea to 0
-    repeat 10 times
-      try
-        set targetWindow to missing value
-        set maxArea to 0
-        repeat with wnd in windows
-          try
-            set {{x1, y1, x2, y2}} to bounds of wnd
-            set area to (x2 - x1) * (y2 - y1)
-            if area > maxArea then
-              set maxArea to area
-              set targetWindow to wnd
-            end if
-          end try
-        end repeat
-        if targetWindow is not missing value then
-          set bounds of targetWindow to {{bx1, by1, bx2, by2}}
-          delay 0.4
-        end if
-      end try
-    end repeat
-  end tell
-end run
-"#,
-        x0, y0, x1, y1
-    );
-    run_cmd("osascript", &["-e", &script])?;
-    Ok(())
 }

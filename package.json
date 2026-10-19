@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
+    "prebuild": "node tools/fetch-displayplacer.mjs",
     "build": "tauri build",
     "build:win": "tauri build --bundles nsis"
   },

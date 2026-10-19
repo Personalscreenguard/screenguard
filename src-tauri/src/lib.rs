@@ -163,20 +163,6 @@ async fn restore_secondary() -> Result<(), String> {
         .map_err(|e| format!("后台任务失败：{}", e))?
 }
 
-#[tauri::command]
-async fn span_video() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(platform::span_video)
-        .await
-        .map_err(|e| format!("后台任务失败：{}", e))?
-}
-
-#[tauri::command]
-async fn restore_video() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(platform::restore_video)
-        .await
-        .map_err(|e| format!("后台任务失败：{}", e))?
-}
-
 // ---------- 屏幕电源控制（方案A：纯本地） ----------
 
 /// 系统级关闭所有屏幕（一次黑全部屏，含不支持 DDC 的显示器）
@@ -1691,8 +1677,6 @@ pub fn run() {
             match_ppi,
             rotate_secondary,
             restore_secondary,
-            span_video,
-            restore_video,
             screen_off,
             screen_wake,
             set_display_power,

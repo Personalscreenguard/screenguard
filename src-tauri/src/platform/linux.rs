@@ -148,13 +148,3 @@ pub fn rotate_secondary() -> Result<(), String> {
 pub fn restore_secondary() -> Result<(), String> {
     unsupported("恢复副屏竖屏")
 }
-pub fn span_video() -> Result<(), String> {
-    if which("vlc") {
-        Err("双屏铺满：Linux 版暂未实现".into())
-    } else {
-        Err("未安装 VLC".into())
-    }
-}
-pub fn restore_video() -> Result<(), String> {
-    unsupported("恢复播放器窗口")
-}
