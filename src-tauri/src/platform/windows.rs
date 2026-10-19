@@ -3023,7 +3023,7 @@ $zip = Join-Path $dst 'pt.zip';
 $urls = @('https://dl.google.com/android/repository/platform-tools-latest-windows.zip','https://googledownloads.cn/android/repository/platform-tools-latest-windows.zip');
 $ok = $false;
 foreach ($u in $urls) { try { Invoke-WebRequest -Uri $u -OutFile $zip -TimeoutSec 300 -UseBasicParsing; $ok = $true; break } catch { } }
-if (-not $ok) { Write-Output 'ERR:下载失败（网络不通），请手动下载 platform-tools 解压到该目录'; exit }
+if (-not $ok) { Write-Output 'ERR:下载 Android Platform-Tools 失败（请检查网络后在 Screenguard 中重试）。本地显示器控制不受影响。'; exit }
 Expand-Archive -Path $zip -DestinationPath $dst -Force;
 Remove-Item $zip -Force;
 Write-Output ('OK:' + (Join-Path $dst 'platform-tools\adb.exe'))"#;

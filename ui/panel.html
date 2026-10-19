@@ -1246,7 +1246,7 @@ document.getElementById('cell-adbdl').onclick = async (ev)=>{
   } catch(e){
     adbSay(platform === 'macos'
       ? 'ADB 安装失败：' + (e && e.message ? e.message : e)
-      : '自动下载失败：' + (e && e.message ? e.message : e) + '（可手动下载 platform-tools 解压到 %LOCALAPPDATA%\\screenguard_adb\\；装了 Android 模拟器或投屏工具的话，它们自带的 adb 也会被自动识别）', true);
+      : '自动下载失败：' + (e && e.message ? e.message : e) + '（请检查网络后在 Screenguard 中重试；未获取 ADB 不影响本地显示器控制）', true);
   }
 };
 
