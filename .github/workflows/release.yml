@@ -121,8 +121,8 @@ jobs:
           if not expected.startswith("v"):
               raise SystemExit(f"release tag must start with v: {expected}")
           expected = expected[1:]
-          package = json.loads(Path("package.json").read_text())["version"]
-          tauri = json.loads(Path("src-tauri/tauri.conf.json").read_text())["version"]
+          package = json.loads(Path("package.json").read_text(encoding="utf-8"))["version"]
+          tauri = json.loads(Path("src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["version"]
           with Path("src-tauri/Cargo.toml").open("rb") as f:
               cargo = tomllib.load(f)["package"]["version"]
           if any(value != expected for value in (package, tauri, cargo)):
