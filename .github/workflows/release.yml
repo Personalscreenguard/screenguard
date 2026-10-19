@@ -110,6 +110,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: 确认 tag 版本与应用版本一致
+        shell: bash
         env:
           TAG_VERSION: ${{ github.ref_name }}
         run: |
