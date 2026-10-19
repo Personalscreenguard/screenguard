@@ -19,8 +19,18 @@ jobs:
         run: python scripts/check_repo.py
 
   package-macos:
-    name: Apple Silicon macOS DMG
-    runs-on: macos-latest
+    name: macOS ${{ matrix.arch }} DMG
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v5
@@ -31,7 +41,7 @@ jobs:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
       - name: 确认 tag 版本与应用版本一致
         shell: bash
         run: |
@@ -95,7 +105,7 @@ jobs:
             exit 1
           fi
           echo "Developer ID Application 身份已导入并验证。"
-      - name: 构建 Apple Silicon App 与 DMG
+      - name: 构建 ${{ matrix.arch }} Mac App 与 DMG
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -103,7 +113,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run build -- --target aarch64-apple-darwin
+        run: npm run build -- --target ${{ matrix.target }}
       - name: 验证 DMG 中的签名、公证与 Gatekeeper 状态
         shell: bash
         env:
@@ -112,7 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          dmg_files=(src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+          dmg_files=(src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
           if [[ "${#dmg_files[@]}" -ne 1 ]]; then
             echo "::error::应生成恰好一个 DMG，实际数量: ${#dmg_files[@]}"
             exit 1
@@ -146,14 +156,14 @@ jobs:
         run: |
           mkdir -p release-assets
           shopt -s nullglob
-          files=(src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+          files=(src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
           test "${#files[@]}" -eq 1
-          name="Screenguard_${GITHUB_REF_NAME#v}_aarch64.dmg"
+          name="Screenguard_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.dmg"
           cp "${files[0]}" "release-assets/$name"
           shasum -a 256 "release-assets/$name" > "release-assets/$name.sha256"
       - uses: actions/upload-artifact@v4
         with:
-          name: release-macos-aarch64
+          name: release-macos-${{ matrix.arch }}
           path: release-assets/*
           if-no-files-found: error
           retention-days: 7
@@ -266,7 +276,7 @@ jobs:
           cat > "$notes" <<'NOTES'
           本草稿仅在 tag 已合入 main 且 macOS 与 Windows 安装包构建完成后生成。
 
-          附件包含 Apple Silicon macOS DMG、Windows x64 NSIS 安装包及 SHA-256 校验文件。
+          附件包含 Apple Silicon 与 Intel macOS DMG、Windows x64 NSIS 安装包及 SHA-256 校验文件。
 
           本草稿中的 macOS DMG 只有在 Developer ID 签名、公证票据装订和 Gatekeeper 检查通过后才会进入附件。发布前仍需人工确认双平台真实设备验收、安装升级卸载和回滚路径；Draft 不代表公开发行或实机验收完成。
           NOTES

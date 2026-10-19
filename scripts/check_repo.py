@@ -38,7 +38,7 @@ def ok(msg):
 
 
 def check_versions():
-    print("[1/5] 版本一致性")
+    print("[1/6] 版本一致性")
     good = True
     cargo = open(os.path.join(ROOT, "src-tauri", "Cargo.toml"), encoding="utf-8").read()
     m = re.search(r'^version\s*=\s*"([^"]+)"', cargo, re.M)
@@ -60,7 +60,7 @@ def check_versions():
 
 
 def check_bundle_refs():
-    print("[2/5] tauri.conf.json 引用与 Windows WebView2 打包模式")
+    print("[2/6] tauri.conf.json 引用与 Windows WebView2 打包模式")
     conf = json.load(open(os.path.join(ROOT, "src-tauri", "tauri.conf.json"), encoding="utf-8"))
     good = True
     webview_mode = conf.get("bundle", {}).get("windows", {}).get("webviewInstallMode", {}).get("type")
@@ -83,7 +83,7 @@ def check_bundle_refs():
 
 def check_single_app_dependencies():
     """Protect the promise that supported display controls ship with Screenguard."""
-    print("[3/5] 单应用依赖与随包组件")
+    print("[3/6] 单应用依赖与随包组件")
     good = True
 
     package = json.load(open(os.path.join(ROOT, "package.json"), encoding="utf-8"))
@@ -154,7 +154,7 @@ def node_check(label, code):
 
 
 def check_js():
-    print("[4/5] 前端 JS 语法（node --check；临时文件按 CommonJS 解析，顶层 await 会报错）")
+    print("[4/6] 前端 JS 语法（node --check；临时文件按 CommonJS 解析，顶层 await 会报错）")
     if not node_available():
         print("  ⚠️ node 不可用，跳过（CI 中会执行此检查）")
         return True
@@ -180,7 +180,7 @@ def check_js():
 
 def check_csharp_quote():
     """windows.rs 的 CORE_CS 内不允许出现单引号（PS 单引号包裹会截断）——与 check_cs.py 同规则的前置防线"""
-    print("[5/5] windows.rs CORE_CS 单引号检查")
+    print("[5/6] windows.rs CORE_CS 单引号检查")
     src = open(os.path.join(ROOT, "src-tauri", "src", "platform", "windows.rs"), encoding="utf-8").read()
     m = re.search(r'const CORE_CS: &str = r#"(.*?)"#;', src, re.S)
     if not m:
@@ -190,12 +190,24 @@ def check_csharp_quote():
     return ok("无单引号")
 
 
+def check_release_architectures():
+    """Both supported Mac architectures must be included in the signed release workflow."""
+    print("[6/6] 正式发布架构")
+    path = os.path.join(ROOT, ".github", "workflows", "release.yml")
+    release = open(path, encoding="utf-8").read()
+    required = ("aarch64-apple-darwin", "x86_64-apple-darwin", "release-macos-${{ matrix.arch }}")
+    missing = [item for item in required if item not in release]
+    if missing:
+        return fail("正式发布工作流缺少架构配置: " + ", ".join(missing))
+    return ok("正式发布包含 Apple Silicon 与 Intel 两种 Mac DMG")
+
+
 def main():
     print("=" * 60)
     print("screenguard 仓库自检")
     print("=" * 60)
     good = all([check_versions(), check_bundle_refs(), check_single_app_dependencies(),
-                check_js(), check_csharp_quote()])
+                check_js(), check_csharp_quote(), check_release_architectures()])
     print("=" * 60)
     print("✅ 全部通过" if good else "❌ 存在问题")
     sys.exit(0 if good else 1)
