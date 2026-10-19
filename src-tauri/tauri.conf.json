@@ -82,9 +82,6 @@
           "English"
         ]
       }
-    },
-    "macOS": {
-      "signingIdentity": "-"
     }
   }
 }

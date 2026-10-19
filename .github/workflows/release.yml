@@ -64,61 +64,10 @@ jobs:
           cargo test --locked --manifest-path src-tauri/Cargo.toml
       - name: 安装前端依赖
         run: npm ci
-      - name: 导入并验证 Developer ID Application 证书
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY KEYCHAIN_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "::error::缺少 GitHub Actions secret: $name"
-              exit 1
-            fi
-          done
-
-          if [[ "$APPLE_SIGNING_IDENTITY" != "Developer ID Application:"* ]]; then
-            echo "::error::APPLE_SIGNING_IDENTITY 必须是 Developer ID Application 身份"
-            exit 1
-          fi
-
-          certificate_path="$RUNNER_TEMP/screenguard-developer-id.p12"
-          keychain_path="$RUNNER_TEMP/screenguard-build.keychain-db"
-          trap 'rm -f "$certificate_path"' EXIT
-          printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$certificate_path"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
-          security default-keychain -d user -s "$keychain_path"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
-          security set-keychain-settings -lut 21600 "$keychain_path"
-          security import "$certificate_path" -k "$keychain_path" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
-
-          identity_line="$(security find-identity -v -p codesigning "$keychain_path" | grep -F "\"$APPLE_SIGNING_IDENTITY\"" || true)"
-          if [[ -z "$identity_line" ]]; then
-            echo "::error::导入的 keychain 中找不到指定的 Developer ID Application 身份"
-            exit 1
-          fi
-          echo "Developer ID Application 身份已导入并验证。"
-      - name: 构建 ${{ matrix.arch }} Mac App 与 DMG
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: 构建未签名 ${{ matrix.arch }} Mac App 与 DMG
         run: npm run build -- --target ${{ matrix.target }}
-      - name: 验证 DMG 中的签名、公证与 Gatekeeper 状态
+      - name: 验证未签名 DMG 镜像完整性
         shell: bash
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -127,30 +76,7 @@ jobs:
             echo "::error::应生成恰好一个 DMG，实际数量: ${#dmg_files[@]}"
             exit 1
           fi
-
-          mountpoint="$RUNNER_TEMP/screenguard-dmg"
-          mkdir -p "$mountpoint"
-          printf 'y\n' | hdiutil attach -nobrowse -readonly -mountpoint "$mountpoint" "${dmg_files[0]}"
-          cleanup() { hdiutil detach -quiet "$mountpoint" || true; }
-          trap cleanup EXIT
-
-          app_path="$(find "$mountpoint" -maxdepth 2 -name 'Screenguard.app' -print -quit)"
-          if [[ -z "$app_path" ]]; then
-            echo "::error::DMG 中找不到 Screenguard.app"
-            exit 1
-          fi
-          codesign --verify --deep --strict --verbose=2 "$app_path"
-          signature_info="$(codesign -dv --verbose=4 "$app_path" 2>&1)"
-          if ! grep -Fq "Authority=$APPLE_SIGNING_IDENTITY" <<< "$signature_info"; then
-            echo "::error::App 签名者与配置的 Developer ID Application 不匹配"
-            exit 1
-          fi
-          if ! grep -Fq "TeamIdentifier=$APPLE_TEAM_ID" <<< "$signature_info"; then
-            echo "::error::App 签名 Team ID 与公证账户 Team ID 不匹配"
-            exit 1
-          fi
-          xcrun stapler validate "$app_path"
-          spctl --assess --type execute --verbose=2 "$app_path"
+          hdiutil verify "${dmg_files[0]}"
       - name: 生成安装包与 SHA-256
         shell: bash
         run: |
@@ -210,13 +136,6 @@ jobs:
         run: npm ci
       - name: 构建 Windows x64 安装包
         run: npm run build:win
-      - name: Authenticode 签名并验证 Windows 安装包
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_SIGNING_CERT_THUMBPRINT: ${{ secrets.WINDOWS_SIGNING_CERT_THUMBPRINT }}
-        run: ./scripts/sign_windows_installer.ps1
       - name: 静默安装与卸载 NSIS 包烟雾检查
         shell: pwsh
         run: |
@@ -278,7 +197,7 @@ jobs:
 
           附件包含 Apple Silicon 与 Intel macOS DMG、Windows x64 NSIS 安装包及 SHA-256 校验文件。
 
-          本草稿中的 macOS DMG 只有在 Developer ID 签名、公证票据装订和 Gatekeeper 检查通过后才会进入附件。发布前仍需人工确认双平台真实设备验收、安装升级卸载和回滚路径；Draft 不代表公开发行或实机验收完成。
+          不使用 Apple Developer ID 或 Windows Authenticode 证书，也不提交 Apple 公证。macOS 首次打开可能需要用户在系统安全提示中手动允许；Windows 可能显示未知发布者/SmartScreen 提示。发布前仍需人工确认双平台真实设备验收、安装升级卸载和回滚路径；Draft 不代表公开发行或实机验收完成。
           NOTES
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" release-assets/* --clobber

@@ -1,5 +1,11 @@
 # Screenguard 桌面端交付状态与发布流程
 
+## 发布策略更新（2026-10-20）
+
+桌面版不提交 App Store 或 Microsoft Store，采用免费网页下载；iPhone 端维持 PWA。按用户决定，不购买或配置 Apple Developer ID / Windows Authenticode 证书，也不做 Apple 公证（macOS Tauri 构建可能保留无开发者身份的本地 ad-hoc 签名）。GitHub Actions 不再要求任何 Apple/Windows 签名 secrets，也不创建临时签名钥匙串；`KEYCHAIN_PASSWORD` 原本只是 CI 临时钥匙串的解锁口令，在此策略下不需要。macOS 首次运行可能需要用户手动允许打开，Windows 可能出现未知发布者或 SmartScreen 提示。
+
+网站目前没有在本工作流中配置自动上传目标；本工作流生成未签名的双平台安装包和 SHA-256 校验文件，并保存在 GitHub Draft Release。把附件链接接入实际网站仍是单独的发布步骤，需确认网站所在仓库/托管方式后完成。
+
 ## 当前状态快照（2026-10-20，产品版本 0.4.47）
 
 当前分支 `codex/screenguard-single-app` 对应 OPEN/DRAFT PR #3，head 为 `a893bc914c0c5fb38efe8ed41f2ed9bc40d6e09c`。单应用依赖门禁检查按架构固定 SHA-256 并随包分发 `displayplacer`、Tauri bundle 资源引用正确，并扫描运行时代码防止重新引入 BetterDisplay。macOS 显示器控制使用系统 API 与应用内 DDC/CI；Windows ADB 下载失败时不要求用户手动安装 Platform-Tools。
@@ -10,7 +16,7 @@
 
 最新 CI artifact 元数据与 Mac DMG 本地回读：Windows NSIS 219,310,044 bytes，GitHub artifact digest `sha256:0a05b4455b529c0f83bcc1cbb9e7b0b948a73a309515e266cb523dae4b2543f6`；Apple Silicon DMG artifact 4,003,531 bytes，digest `sha256:6c18de6e02c68c174a0b77a2d1b7682d73248eb82bdc6f65d4e7e74ba0112ef6`，下载后 `hdiutil verify` 为 VALID、DMG SHA-256 `ed3b7500ada0ffac5df87865d7bff90a812e6ee5ac8dd678094535d6ae4cab8d`；Intel DMG artifact 4,250,699 bytes，digest `sha256:a6c0ba9d6026ec8a6a32fe7ca0f14d4dbd1158dccd69ea1487b2b8535a1ff629`，下载后 `hdiutil verify` 为 VALID、DMG SHA-256 `68ccbd610c96bc15a0ba387f75e710b3ebbad78db99924caebb2e974dc9c3c9f`。Windows 包在 CI 安装/卸载 smoke 通过，未在本机下载或 Windows 用户设备上验收。
 
-这仍不是可直接面向普通用户发布的正式签名包：GitHub 仓库目前没有 Actions secrets；Windows 正式包需要可信 Authenticode 签名，macOS 需要 Developer ID 签名、公证和 Gatekeeper 验收。Windows 实机安装/启动/功能验收，以及 Mac 外接显示器 DDC/CI 与 ColorSync 验收仍未完成。
+当前候选包为无付费开发者证书/公证的构建，按用户选择的免费分发策略继续；macOS 首次启动需要接受系统安全提示，Windows 可能出现未知发布者/SmartScreen 提示。Windows 实机安装/启动/功能验收，以及 Mac 外接显示器 DDC/CI 与 ColorSync 验收仍未完成。
 
 ### 单软件安装范围
 
@@ -25,8 +31,8 @@
 
 | 平台 | 当前目标 | 已有自动化证据 | 尚缺证据 |
 |---|---|---|---|
-| Windows x64 | Screenguard NSIS 单安装包 | 39282943351：离线 WebView2 体积门槛、静默安装/卸载 smoke；Windows Cargo check/tests 通过 | 用户 Windows 离线安装、启动与功能验收；正式 Authenticode 签名 |
-| macOS Apple Silicon / Intel | Screenguard DMG | 39282943351：ARM/Intel DMG；本地回读后两份 DMG `hdiutil verify` 均 VALID；macOS Cargo check/tests 通过 | 用户 Mac 外接显示器 DDC/CI 与 ColorSync 验收；Developer ID 签名、公证及 Gatekeeper 通过 |
+| Windows x64 | Screenguard NSIS 单安装包 | 39282943351：离线 WebView2 体积门槛、静默安装/卸载 smoke；Windows Cargo check/tests 通过 | 用户 Windows 离线安装、启动与功能验收 |
+| macOS Apple Silicon / Intel | 未签名 Screenguard DMG | 39282943351：ARM/Intel DMG；本地回读后两份 DMG `hdiutil verify` 均 VALID；macOS Cargo check/tests 通过 | 用户 Mac 外接显示器 DDC/CI 与 ColorSync 验收；真实用户首次安装体验 |
 
 历史发布记录：下方条目保留当时证据，不自动继承为当前版本结论。
 
@@ -193,10 +199,10 @@
 `.github/workflows/release.yml` 只处理 `v*` tag：
 
 1. tag 对应的版本必须与 `package.json`、`src-tauri/tauri.conf.json` 和 `Cargo.toml` 一致。
-2. macOS 运行仓库检查和 Rust 单测，导入 Developer ID Application 身份，构建 DMG 并对 App 签名，向 Apple 公证并装订票据，然后验证签名、Team ID、公证和 Gatekeeper；Windows 运行仓库检查、C# 桥接检查和 Rust 单测，构建含 WebView2 离线运行时的 x64 NSIS 包、签名并验证 Authenticode 与时间戳。macOS 发布需预先配置七项 Apple GitHub Actions secrets；Windows 发布需配置 `WINDOWS_CERTIFICATE`、`WINDOWS_CERTIFICATE_PASSWORD`、`WINDOWS_SIGNING_CERT_THUMBPRINT`。
+2. macOS 运行仓库检查和 Rust 单测，构建无 Developer ID/公证 DMG 并校验镜像完整性；Windows 运行仓库检查、C# 桥接检查和 Rust 单测，构建含 WebView2 离线运行时且不做 Authenticode 签名的 x64 NSIS 包并进行静默安装/卸载 smoke。无需 Apple、Windows 签名 secrets。
 3. 两个安装包均生成 SHA-256 文件。
 4. 仅当 tag 的提交已合入 `main` 且双平台构建成功时，自动创建或更新 GitHub Draft Release。
-5. Draft 不会自动公开。只有实机验收、升级/回滚检查均有证据后，维护者才可手动发布；macOS 的 Developer ID 签名、公证和 Gatekeeper 检查是 tag 构建的硬门槛。
+5. Draft 不会自动公开。只有实机验收、升级/回滚检查均有证据后，维护者才可手动发布。网站下载页需单独链接到已公开 Release 的安装包和 SHA-256 校验文件。
 
 正式打 tag 前要先完成 PR 审核并合入 `main`，确认仓库版本字段一致，再创建 `vX.Y.Z` tag 并推送。不要在未合入 main 的 PR commit 上创建正式版本 tag；工作流会拒绝这种 tag。
 
