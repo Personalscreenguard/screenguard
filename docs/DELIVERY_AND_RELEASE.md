@@ -8,9 +8,9 @@
 
 Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。BetterDisplay 不再是运行依赖，主窗口和菜单栏已移除残留的 BetterDisplay 风格旧入口，只保留原生支持的显示操作；macOS HDR 等无法可靠替代的控制标为不支持。窗口跨屏不再提供要求 VLC/PotPlayer 的专用播放器入口；Linux 不在支持范围。Windows 的 WebView2 离线运行时随 NSIS 包分发；ADB Platform-Tools 只在用户使用兼容显示器联网增强时由应用内获取。上述代码和 CI 结果仍不代替真实设备验收、签名公证或正式发布。
 
-### 单安装包收口（2026-10-19，待 CI 验证）
+### 单安装包收口（2026-10-19）
 
-- Windows NSIS 配置由 `embedBootstrapper` 切换为 WebView2 `offlineInstaller`，把 Evergreen 离线运行时安装器放进 Screenguard 安装包。首次安装不需要网络，也不要求用户预装 WebView2；预计安装包增加约 127 MB。该变化基于 [Tauri Windows Installer 文档](https://v2.tauri.app/distribute/windows-installer/)；具体包体与离线安装效果仍待本分支 CI 和 Windows 实机核验。
+- Windows NSIS 配置由 `embedBootstrapper` 切换为 WebView2 `offlineInstaller`，把 Evergreen 离线运行时安装器放进 Screenguard 安装包。首次安装不需要网络，也不要求用户预装 WebView2；Tauri 文档预估安装包增加约 127 MB。本分支 CI run [39211091245](https://github.com/Personalscreenguard/screenguard/actions/runs/39211091245) 六项全绿，Windows NSIS 构建、静默安装/卸载 smoke 通过。Windows artifact `12167718962` 的 GitHub 压缩包大小为 219,304,989 bytes（digest `52e4cd414fb2e347e3e360d3df46e4829e7f7922fd4c5804747820366789a7d2`）；由于大文件回读连接被重置，本轮没有核实归档内安装器的精确大小和运行时文件清单，首次离线安装仍需 Windows 实机验收。
 - Windows tag 发布流程新增 Authenticode 签名步骤，要求 `WINDOWS_CERTIFICATE`（Base64 编码的 PFX）、`WINDOWS_CERTIFICATE_PASSWORD` 和 `WINDOWS_SIGNING_CERT_THUMBPRINT` 三项 GitHub Actions secrets。签名后验证证书指纹、签名链状态和可信时间戳；缺 secret、证书过期或验证失败时阻止 Draft Release 生成。
 - 该分支没有 Windows 代码签名证书，未运行 tag 发布。PR CI 的 Windows 验收包仍为未签名构建，用户 Windows 实机、离线安装与 SmartScreen 验收未完成。
 
