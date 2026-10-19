@@ -2,9 +2,9 @@
 
 ## 当前状态快照（2026-10-19，产品版本 0.4.47）
 
-当前分支 `codex/screenguard-single-app` 对应 OPEN/DRAFT PR #3。最新运行时代码提交为 `e0bfbd6`，它在 `00fd5756cee4e61cafe5e8175dcb413f1f3ab3d3` 的基础上修正 macOS 随包布局组件提示和 README 平台状态表；本次本机 Rust 单测 15/15 通过，仓库与前端检查通过。最新完整绿色 CI run [39214507784](https://github.com/Personalscreenguard/screenguard/actions/runs/39214507784) 验证其前一代码提交 `00fd575` 的六个 job；新提交推送后仍需等对应 CI 验证。
+当前分支 `codex/screenguard-single-app` 对应 OPEN/DRAFT PR #3，最新运行时代码提交为 `e0bfbd6`；CI run 39217635070 在其后的文档提交 `dd0a7c9` 上验证六项全部通过。本次只补录该验证结果，不改变运行时代码。CI run [39217635070](https://github.com/Personalscreenguard/screenguard/actions/runs/39217635070) 对该 head 的六项全部通过：仓库检查、Windows/macOS Cargo check 与 tests、Windows NSIS 离线安装包、macOS Apple Silicon/Intel DMG。Windows 安装包通过 WebView2 离线运行时体积门槛与静默安装/卸载 smoke；Draft 发布配置 run [39217634987](https://github.com/Personalscreenguard/screenguard/actions/runs/39217634987) 通过。本机检查 `scripts/check_repo.py`、JS 语法、`git diff --check` 通过；macOS Rust 单测 15/15 通过。
 
-GitHub 报告的该次 CI artifacts 元数据（未在本机下载回读）：Apple Silicon DMG ZIP 4,003,230 bytes，digest `sha256:6c0386c4a9f34480d23437b03a0e2faf350e6af91c54f25fb90be3a324d85ef4`；Intel DMG ZIP 4,250,595 bytes，digest `sha256:e73c2dac9a91daa3ee475a06ef8f38ad7ea381fe6444437751d88f0435449f66`；Windows 安装器 ZIP 219,305,992 bytes，digest `sha256:6473993d87c802875ee592132d84183fedf516dfee95d5db31c6a50d7e76291b`。Draft 发布流程配置检查 run [39214507694](https://github.com/Personalscreenguard/screenguard/actions/runs/39214507694) 成功。Windows CI 安装器通过大于 100 MiB 的离线 WebView2 门禁及静默安装/卸载 smoke；实际 Windows 离线设备验收尚未做。
+GitHub 报告的 CI artifact ZIP 元数据（未下载回读）：Windows 安装器 ZIP 219,316,999 bytes，digest `sha256:a2884e134bf613e162b1ab9b53d51af0b7ff45ea0a3c86947769a3f81c1f2cd3`；Apple Silicon DMG ZIP 4,003,337 bytes，digest `sha256:d1a403997aadab6d883eabb5ab9b7d3f774b50fb86f8f4aad9e1619e990ad792`；Intel DMG ZIP 4,250,668 bytes，digest `sha256:ee38f044b59fdbb7825959f1ecc176364dabab0ffc74346b0f25b4f362f7716c`。
 
 PR CI 包不是面向普通用户的已签名正式发行包：Windows 安装器无 Authenticode 签名；macOS CI App 仅 ad-hoc 签名、未公证，Gatekeeper 不会自动信任。普通用户分发仍需 Windows 可信签名，以及 macOS Developer ID 签名、公证与 Gatekeeper 验收。
 
@@ -20,8 +20,8 @@ PR CI 包不是面向普通用户的已签名正式发行包：Windows 安装器
 
 | 平台 | 当前目标 | 已有自动化证据 | 尚缺证据 |
 |---|---|---|---|
-| Windows x64 | Screenguard NSIS 单安装包 | 39214507784：构建、离线运行时体积门槛、静默安装/卸载 smoke 通过 | 新代码提交 e0bfbd6 的 CI；用户 Windows 离线安装、启动与功能验收；正式 Authenticode 签名 |
-| macOS Apple Silicon / Intel | Screenguard DMG | 39214507784：ARM/Intel DMG 均构建通过；e0bfbd6 本机 Rust 单测 15/15 通过 | 新提交 CI；用户 Mac 外接显示器 DDC/CI 与 ColorSync 验收；Developer ID 签名、公证及 Gatekeeper 通过 |
+| Windows x64 | Screenguard NSIS 单安装包 | 39217635070：离线 WebView2 体积门槛、静默安装/卸载 smoke；Windows Cargo check/tests 通过 | 用户 Windows 离线安装、启动与功能验收；正式 Authenticode 签名 |
+| macOS Apple Silicon / Intel | Screenguard DMG | 39217635070：ARM/Intel DMG；macOS Cargo check/tests 通过；macOS 本机单测 15/15 | 用户 Mac 外接显示器 DDC/CI 与 ColorSync 验收；Developer ID 签名、公证及 Gatekeeper 通过 |
 
 历史发布记录：下方条目保留当时证据，不自动继承为当前版本结论。
 
