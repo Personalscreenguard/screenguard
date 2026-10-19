@@ -2,7 +2,9 @@
 
 ## 当前状态快照（2026-10-19，产品版本 0.4.47）
 
-当前分支 `codex/screenguard-single-app` 对应 OPEN/DRAFT PR #3，最新运行时代码提交为 `ddaa014`。该提交去掉 Windows ADB 下载失败时要求用户手动安装 Platform-Tools 的提示，改为在 Screenguard 内重试，并明确说明本地显示器控制不受影响。CI run [39229737104](https://github.com/Personalscreenguard/screenguard/actions/runs/39229737104) 对当前提交六项全部通过：仓库检查、Windows/macOS Cargo check 与 tests、Windows NSIS 离线安装包、macOS Apple Silicon/Intel DMG。Windows 安装包通过 WebView2 离线运行时体积门槛与静默安装/卸载 smoke；Draft 发布配置 run [39229736755](https://github.com/Personalscreenguard/screenguard/actions/runs/39229736755) 的发布工作流检查通过，实际发布步骤按 PR 流程跳过。本机 `scripts/check_repo.py`、JS 语法、`git diff --check` 通过。
+当前分支 `codex/screenguard-single-app` 对应 OPEN/DRAFT PR #3；运行时代码提交为 `ddaa014`，当前文档 head 为 `42b2b98`。运行时代码已移除 BetterDisplay 调用，macOS 高级显示器控制改走系统 API 与应用内 DDC/CI；Windows ADB 下载失败时也不再要求用户手动安装 Platform-Tools。PR head 的 CI run [39231072878](https://github.com/Personalscreenguard/screenguard/actions/runs/39231072878) 六项全部通过：仓库检查、Windows/macOS Cargo check 与 tests、Windows NSIS 离线安装包、macOS Apple Silicon/Intel DMG。Windows 安装包通过 WebView2 离线运行时体积门槛与静默安装/卸载 smoke；Draft 发布配置 run [39231072845](https://github.com/Personalscreenguard/screenguard/actions/runs/39231072845) 的发布工作流检查通过，实际发布步骤按 PR 流程跳过。本机仓库检查、前端语法检查和 `git diff --check` 通过；使用 MacOSX26.5 SDK 的 Rust 单测 15/15 通过。
+
+本机 Apple Silicon v0.4.47 Release 构建成功。App bundle 严格代码签名校验通过，版本为 0.4.47，内含 arm64 `displayplacer`，SHA-256 为 `0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0`。DMG `Screenguard_0.4.47_aarch64.dmg` 的 `hdiutil verify` 为 VALID，SHA-256 `289d404940dd67bfc6e767201c6f6f1d5afe87166b6918d587e243a22493dbfa`。该包使用 ad-hoc 签名，没有 Team ID，也未公证；未安装或启动候选 App。
 
 GitHub 报告的本次 CI artifact ZIP 元数据（未下载回读）：Windows 安装器 ZIP 219,305,818 bytes，digest `sha256:696884e712d2b5597ab1854ae18603f715b4cb8f2470bd07164ded2cfac90c21`；Apple Silicon DMG ZIP 4,003,191 bytes，digest `sha256:2ba3a6e49ccfc4b3fe3e0a6261537f8752c4256b88c27fabfb33f2e054b9aa8b`；Intel DMG ZIP 4,250,707 bytes，digest `sha256:cbe27b896497d567baef2d883167625920515c52793e1ac95724eb790e07cbb6`。
 
@@ -20,8 +22,8 @@ PR CI 包不是面向普通用户的已签名正式发行包：Windows 安装器
 
 | 平台 | 当前目标 | 已有自动化证据 | 尚缺证据 |
 |---|---|---|---|
-| Windows x64 | Screenguard NSIS 单安装包 | 39229737104：离线 WebView2 体积门槛、静默安装/卸载 smoke；Windows Cargo check/tests 通过 | 用户 Windows 离线安装、启动与功能验收；正式 Authenticode 签名 |
-| macOS Apple Silicon / Intel | Screenguard DMG | 39229737104：ARM/Intel DMG；macOS Cargo check/tests 通过 | 用户 Mac 外接显示器 DDC/CI 与 ColorSync 验收；Developer ID 签名、公证及 Gatekeeper 通过 |
+| Windows x64 | Screenguard NSIS 单安装包 | 39231072878：离线 WebView2 体积门槛、静默安装/卸载 smoke；Windows Cargo check/tests 通过 | 用户 Windows 离线安装、启动与功能验收；正式 Authenticode 签名 |
+| macOS Apple Silicon / Intel | Screenguard DMG | 39231072878：ARM/Intel DMG；macOS Cargo check/tests 通过 | 用户 Mac 外接显示器 DDC/CI 与 ColorSync 验收；Developer ID 签名、公证及 Gatekeeper 通过 |
 
 历史发布记录：下方条目保留当时证据，不自动继承为当前版本结论。
 
@@ -72,16 +74,15 @@ PR CI 包不是面向普通用户的已签名正式发行包：Windows 安装器
 | 系统音量 | Windows 可枚举并选择 CoreAudio 端点；macOS 读取/设置系统默认输出音量与静音，不提供应用内输出设备切换 | macOS 解析单测覆盖有效、缺失、越界数据；当前 Mac 实际接口返回 `missing value`，UI 停用控制且不发送设置 | 在提供系统输出音量的 Mac 上确认音量/静音生效及系统托盘同步；确认显示器音频等固定音量输出被如实禁用 |
 | 电源联动 | 默认关闭的用户开关、持久化状态和原生后台监听；macOS 结合 VCP `0xD6` 与 CoreGraphics 单屏睡眠状态检测，失败时使用系统级待机/唤醒兜底；面板可逐屏查看 Quartz 状态。Quartz 当前状态不等于物理电源状态 | macOS DDC/Quartz 转换策略及诊断序列化单测；三平台 CI | 真实关闭主屏、确认副屏进入待机；再反向唤醒。物理断电但 macOS 仍报告显示器在线且唤醒时，系统没有可检测信号 |
 | 窗口列表、双屏铺满与还原 | Windows/macOS 已实现；macOS 需辅助功能授权；macOS 屏幕联合包围盒有横竖屏、负坐标及禁用屏测试 | macOS 窗口边界 3 项测试；跨平台编译 | 分别选择普通应用和视频窗口，跨不同分辨率/方向屏幕铺满，再确认原窗口位置和大小恢复 |
-| BetterDisplay 控件 | macOS 命令集接入，部分能力取决于 BetterDisplay 版本、Pro 和显示器 | macOS 编译 | 对每条菜单命令核对执行结果与实际屏幕状态；当前 DDC 读取曾超时，不能宣称电源控制已实测通过 |
+| macOS 高级显示器控制 | 主屏、镜像、排列、标准 DDC/CI 输入源走 macOS 系统 API 与 Screenguard 内置控制；不依赖 BetterDisplay。HDR、PIP、串流、虚拟显示器和配置保护不在支持范围 | macOS 编译、原生控制策略单测；核心 DDC 传输受设备与链路限制 | 按显示器验证主屏/镜像/布局、DDC 亮度/音量/输入源的实际写入和回读；无法读写时界面必须报告不支持或未知 |
 | 电池、ADB、自启 | 按平台接入；ADB 下载需用户接受 SDK 条款 | CI 编译 | 有设备时验证电量/网络 ADB；检查登录启动、升级后设置保留 |
 | 备份与一键还原 | 已有启动基线与恢复入口 | Rust/平台编译 | 对显示模式、窗口布局、色彩、电源逐项验证还原；测试中断与部分失败路径 |
 
 ## 当前发布阻塞项
 
-1. 用户提到的新增 Windows 代码还没有出现在远端仓库分支或提交中，无法基于真实差异完成 Mac 移植；本次只适配了 PR 中已有的 Windows 健康面板能力。
-2. Windows 和 macOS 物理显示器行为仍需设备验收。macOS 屏幕即使物理关闭仍留在系统在线列表、且 DDC 不可读时，系统无法判断该屏已关；未知状态必须保留为未知。
-3. 当前签名身份列表没有 Developer ID Application，GitHub 仓库也未配置 Apple 发布 secrets。tag 工作流现要求证书、签名身份、Apple ID 公证凭据和临时 keychain 密码；缺少任一项就会停止，且签名、公证、Gatekeeper 检查全部成功前不会上传 macOS 包。当前仍没有已签名/公证 DMG。
-4. 当前 GitHub 最新公开 Release 仍是 v0.2.9；Windows x64 旧安装包可以回滚，但它不包含 0.4.43 的新代码。
+1. Windows 和 macOS 的真实显示器行为仍需在目标设备验收，包括 DDC/CI 写入/回读、色彩配置、窗口跨屏和显示器电源控制。macOS 屏幕即使物理关闭仍留在系统在线列表、且 DDC 不可读时，系统无法判断该屏已关；未知状态必须保留为未知。
+2. 普通用户安装所需的正式签名凭据尚未完成配置：Windows 需 Authenticode；macOS 需 Developer ID Application、Apple 公证凭据和临时 keychain 密码。tag 工作流会在凭据缺失时停止，签名、公证和 Gatekeeper 检查全部成功前不会上传 macOS 包。
+3. 当前 PR #3 仍为 open/draft；GitHub 最新公开 Release 仍需确认并发布本版本。PR CI 包目前不能作为已签名、已公证的普通用户安装包。
 
 ## v0.4.38 当前交付核验（2026-10-16）
 
