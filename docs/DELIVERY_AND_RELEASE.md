@@ -2,11 +2,11 @@
 
 ## 当前状态快照（2026-10-19，产品版本 0.4.47）
 
-当前分支 `codex/screenguard-single-app` 对应 OPEN/DRAFT PR #3；运行时代码提交为 `ddaa014`，当前文档 head 为 `42b2b98`。运行时代码已移除 BetterDisplay 调用，macOS 高级显示器控制改走系统 API 与应用内 DDC/CI；Windows ADB 下载失败时也不再要求用户手动安装 Platform-Tools。PR head 的 CI run [39231072878](https://github.com/Personalscreenguard/screenguard/actions/runs/39231072878) 六项全部通过：仓库检查、Windows/macOS Cargo check 与 tests、Windows NSIS 离线安装包、macOS Apple Silicon/Intel DMG。Windows 安装包通过 WebView2 离线运行时体积门槛与静默安装/卸载 smoke；Draft 发布配置 run [39231072845](https://github.com/Personalscreenguard/screenguard/actions/runs/39231072845) 的发布工作流检查通过，实际发布步骤按 PR 流程跳过。本机仓库检查、前端语法检查和 `git diff --check` 通过；使用 MacOSX26.5 SDK 的 Rust 单测 15/15 通过。
+当前分支 `codex/screenguard-single-app` 对应 OPEN/DRAFT PR #3。运行时代码提交为 `ddaa014`；该代码与交付快照在提交 `9a434b6` 上通过验证。运行时代码已移除 BetterDisplay 调用，macOS 高级显示器控制改走系统 API 与应用内 DDC/CI；Windows ADB 下载失败时也不再要求用户手动安装 Platform-Tools。PR 提交 `9a434b6` 的 CI run [39245477151](https://github.com/Personalscreenguard/screenguard/actions/runs/39245477151) 六项全部通过：仓库检查、Windows/macOS Cargo check 与 tests、Windows NSIS 离线安装包、macOS Apple Silicon/Intel DMG。Windows 安装包通过 WebView2 离线运行时体积门槛与静默安装/卸载 smoke；Draft 发布配置 run [39245476908](https://github.com/Personalscreenguard/screenguard/actions/runs/39245476908) 的发布工作流检查通过，实际发布步骤按 PR 流程跳过。本机仓库检查、前端语法检查和 `git diff --check` 通过；使用 MacOSX26.5 SDK 的 Rust 单测 15/15 通过。
 
 本机 Apple Silicon v0.4.47 Release 构建成功。App bundle 严格代码签名校验通过，版本为 0.4.47，内含 arm64 `displayplacer`，SHA-256 为 `0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0`。DMG `Screenguard_0.4.47_aarch64.dmg` 的 `hdiutil verify` 为 VALID，SHA-256 `289d404940dd67bfc6e767201c6f6f1d5afe87166b6918d587e243a22493dbfa`。该包使用 ad-hoc 签名，没有 Team ID，也未公证；未安装或启动候选 App。
 
-GitHub 报告的本次 CI artifact ZIP 元数据（未下载回读）：Windows 安装器 ZIP 219,305,818 bytes，digest `sha256:696884e712d2b5597ab1854ae18603f715b4cb8f2470bd07164ded2cfac90c21`；Apple Silicon DMG ZIP 4,003,191 bytes，digest `sha256:2ba3a6e49ccfc4b3fe3e0a6261537f8752c4256b88c27fabfb33f2e054b9aa8b`；Intel DMG ZIP 4,250,707 bytes，digest `sha256:cbe27b896497d567baef2d883167625920515c52793e1ac95724eb790e07cbb6`。
+上一 CI run [39231072878](https://github.com/Personalscreenguard/screenguard/actions/runs/39231072878) 的 artifact ZIP 元数据（未下载回读）：Windows 安装器 ZIP 219,312,261 bytes，digest `sha256:81a79a848a75853a16595f3e2c8201593951feb347af74a2b7cc64c99ec2b764`；Apple Silicon DMG ZIP 4,003,171 bytes，digest `sha256:65108078902f67c77d4ca89aa7df65f59b67239b998431c8b19b24f14df1c9c2`；Intel DMG ZIP 4,250,761 bytes，digest `sha256:1dede6af0e1d5d97a221fe7d71ed2c7f51179e9065912a655a08c2e2015890c2`。这些是 GitHub 返回的压缩 artifact 元数据，本机没有成功下载回读该 run 的归档。
 
 PR CI 包不是面向普通用户的已签名正式发行包：Windows 安装器无 Authenticode 签名；macOS CI App 仅 ad-hoc 签名、未公证，Gatekeeper 不会自动信任。普通用户分发仍需 Windows 可信签名，以及 macOS Developer ID 签名、公证与 Gatekeeper 验收。
 
@@ -22,8 +22,8 @@ PR CI 包不是面向普通用户的已签名正式发行包：Windows 安装器
 
 | 平台 | 当前目标 | 已有自动化证据 | 尚缺证据 |
 |---|---|---|---|
-| Windows x64 | Screenguard NSIS 单安装包 | 39231072878：离线 WebView2 体积门槛、静默安装/卸载 smoke；Windows Cargo check/tests 通过 | 用户 Windows 离线安装、启动与功能验收；正式 Authenticode 签名 |
-| macOS Apple Silicon / Intel | Screenguard DMG | 39231072878：ARM/Intel DMG；macOS Cargo check/tests 通过 | 用户 Mac 外接显示器 DDC/CI 与 ColorSync 验收；Developer ID 签名、公证及 Gatekeeper 通过 |
+| Windows x64 | Screenguard NSIS 单安装包 | 39245477151：离线 WebView2 体积门槛、静默安装/卸载 smoke；Windows Cargo check/tests 通过 | 用户 Windows 离线安装、启动与功能验收；正式 Authenticode 签名 |
+| macOS Apple Silicon / Intel | Screenguard DMG | 39245477151：ARM/Intel DMG；macOS Cargo check/tests 通过 | 用户 Mac 外接显示器 DDC/CI 与 ColorSync 验收；Developer ID 签名、公证及 Gatekeeper 通过 |
 
 历史发布记录：下方条目保留当时证据，不自动继承为当前版本结论。
 
