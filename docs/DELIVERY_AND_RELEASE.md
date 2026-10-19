@@ -1,28 +1,27 @@
 # Screenguard 桌面端交付状态与发布流程
 
-## 当前状态快照（2026-10-19，源码版本 0.4.47）
+## 当前状态快照（2026-10-19，产品版本 0.4.47）
 
-当前分支 `codex/screenguard-single-app` 对应 Draft PR #3，分支 head `3a5d01a74b476c6510749824189b6b4f9ea11c4b`；产品源码 head 为 `9196ce7f945a3c9944d35bb0132b61ebc4b564bd`，其后仅有文档更新。当前 head 的 CI run [39206852464](https://github.com/Personalscreenguard/screenguard/actions/runs/39206852464) 六项全绿，Draft 发布流程配置检查 run [39206852518](https://github.com/Personalscreenguard/screenguard/actions/runs/39206852518) 成功。当前 CI artifacts：Windows `12166226594`（ZIP SHA-256 `1e61dad181e912cace700c67dfcc6041e9149a9516b940faf73a24e7cee27c22`）、Apple Silicon `12166197414`（ZIP SHA-256 `662188df27ff93c28d17fd4bbe8d11f4f6fb20d9223bdb14a3a41abddd57b94e`）、Intel `12165998522`（ZIP SHA-256 `0687c90925a3498c4f84091ca7eaa99e33549b5e0bdef279c2f544e299e0990c`）。三份 ZIP 均从 GitHub artifact API 回读；Windows ZIP 内含 `Screenguard_0.4.47_x64-setup.exe`，PE Authenticode 目录为空。两份 CI DMG 已提取并 `hdiutil verify` 为 VALID：Apple Silicon SHA-256 `3e46814af82feeb4956213d65d976168b9650f7749ec3a7fccf5b3bb8fea6c49`，Intel SHA-256 `4f2c3fb498da8d5fd08b2b694c7152faca73b82f26f4aadb676ea05ba722110c`。尝试只读挂载 Apple Silicon CI DMG 时会显示许可文本并取消挂载，因此没有在未确认许可的情况下检查挂载卷内容。
+当前分支 `codex/screenguard-single-app` 对应 OPEN/DRAFT PR #3。最新运行时代码提交为 `e0bfbd6`，它在 `00fd5756cee4e61cafe5e8175dcb413f1f3ab3d3` 的基础上修正 macOS 随包布局组件提示和 README 平台状态表；本次本机 Rust 单测 15/15 通过，仓库与前端检查通过。最新完整绿色 CI run [39214507784](https://github.com/Personalscreenguard/screenguard/actions/runs/39214507784) 验证其前一代码提交 `00fd575` 的六个 job；新提交推送后仍需等对应 CI 验证。
 
-本地当前 Apple Silicon DMG SHA-256 为 `260c1953eea0596cc5c377c78f3a6a968c0ad4e58dd65e32a4ad7ce94cc4b148`，`hdiutil verify` 为 VALID；App 深层 `codesign` 校验通过但签名为 ad-hoc、没有 Team ID，`spctl --assess` 明确返回 `rejected`。App 内的 arm64 `displayplacer` SHA-256 为 `0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0`，随包许可文件存在。仓库无 Apple 发布 secrets；本机唯一签名 identity 是自签名的 Smart Media Backup Developer，不是 Developer ID。正式 Mac 发布仍需账号所有者配置七项签名/公证 secrets。当前 PR CI 包是验收构建：Windows 安装器没有 Authenticode 签名，macOS App 未公证且 Gatekeeper 拒绝；不能称为普通用户可直接运行的正式发行包。
+GitHub 报告的该次 CI artifacts 元数据（未在本机下载回读）：Apple Silicon DMG ZIP 4,003,230 bytes，digest `sha256:6c0386c4a9f34480d23437b03a0e2faf350e6af91c54f25fb90be3a324d85ef4`；Intel DMG ZIP 4,250,595 bytes，digest `sha256:e73c2dac9a91daa3ee475a06ef8f38ad7ea381fe6444437751d88f0435449f66`；Windows 安装器 ZIP 219,305,992 bytes，digest `sha256:6473993d87c802875ee592132d84183fedf516dfee95d5db31c6a50d7e76291b`。Draft 发布流程配置检查 run [39214507694](https://github.com/Personalscreenguard/screenguard/actions/runs/39214507694) 成功。Windows CI 安装器通过大于 100 MiB 的离线 WebView2 门禁及静默安装/卸载 smoke；实际 Windows 离线设备验收尚未做。
 
-Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。BetterDisplay 不再是运行依赖，主窗口和菜单栏已移除残留的 BetterDisplay 风格旧入口，只保留原生支持的显示操作；macOS HDR 等无法可靠替代的控制标为不支持。窗口跨屏不再提供要求 VLC/PotPlayer 的专用播放器入口；Linux 不在支持范围。Windows 的 WebView2 离线运行时随 NSIS 包分发；ADB Platform-Tools 只在用户使用兼容显示器联网增强时由应用内获取。上述代码和 CI 结果仍不代替真实设备验收、签名公证或正式发布。
+PR CI 包不是面向普通用户的已签名正式发行包：Windows 安装器无 Authenticode 签名；macOS CI App 仅 ad-hoc 签名、未公证，Gatekeeper 不会自动信任。普通用户分发仍需 Windows 可信签名，以及 macOS Developer ID 签名、公证与 Gatekeeper 验收。
 
-### 单安装包收口（2026-10-19）
+### 单软件安装范围
 
-- Windows NSIS 配置由 `embedBootstrapper` 切换为 WebView2 `offlineInstaller`，把 Evergreen 离线运行时安装器放进 Screenguard 安装包。首次安装不需要网络，也不要求用户预装 WebView2；Tauri 文档预估安装包增加约 127 MB。本分支 CI run [39211091245](https://github.com/Personalscreenguard/screenguard/actions/runs/39211091245) 六项全绿，Windows NSIS 构建、静默安装/卸载 smoke 通过。Windows artifact `12167718962` 的 GitHub 压缩包大小为 219,304,989 bytes（digest `52e4cd414fb2e347e3e360d3df46e4829e7f7922fd4c5804747820366789a7d2`）；由于大文件回读连接被重置，本轮没有核实归档内安装器的精确大小和运行时文件清单，首次离线安装仍需 Windows 实机验收。
-- Windows tag 发布流程新增 Authenticode 签名步骤，要求 `WINDOWS_CERTIFICATE`（Base64 编码的 PFX）、`WINDOWS_CERTIFICATE_PASSWORD` 和 `WINDOWS_SIGNING_CERT_THUMBPRINT` 三项 GitHub Actions secrets。签名后验证证书指纹、签名链状态和可信时间戳；缺 secret、证书过期或验证失败时阻止 Draft Release 生成。
-- 仓库自检现锁定 Windows Tauri 配置必须为 `offlineInstaller`；Windows CI 还会检查生成的 NSIS 安装器大于 100 MiB，作为 WebView2 离线运行时随包的回归门槛。此新门槛尚待下一轮 CI 验证。
-- 该分支没有 Windows 代码签名证书，未运行 tag 发布。PR CI 的 Windows 验收包仍为未签名构建，用户 Windows 实机、离线安装与 SmartScreen 验收未完成。
+- 核心支持的显示器控制不要求用户另装 BetterDisplay、displayplacer 或其他显示器控制软件。macOS 的 MIT 许可 `displayplacer` 按架构固定哈希并随 Screenguard 分发；相关错误提示只指引重装 Screenguard，不要求用户单独安装或更新它。
+- Windows NSIS 包使用 WebView2 `offlineInstaller`，内含 Evergreen 离线运行时。首次安装不要求联网或预装 WebView2，代价是安装包约增加 127 MB；CI 检查 NSIS 大于 100 MiB 防止误删该运行时。
+- ADB 联网增强为可选功能。用户主动启用时，Screenguard 从 Google 获取 Platform-Tools 并放在应用数据目录；该增强需要网络，不影响普通显示器控制，也不要求用户自行下载/安装 ADB。
+- PowerShell、注册表、`dxva2.dll` 以及 macOS `pmset`、`caffeinate`、`osascript`、`launchctl` 属于系统自带组件，不是用户需另行安装的软件。Linux 不在支持范围。
+- 没有可靠原生替代的 BetterDisplay 专属 HDR/PIP/串流/虚拟显示器/配置保护已从支持范围排除；用户放弃的小米屏幕电源联动也不属于产品目标。
 
-本文后续历史记录按当时日期与源码版本保留；不要把下方旧快照的状态误认为当前状态。
+### 当前发布目标与缺口
 
-## 当前发布目标
-
-| 平台 | 当前目标 | 最近自动化证据 | 尚缺证据 |
+| 平台 | 当前目标 | 已有自动化证据 | 尚缺证据 |
 |---|---|---|---|
-| Windows x64 | Screenguard NSIS 安装包 | CI run `39206852464`：Rust 检查/测试、NSIS 构建、runner 静默安装卸载 smoke 均通过；artifact `12166226594` 已回读并校验；安装器 Authenticode 签名目录为空 | Windows 实机安装、启动与功能验收；正式发布签名 |
-| macOS Apple Silicon / Intel | Screenguard DMG | CI run `39206852464`：ARM/Intel 构建成功；artifact IDs `12166197414` / `12165998522` 已回读，DMG 均 `hdiutil verify` 为 VALID；本地 App 是 ad-hoc，Gatekeeper 拒绝 | Mac 外接显示器回归；Developer ID 签名、公证与 Gatekeeper 通过 |
+| Windows x64 | Screenguard NSIS 单安装包 | 39214507784：构建、离线运行时体积门槛、静默安装/卸载 smoke 通过 | 新代码提交 e0bfbd6 的 CI；用户 Windows 离线安装、启动与功能验收；正式 Authenticode 签名 |
+| macOS Apple Silicon / Intel | Screenguard DMG | 39214507784：ARM/Intel DMG 均构建通过；e0bfbd6 本机 Rust 单测 15/15 通过 | 新提交 CI；用户 Mac 外接显示器 DDC/CI 与 ColorSync 验收；Developer ID 签名、公证及 Gatekeeper 通过 |
 
 历史发布记录：下方条目保留当时证据，不自动继承为当前版本结论。
 
