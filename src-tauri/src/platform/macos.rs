@@ -66,6 +66,7 @@ extern "C" {
         user_data: *mut std::ffi::c_void,
         out_handler: *mut EventRef,
     ) -> i32;
+    fn RemoveEventHandler(handler: EventRef) -> i32;
     fn RegisterEventHotKey(
         key_code: u32,
         modifiers: u32,
@@ -131,11 +132,17 @@ unsafe extern "C" fn carbon_hotkey_handler(
         CARBON_HOTKEY_TOGGLE_ID => {
             std::thread::spawn(|| {
                 let mut asleep = hotkey_screen_asleep().lock().unwrap_or_else(|e| e.into_inner());
-                let result = if *asleep { screen_wake() } else { screen_off() };
+                let observed = display_sleep_states();
+                let current_asleep = if observed.is_empty() {
+                    *asleep
+                } else {
+                    observed.iter().all(|display| display.asleep)
+                };
+                let result = if current_asleep { screen_wake() } else { screen_off() };
                 if let Err(error) = result {
                     eprintln!("[screenguard] macOS 快捷键屏幕操作失败：{}", error);
                 } else {
-                    *asleep = !*asleep;
+                    *asleep = !current_asleep;
                 }
             });
         }
@@ -191,6 +198,7 @@ pub fn hotkey_start() -> Result<String, String> {
             &mut toggle,
         );
         if status != 0 {
+            RemoveEventHandler(handler);
             return Err(format!("注册 Control+Option+L 失败（快捷键可能被占用，Carbon 错误码 {}）", status));
         }
 
@@ -205,6 +213,7 @@ pub fn hotkey_start() -> Result<String, String> {
         );
         if status != 0 {
             UnregisterEventHotKey(toggle);
+            RemoveEventHandler(handler);
             return Err(format!("注册 Control+Option+R 失败（快捷键可能被占用，Carbon 错误码 {}）", status));
         }
 
