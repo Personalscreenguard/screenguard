@@ -2,7 +2,7 @@
 
 ## 当前状态快照（2026-10-19，源码版本 0.4.47）
 
-当前工作分支 `codex/screenguard-single-app` 对应 Draft PR #3。功能代码 head `a46ef65e7ca9d3e987e9db673b72593644a36b24` 的 CI run [39201683225](https://github.com/Personalscreenguard/screenguard/actions/runs/39201683225) 六个 job 全部成功，包含 Windows NSIS 静默安装/卸载 smoke 和 macOS ARM/Intel DMG 构建。实际下载并挂载检查两个干净 runner DMG 后，arm64 helper SHA-256 为 `0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0`，x86_64 helper SHA-256 为 `13ec0351ed7849b22e945974f1d4ac91eca30b38b09ec962c497feb8297eac2b`，均与锁定值一致；两份 DMG 的 `hdiutil verify` 均为 VALID。文档 head `438a9f84abf988c2eacedf61831bf206b533257f` 的 CI run `39202482407` 也已全绿。本轮随后清理了主窗口/菜单栏残留的 BetterDisplay 风格控件并禁用 macOS HDR 按钮，本机 Apple Silicon Release/DMG 构建成功；这批 UI 修改的干净 runner CI 待推送后核验。旧 CI DMG 的遗漏根因是下载脚本没有接入构建流程；现已加 npm `prebuild`，并移除对用户自行安装版本的回退。
+当前工作分支 `codex/screenguard-single-app` 对应 Draft PR #3，最新 head 为 `9196ce7f945a3c9944d35bb0132b61ebc4b564bd`。该提交的 CI run [39203615377](https://github.com/Personalscreenguard/screenguard/actions/runs/39203615377) 六个 job 全部成功：仓库自检、macOS/Windows Rust 检查与测试、Windows NSIS 构建及静默安装/卸载 smoke、Apple Silicon/Intel DMG 构建。对应 Draft desktop release 检查 run `39203615456` 成功。已下载本次产物：Windows NSIS 安装包 SHA-256 `7e7350a3755aa4079ab9d868d2d403d7cbfde4c347cd667118073d615457ce8c`；Apple Silicon DMG SHA-256 `7d1fea616bc1ef6d3f2a0a155f0f9265afc77d1616503cf9924876eca97b3d54`；Intel DMG SHA-256 `f10fc4989a817e3c81bcedc229d281a19982ed6649ca15ddfce80ba468d2ed72`。两份 DMG 的 `hdiutil verify` 均为 VALID，Windows 文件确认为 NSIS 安装程序。上一轮 clean-runner 包的布局组件内容也已实包核验：arm64 helper SHA-256 `0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0`，x86_64 helper SHA-256 `13ec0351ed7849b22e945974f1d4ac91eca30b38b09ec962c497feb8297eac2b`；本次只清理界面控件，没有改动该组件或其打包流程。旧 CI DMG 的遗漏根因是下载脚本没有接入构建流程；现已加 npm `prebuild`，并移除对用户自行安装版本的回退。
 
 Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。BetterDisplay 不再是运行依赖，主窗口和菜单栏已移除残留的 BetterDisplay 风格旧入口，只保留原生支持的显示操作；macOS HDR 等无法可靠替代的控制标为不支持。窗口跨屏不再提供要求 VLC/PotPlayer 的专用播放器入口；Linux 不在支持范围。Windows 的 WebView2 缺失时由 NSIS 安装程序引导安装，ADB Platform-Tools 只在用户使用兼容显示器联网增强时由应用内获取。上述代码和 CI 结果仍不代替真实设备验收、签名公证或正式发布。
 
@@ -12,8 +12,8 @@ Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。B
 
 | 平台 | 当前目标 | 最近自动化证据 | 尚缺证据 |
 |---|---|---|---|
-| Windows x64 | Screenguard NSIS 安装包 | CI run `39201683225`：Rust 检查/测试、NSIS 构建、runner 静默安装卸载 smoke 均通过；安装包 SHA-256 `0383f78c9623b71ce59e61ddefd515e026a6b6314b1266ca126a366a419ccb6e` | 用户 Windows 实机安装、启动与功能验收；签名状态确认 |
-| macOS Apple Silicon / Intel | Screenguard DMG | CI run `39201683225`：ARM/Intel 构建成功、DMG 均 VALID，且 helper 文件/架构/锁定哈希均已实包核验 | Mac 外接显示器回归；Developer ID 签名与公证 |
+| Windows x64 | Screenguard NSIS 安装包 | CI run `39203615377`：Rust 检查/测试、NSIS 构建、runner 静默安装卸载 smoke 均通过；产物 SHA-256 `7e7350a3755aa4079ab9d868d2d403d7cbfde4c347cd667118073d615457ce8c` | 用户 Windows 实机安装、启动与功能验收；签名状态确认 |
+| macOS Apple Silicon / Intel | Screenguard DMG | CI run `39203615377`：ARM/Intel 构建成功，两份 DMG 均 VALID；产物 SHA-256 分别为 `7d1fea616bc1ef6d3f2a0a155f0f9265afc77d1616503cf9924876eca97b3d54`（Apple Silicon）、`f10fc4989a817e3c81bcedc229d281a19982ed6649ca15ddfce80ba468d2ed72`（Intel） | Mac 外接显示器回归；Developer ID 签名与公证 |
 
 历史发布记录：下方条目保留当时证据，不自动继承为当前版本结论。
 
