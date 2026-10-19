@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-24.04]
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -51,7 +51,15 @@ jobs:
 
   package-macos:
     name: macOS DMG 构建
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -65,7 +73,7 @@ jobs:
         run: npm run build
       - uses: actions/upload-artifact@v4
         with:
-          name: screenguard-macos-${{ github.sha }}
+          name: screenguard-macos-${{ matrix.arch }}-${{ github.sha }}
           path: src-tauri/target/**/release/bundle/dmg/*.dmg
           if-no-files-found: error
           retention-days: 14
@@ -80,10 +88,36 @@ jobs:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: 验证 Windows 签名脚本语法
+        shell: pwsh
+        working-directory: .
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts/sign_windows_installer.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "Windows 签名脚本语法无效"
+          }
       - name: 安装前端依赖
         run: npm ci
       - name: 构建 Windows NSIS 安装包
         run: npm run build:win
+      - name: 确认离线 WebView2 运行时已打入安装包
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if ($installers.Count -ne 1) { throw "预期一个 NSIS 安装包，实际数量: $($installers.Count)" }
+          $size = (Get-Item $installers[0].FullName).Length
+          $minimum = [long](100MB)
+          if ($size -lt $minimum) {
+            throw "NSIS 包只有 $size bytes；低于 100 MiB，疑似未嵌入 WebView2 离线运行时"
+          }
+          Write-Host "NSIS 包大小 $size bytes；已满足离线 WebView2 运行时体积门槛。"
       - name: 静默安装与卸载 NSIS 包烟雾检查
         shell: pwsh
         run: |

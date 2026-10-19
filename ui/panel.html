@@ -114,59 +114,35 @@
 
   <div class="sec-label">显示器管理</div>
   <div style="padding:0 8px">
-    <div class="grp" id="bdp-grp" style="display:none">
-      <div class="grp-h" id="bdp-head" role="button" tabindex="0" aria-expanded="false">
-        <div><div class="grp-title">🧰 BetterDisplay 控制</div><div class="grp-meta">镜像 · 排列 · 画中画 · 虚拟屏</div></div>
-        <div class="grp-right"><span class="badge">macOS</span><span id="bdp-caret">▸</span></div>
+    <div class="grp" id="native-display-grp" style="display:none">
+      <div class="grp-h" id="native-display-head" role="button" tabindex="0" aria-expanded="false">
+        <div><div class="grp-title">🧰 高级显示控制</div><div class="grp-meta">主屏 · 镜像 · 排列 · 输入源</div></div>
+        <div class="grp-right"><span class="badge">macOS</span><span id="native-display-caret">▸</span></div>
       </div>
       <div class="grp-body">
         <div class="srow" style="grid-template-columns:52px minmax(0,1fr);gap:6px">
-          <label for="bdp-source">操作屏</label><select id="bdp-source" class="mode-select"><option value="">读取中…</option></select>
+          <label for="ndp-source">操作屏</label><select id="ndp-source" class="mode-select"><option value="">读取中…</option></select>
         </div>
         <div class="srow" style="grid-template-columns:52px minmax(0,1fr);gap:6px">
-          <label for="bdp-target">目标屏</label><select id="bdp-target" class="mode-select"><option value="">读取中…</option></select>
+          <label for="ndp-target">目标屏</label><select id="ndp-target" class="mode-select"><option value="">读取中…</option></select>
         </div>
         <div class="btnrow">
-          <button class="ibtn" data-bdp-action="set-main">设为主屏</button>
-          <button class="ibtn" data-bdp-action="mirror-on">镜像到目标</button>
-          <button class="ibtn" data-bdp-action="mirror-off">停止镜像</button>
+          <button class="ibtn" data-native-action="set-main">设为主屏</button>
+          <button class="ibtn" data-native-action="mirror-on">镜像到目标</button>
+          <button class="ibtn" data-native-action="mirror-off">停止镜像</button>
         </div>
         <div class="btnrow">
-          <button class="ibtn" data-bdp-action="place-left">移到左侧</button>
-          <button class="ibtn" data-bdp-action="place-right">移到右侧</button>
-          <button class="ibtn" data-bdp-action="place-above">移到上方</button>
-          <button class="ibtn" data-bdp-action="place-below">移到下方</button>
-        </div>
-        <div class="btnrow">
-          <button class="ibtn" data-bdp-action="pip-on">画中画到目标</button>
-          <button class="ibtn" data-bdp-action="pip-off">关闭画中画</button>
-          <button class="ibtn" data-bdp-action="stream-on">屏幕串流</button>
-          <button class="ibtn" data-bdp-action="stream-off">停止串流</button>
-        </div>
-        <div class="btnrow">
-          <button class="ibtn" data-bdp-action="hdr-on">HDR 开</button>
-          <button class="ibtn" data-bdp-action="hdr-off">HDR 关</button>
-          <button class="ibtn" data-bdp-action="protect-resolution-on">锁分辨率</button>
-          <button class="ibtn" data-bdp-action="protect-resolution-off">解锁分辨率</button>
-        </div>
-        <div class="btnrow">
-          <button class="ibtn" data-bdp-action="protect-refresh-on">锁刷新率</button>
-          <button class="ibtn" data-bdp-action="protect-refresh-off">解锁刷新率</button>
-          <button class="ibtn" data-bdp-action="protect-rotation-on">锁旋转</button>
-          <button class="ibtn" data-bdp-action="protect-rotation-off">解锁旋转</button>
-        </div>
-        <div class="btnrow">
-          <button class="ibtn" data-bdp-action="virtual-16-9">创建 16:9 虚拟屏</button>
-          <button class="ibtn" data-bdp-action="virtual-21-9">创建 21:9 虚拟屏</button>
-          <button class="ibtn" data-bdp-action="connect-on">重新连接</button>
-          <button class="ibtn" data-bdp-action="connect-off">断开所选屏</button>
+          <button class="ibtn" data-native-action="place-left">移到左侧</button>
+          <button class="ibtn" data-native-action="place-right">移到右侧</button>
+          <button class="ibtn" data-native-action="place-above">移到上方</button>
+          <button class="ibtn" data-native-action="place-below">移到下方</button>
         </div>
         <div class="srow" style="grid-template-columns:72px minmax(0,1fr) auto;gap:6px">
-          <label for="bdp-input-code">输入源码</label>
-          <input id="bdp-input-code" inputmode="numeric" placeholder="VCP 代码 1–255">
-          <button class="ibtn" data-bdp-action="input-source">切换</button>
+          <label for="ndp-input-code">输入源码</label>
+          <input id="ndp-input-code" inputmode="numeric" placeholder="VCP 代码 1–255">
+          <button class="ibtn" data-native-action="input-source">切换</button>
         </div>
-        <div class="hint" id="bdp-hint">需要 BetterDisplay 正在运行并启用 CLI 集成；PIP/串流等部分能力需要 Pro。断开操作保留虚拟屏配置。</div>
+        <div class="hint" id="ndp-hint">使用 macOS 系统显示 API 与 DDC/CI；实际能力取决于显示器及连接链路。</div>
       </div>
     </div>
   </div>
@@ -256,62 +232,62 @@ function sendVCP(kind, id, val){
   })();
 }
 
-const bdpPanel = { displays: [], loaded: false };
-function bdpSetHint(message, error=false){
-  const hint = document.getElementById('bdp-hint');
+const nativeDisplayPanel = { displays: [], loaded: false };
+function nativeDisplaySetHint(message, error=false){
+  const hint = document.getElementById('ndp-hint');
   if (!hint) return;
   hint.textContent = message || '';
   hint.style.color = error ? '#ef6a6a' : '';
 }
-function bdpRefreshActionAvailability(){
-  const source = document.getElementById('bdp-source');
-  const target = document.getElementById('bdp-target');
-  const count = bdpPanel.displays.length;
+function nativeDisplayRefreshActionAvailability(){
+  const source = document.getElementById('ndp-source');
+  const target = document.getElementById('ndp-target');
+  const count = nativeDisplayPanel.displays.length;
   const hasSource = !!(source && source.value);
   const hasTarget = !!(target && target.value && target.value !== source?.value);
-  document.querySelectorAll('#bdp-grp [data-bdp-action]').forEach(button=>{
-    const action = button.dataset.bdpAction || '';
-    const needsTarget = action.startsWith('place-') || ['mirror-on','pip-on','stream-on'].includes(action);
+  document.querySelectorAll('#native-display-grp [data-native-action]').forEach(button=>{
+    const action = button.dataset.nativeAction || '';
+    const needsTarget = action.startsWith('place-') || action === 'mirror-on';
     button.disabled = !hasSource || (needsTarget && (count < 2 || !hasTarget));
   });
 }
-function loadBetterDisplayPanel(displays){
-  const card = document.getElementById('bdp-grp');
-  const source = document.getElementById('bdp-source');
-  const target = document.getElementById('bdp-target');
+function loadNativeDisplayPanel(displays){
+  const card = document.getElementById('native-display-grp');
+  const source = document.getElementById('ndp-source');
+  const target = document.getElementById('ndp-target');
   if (!card || !source || !target) return;
-  bdpPanel.displays = Array.isArray(displays) ? displays : [];
+  nativeDisplayPanel.displays = Array.isArray(displays) ? displays : [];
   const oldSource = source.value;
   const oldTarget = target.value;
   for (const select of [source, target]) {
     select.replaceChildren();
-    if (!bdpPanel.displays.length) {
+    if (!nativeDisplayPanel.displays.length) {
       const option = document.createElement('option');
       option.value = '';
       option.textContent = '未检测到显示器';
       select.appendChild(option);
       continue;
     }
-    for (const display of bdpPanel.displays) {
+    for (const display of nativeDisplayPanel.displays) {
       const option = document.createElement('option');
       option.value = display.id;
       option.textContent = `${display.name || display.id}${display.main ? '（主屏）' : ''} · ${display.resolution || '未知分辨率'}${display.hz ? ` · ${display.hz}Hz` : ''}`;
       select.appendChild(option);
     }
   }
-  if (bdpPanel.displays.some(display=>display.id === oldSource)) source.value = oldSource;
-  else source.value = bdpPanel.displays.find(display=>display.main)?.id || bdpPanel.displays[0]?.id || '';
-  if (bdpPanel.displays.some(display=>display.id === oldTarget && display.id !== source.value)) target.value = oldTarget;
-  else target.value = bdpPanel.displays.find(display=>display.id !== source.value)?.id || '';
-  bdpRefreshActionAvailability();
-  if (!bdpPanel.displays.length) bdpSetHint('未检测到显示器；连接显示器后点面板底部“刷新”。', true);
+  if (nativeDisplayPanel.displays.some(display=>display.id === oldSource)) source.value = oldSource;
+  else source.value = nativeDisplayPanel.displays.find(display=>display.main)?.id || nativeDisplayPanel.displays[0]?.id || '';
+  if (nativeDisplayPanel.displays.some(display=>display.id === oldTarget && display.id !== source.value)) target.value = oldTarget;
+  else target.value = nativeDisplayPanel.displays.find(display=>display.id !== source.value)?.id || '';
+  nativeDisplayRefreshActionAvailability();
+  if (!nativeDisplayPanel.displays.length) nativeDisplaySetHint('未检测到显示器；连接显示器后点面板底部“刷新”。', true);
 }
-function setupBetterDisplayPanel(){
-  if (bdpPanel.loaded) return;
-  bdpPanel.loaded = true;
-  const group = document.getElementById('bdp-grp');
-  const head = document.getElementById('bdp-head');
-  const caret = document.getElementById('bdp-caret');
+function setupNativeDisplayPanel(){
+  if (nativeDisplayPanel.loaded) return;
+  nativeDisplayPanel.loaded = true;
+  const group = document.getElementById('native-display-grp');
+  const head = document.getElementById('native-display-head');
+  const caret = document.getElementById('native-display-caret');
   const toggle = ()=>{
     const open = group.classList.toggle('open');
     head.setAttribute('aria-expanded', String(open));
@@ -321,38 +297,37 @@ function setupBetterDisplayPanel(){
   head.addEventListener('keydown', event=>{
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); }
   });
-  document.getElementById('bdp-source').addEventListener('change', bdpRefreshActionAvailability);
-  document.getElementById('bdp-target').addEventListener('change', bdpRefreshActionAvailability);
-  document.querySelectorAll('#bdp-grp [data-bdp-action]').forEach(button=>{
+  document.getElementById('ndp-source').addEventListener('change', nativeDisplayRefreshActionAvailability);
+  document.getElementById('ndp-target').addEventListener('change', nativeDisplayRefreshActionAvailability);
+  document.querySelectorAll('#native-display-grp [data-native-action]').forEach(button=>{
     button.addEventListener('click', async ()=>{
-      const action = button.dataset.bdpAction;
-      const source = document.getElementById('bdp-source');
-      const target = document.getElementById('bdp-target');
-      const input = document.getElementById('bdp-input-code');
-      if (action === 'connect-off' && !confirm('断开所选显示器可能会让该屏幕暂时消失。继续吗？')) return;
+      const action = button.dataset.nativeAction;
+      const source = document.getElementById('ndp-source');
+      const target = document.getElementById('ndp-target');
+      const input = document.getElementById('ndp-input-code');
       if (action === 'input-source' && !/^[1-9]\d{0,2}$/.test(input.value.trim())) {
-        bdpSetHint('请输入 1–255 的 VCP 输入源代码。', true);
+        nativeDisplaySetHint('请输入 1–255 的 VCP 输入源代码。', true);
         input.focus();
         return;
       }
       const previousDisabled = button.disabled;
       button.disabled = true;
-      bdpSetHint('正在执行 BetterDisplay 操作…');
+      nativeDisplaySetHint('正在执行显示操作…');
       try {
-        const result = await invoke('betterdisplay_action', {
+        const result = await invoke('display_action', {
           action,
           displayId: source.value,
           targetId: target.value || null,
           value: action === 'input-source' ? input.value.trim() : null
         });
-        bdpSetHint(String(result || '操作已提交。'));
+        nativeDisplaySetHint(String(result || '操作已提交。'));
         if (action === 'input-source') input.value = '';
         await load();
       } catch(error) {
-        bdpSetHint('操作失败：' + (error && error.message ? error.message : String(error)), true);
+        nativeDisplaySetHint('操作失败：' + (error && error.message ? error.message : String(error)), true);
       } finally {
         button.disabled = previousDisabled;
-        bdpRefreshActionAvailability();
+        nativeDisplayRefreshActionAvailability();
       }
     });
   });
@@ -362,7 +337,7 @@ async function load(){
   const box = document.getElementById('scroll');
   try {
     const ds = await invoke('get_displays');
-    loadBetterDisplayPanel(ds);
+    loadNativeDisplayPanel(ds);
     if(!ds||!ds.length){ box.innerHTML='<div class="empty">未检测到显示器</div>'; return; }
     box.innerHTML = ds.map(d=>{
       const hasBri = d.ddc || d.brightness != null; // DDC 或 WMI（内屏）亮度
@@ -489,11 +464,27 @@ document.getElementById('cell-brisync').onclick = async (ev)=>{
 };
 
 // HDR：格子直接显示当前状态（开/关/混合），点一下设成一致
+let panelPlatform = '';
 async function paintHdrCell() {
   const c = document.getElementById('cell-hdr');
   if (!c) return;
+  if (panelPlatform === 'macos') {
+    const lbl = c.querySelector('.lbl');
+    lbl.textContent = 'HDR 暂不支持';
+    c.title = 'macOS HDR 由系统和显示器驱动管理，Screenguard 当前不提供切换';
+    c.style.opacity = '.45';
+    c.style.pointerEvents = 'none';
+    return;
+  }
   try {
     const raw = String(await invoke('hdr_states') || '');
+    if (panelPlatform === 'macos') {
+      c.querySelector('.lbl').textContent = 'HDR 暂不支持';
+      c.title = 'macOS HDR 由系统和显示器驱动管理，Screenguard 当前不提供切换';
+      c.style.opacity = '.45';
+      c.style.pointerEvents = 'none';
+      return;
+    }
     let sup = 0, on = 0;
     for (const line of raw.split('\n')) {
       const p = line.split('|');
@@ -965,7 +956,7 @@ async function linkTick(){
     if (link.last === null) {
       link.last = sample;
       if (!sample.power.size && link.platform !== 'macos') {
-        pwHint('联动已开启，但目前无法读取显示器电源状态；检查 BetterDisplay CLI 集成。', true);
+        pwHint('联动已开启，但目前无法读取显示器电源状态；请检查显示器 DDC/CI 设置和连接链路。', true);
       }
       return;
     }
@@ -1101,9 +1092,9 @@ async function startLink(){
   if (link.platform === 'macos') {
     const unreadable = initial.unreadable.length;
     if (unreadable) {
-      pwHint('联动已开启，但当前有 '+unreadable+' 台屏幕读不到 DDC VCP 0xD6。请启动 BetterDisplay，在 Settings > Application > Integration 开启 CLI access 和 notification based integration，并确认该屏的 DDC Control 已开启。仍会同时监测 macOS Quartz 单屏睡眠状态和显示器断开/重连；若屏幕物理断电后仍在线且系统仍报告唤醒，则 macOS 无法识别这次物理关屏。', true);
+      pwHint('联动已开启，但当前有 '+unreadable+' 台屏幕读不到 DDC VCP 0xD6。请检查显示器 OSD 的 DDC/CI 设置和连接链路。仍会同时监测 macOS Quartz 单屏睡眠状态和显示器断开/重连；若屏幕物理断电后仍在线且系统仍报告唤醒，则 macOS 无法识别这次物理关屏。', true);
     } else {
-      pwHint('联动已开启：当前显示器可读取 BetterDisplay DDC VCP 0xD6。请保持 Screenguard 和 BetterDisplay 运行；显示器是否响应电源命令仍取决于 DDC/CI 和连接链路。');
+      pwHint('联动已开启：当前显示器可读取 DDC VCP 0xD6。请保持 Screenguard 运行；显示器是否响应电源命令仍取决于 DDC/CI 和连接链路。');
     }
     return;
   }
@@ -1155,12 +1146,24 @@ window.addEventListener('storage', ev => {
 // Windows 没有内建 P3 屏，「对齐Mac」的等价语义是「把主屏色彩配置对齐到其它屏」；
 // Linux 端这些能力尚未实现，置灰并标注，避免点了只弹错。
 invoke('get_platform').then(p=>{
+  panelPlatform = p;
   link.platform = p;
   link.supported = p === 'windows' || p === 'macos';
   if (sleepDiagnostic) sleepDiagnostic.style.display = p === 'macos' ? 'flex' : 'none';
-  const betterDisplayGroup = document.getElementById('bdp-grp');
-  if (betterDisplayGroup) betterDisplayGroup.style.display = p === 'macos' ? '' : 'none';
-  setupBetterDisplayPanel();
+  const nativeDisplayGroup = document.getElementById('native-display-grp');
+  if (nativeDisplayGroup) nativeDisplayGroup.style.display = p === 'macos' ? '' : 'none';
+  setupNativeDisplayPanel();
+  const hdrCell = document.getElementById('cell-hdr');
+  if (p === 'windows') {
+    hdrCell.style.opacity = '';
+    hdrCell.style.pointerEvents = '';
+  } else if (p === 'macos') paintHdrCell();
+  else {
+    hdrCell.querySelector('.lbl').textContent = 'HDR 暂不支持';
+    hdrCell.title = '当前平台暂不支持 HDR 控制';
+    hdrCell.style.opacity = '.45';
+    hdrCell.style.pointerEvents = 'none';
+  }
   if (!link.supported) {
     const linkEl = document.getElementById('cell-link');
     linkEl.title = '电源联动目前仅支持 macOS / Windows';
@@ -1169,7 +1172,7 @@ invoke('get_platform').then(p=>{
   } else {
     const linkEl = document.getElementById('cell-link');
     linkEl.title = p === 'macos'
-      ? '原生后台服务读取 BetterDisplay DDC VCP 0xD6、Quartz 单屏睡眠状态及显示器连接事件'
+      ? 'Screenguard 原生后台读取 DDC VCP 0xD6、Quartz 单屏睡眠状态及显示器连接事件'
       : '显示器需支持 DDC/CI VCP 0xD6 电源控制';
     invoke('get_power_link_preference').then(enabled=>{
       localStorage.setItem(LINK_KEY, enabled ? '1' : '0');
@@ -1243,7 +1246,7 @@ document.getElementById('cell-adbdl').onclick = async (ev)=>{
   } catch(e){
     adbSay(platform === 'macos'
       ? 'ADB 安装失败：' + (e && e.message ? e.message : e)
-      : '自动下载失败：' + (e && e.message ? e.message : e) + '（可手动下载 platform-tools 解压到 %LOCALAPPDATA%\\screenguard_adb\\；装了 Android 模拟器或投屏工具的话，它们自带的 adb 也会被自动识别）', true);
+      : '自动下载失败：' + (e && e.message ? e.message : e) + '（请检查网络后在 Screenguard 中重试；未获取 ADB 不影响本地显示器控制）', true);
   }
 };
 

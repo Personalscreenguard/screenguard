@@ -1,10 +1,12 @@
-use super::{
-    run_cmd, which, AudioEndpoint, BatteryInfo, DisplayInfo, DisplayMode, SystemAudio,
-};
+use super::{run_cmd, AudioEndpoint, BatteryInfo, DisplayInfo, DisplayMode, SystemAudio};
+use core_foundation::base::{CFType, TCFType};
+use core_foundation::dictionary::CFDictionary;
+use core_foundation::string::CFString;
+use core_foundation::url::CFURL;
+use core_foundation::uuid::CFUUID;
 use serde::{Deserialize, Serialize};
-use std::io::Read;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 type CGDisplayConfigRef = *mut std::ffi::c_void;
 
@@ -13,13 +15,26 @@ extern "C" {
     fn CGBeginDisplayConfiguration(config: *mut CGDisplayConfigRef) -> i32;
     fn CGCancelDisplayConfiguration(config: CGDisplayConfigRef) -> i32;
     fn CGConfigureDisplayOrigin(config: CGDisplayConfigRef, display: u32, x: i32, y: i32) -> i32;
+    fn CGConfigureDisplayMirrorOfDisplay(config: CGDisplayConfigRef, display: u32, master: u32) -> i32;
     fn CGCompleteDisplayConfiguration(config: CGDisplayConfigRef, option: u32) -> i32;
     fn CGDisplayIsAsleep(display: u32) -> u32;
+    fn CGDisplayCreateUUIDFromDisplayID(display: u32) -> *const std::ffi::c_void;
+    fn CGDisplayIsBuiltin(display: u32) -> bool;
 }
 
-const BETTERDISPLAY: &str = "/Applications/BetterDisplay.app/Contents/MacOS/BetterDisplay";
+#[link(name = "ColorSync", kind = "framework")]
+extern "C" {
+    fn ColorSyncDeviceSetCustomProfiles(
+        device_class: *const std::ffi::c_void,
+        device_id: *const std::ffi::c_void,
+        profile_info: *const std::ffi::c_void,
+    ) -> bool;
+    static kColorSyncDeviceDefaultProfileID: *const std::ffi::c_void;
+}
+
 const K_CG_CONFIGURE_PERMANENTLY: u32 = 2;
-const POWER_DDC_TIMEOUT: Duration = Duration::from_secs(6);
+
+pub fn platform_name() -> &'static str { "macOS" }
 
 fn parse_internal_battery(output: &str) -> Option<BatteryInfo> {
     let header = output.lines().next().unwrap_or_default();
@@ -321,151 +336,6 @@ pub fn adb_download() -> Result<String, String> {
     result
 }
 
-/// BetterDisplay may wait indefinitely for a monitor's DDC/CI bus. Bound power
-/// polling and writes so a missing display response cannot freeze the watcher.
-fn run_power_ddc(args: &[&str]) -> Result<String, String> {
-    let mut child = Command::new(BETTERDISPLAY)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("无法启动 BetterDisplay DDC 命令：{}", error))?;
-
-    let stdout = child.stdout.take().ok_or("无法读取 BetterDisplay 输出")?;
-    let stderr = child.stderr.take().ok_or("无法读取 BetterDisplay 错误")?;
-    let stdout_reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = std::io::BufReader::new(stdout).read_to_end(&mut bytes);
-        bytes
-    });
-    let stderr_reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = std::io::BufReader::new(stderr).read_to_end(&mut bytes);
-        bytes
-    });
-
-    let deadline = Instant::now() + POWER_DDC_TIMEOUT;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
-                return Err(format!(
-                    "BetterDisplay DDC 电源命令超过 {} 秒仍未响应；请检查 BetterDisplay、DDC/CI 和显示器连接",
-                    POWER_DDC_TIMEOUT.as_secs()
-                ));
-            }
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout_reader.join();
-                let _ = stderr_reader.join();
-                return Err(format!("读取 BetterDisplay DDC 命令状态失败：{}", error));
-            }
-        }
-    };
-
-    let stdout = String::from_utf8_lossy(&stdout_reader.join().unwrap_or_default()).to_string();
-    let stderr = String::from_utf8_lossy(&stderr_reader.join().unwrap_or_default())
-        .trim()
-        .to_string();
-    if !status.success() && stdout.trim().is_empty() {
-        return Err(if stderr.is_empty() {
-            format!("BetterDisplay DDC 命令退出码：{}", status)
-        } else {
-            stderr
-        });
-    }
-    Ok(stdout)
-}
-
-pub fn platform_name() -> &'static str {
-    "macos"
-}
-
-#[cfg(test)]
-mod battery_tests {
-    use super::{parse_adb_devices, parse_internal_battery, parse_system_audio};
-
-    #[test]
-    fn parses_adjustable_default_output_volume_and_mute() {
-        let audio = parse_system_audio(
-            "output volume:55, input volume:38, alert volume:100, output muted:false",
-        )
-        .expect("audio settings should parse");
-        assert_eq!(audio.volume, 55);
-        assert!(!audio.mute);
-        assert!(audio.adjustable);
-    }
-
-    #[test]
-    fn missing_default_output_values_are_not_faked_as_adjustable() {
-        let audio = parse_system_audio(
-            "output volume:missing value, input volume:38, alert volume:100, output muted:missing value",
-        )
-        .expect("missing values should be represented safely");
-        assert_eq!(audio.volume, 0);
-        assert!(!audio.mute);
-        assert!(!audio.adjustable);
-    }
-
-    #[test]
-    fn rejects_out_of_range_default_output_volume() {
-        let audio = parse_system_audio(
-            "output volume:101, input volume:38, alert volume:100, output muted:false",
-        )
-        .expect("unavailable values should still parse safely");
-        assert!(!audio.adjustable);
-    }
-
-    #[test]
-    fn parses_ac_power_and_not_charging_state() {
-        let battery = parse_internal_battery(
-            "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t80%; AC attached; not charging present: true",
-        )
-        .expect("battery should be present");
-        assert_eq!(battery.percent, 80);
-        assert!(!battery.charging);
-        assert!(battery.on_ac);
-        assert_eq!(battery.conn, "内置");
-    }
-
-    #[test]
-    fn parses_battery_power_charging_state() {
-        let battery = parse_internal_battery(
-            "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t22%; charging; 1:20 remaining present: true",
-        )
-        .expect("battery should be present");
-        assert_eq!(battery.percent, 22);
-        assert!(battery.charging);
-        assert!(!battery.on_ac);
-    }
-
-    #[test]
-    fn ignores_missing_or_absent_battery() {
-        assert!(parse_internal_battery("Now drawing from 'AC Power'").is_none());
-        assert!(parse_internal_battery(
-            "Now drawing from 'AC Power'\n -InternalBattery-0\t0%; not charging present: false"
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn adb_status_lists_only_connected_devices() {
-        let devices = parse_adb_devices(
-            "List of devices attached\n192.168.1.20:5555 device product:tv model:Display\n192.168.1.21:5555 offline\n192.168.1.22:5555 unauthorized\n* daemon started successfully\n",
-        );
-        assert_eq!(devices, vec!["192.168.1.20:5555"]);
-    }
-}
-
 /// Sleep the complete macOS display system without requiring a monitor-specific DDC command.
 pub fn screen_off() -> Result<(), String> {
     run_cmd("/usr/bin/pmset", &["displaysleepnow"])
@@ -480,42 +350,28 @@ pub fn screen_wake() -> Result<(), String> {
         .map_err(|error| format!("macOS 唤醒显示器失败：{}", error))
 }
 
-/// A DDC power write is available only when BetterDisplay exposes the monitor's VCP channel.
+/// Write the standard DDC/CI power-mode feature directly through the in-process driver.
 pub fn set_display_power(display_id: &str, mode: u32) -> Result<(), String> {
-    if !matches!(mode, 1 | 2 | 4) {
-        return Err("显示器电源模式只支持 1（开）、2（待机）或 4（软关）".into());
-    }
-    ensure_betterdisplay()?;
+    if !matches!(mode, 1 | 2 | 4) { return Err("显示器电源模式只支持 1（开）、2（待机）或 4（软关）".into()); }
+    use ddc::Ddc;
     let cgid = find_ddc_id(display_id)?;
-    let ddc_id = ddctl(cgid);
-    let value = format!("-value={}", mode);
-    run_power_ddc(&["set", &ddc_id, "-ddc", "-vcp=powerMode", &value])
-    .map(|_| ())
-    .map_err(|error| format!("无法设置显示器电源 VCP 0xD6：{}", error))
+    with_ddc_monitor(cgid, move |monitor| monitor.set_vcp_feature(0xD6, mode as u16))?
+        .map_err(|error| format!("无法设置显示器电源 VCP 0xD6：{}", error))
 }
 
-/// Read DDC VCP 0xD6 through BetterDisplay when the monitor and connection support it.
 fn parse_display_power_mode(output: &str) -> Option<u32> {
-    output
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .filter_map(|token| {
-            if let Some(hex) = token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")) {
-                u32::from_str_radix(hex, 16).ok()
-            } else {
-                token.parse::<u32>().ok()
-            }
-        })
-        .find(|value| matches!(value, 1 | 2 | 3 | 4 | 5))
+    output.split(|ch: char| !ch.is_ascii_alphanumeric()).filter_map(|token| {
+        if let Some(hex) = token.strip_prefix("0x").or_else(|| token.strip_prefix("0X")) { u32::from_str_radix(hex, 16).ok() }
+        else { token.parse::<u32>().ok() }
+    }).find(|value| matches!(value, 1 | 2 | 3 | 4 | 5))
 }
 
 pub fn get_display_power(display_id: &str) -> Result<u32, String> {
-    ensure_betterdisplay()?;
+    use ddc::Ddc;
     let cgid = find_ddc_id(display_id)?;
-    let ddc_id = ddctl(cgid);
-    let output = run_power_ddc(&["get", &ddc_id, "-ddc", "-vcp=powerMode", "-value"])
-        .map_err(|error| format!("无法读取显示器电源 VCP 0xD6：{}", error))?;
-    parse_display_power_mode(&output)
-        .ok_or_else(|| format!("BetterDisplay 未返回有效的 VCP 0xD6 电源值：{}", output.trim()))
+    with_ddc_monitor(cgid, |monitor| monitor.get_vcp_feature(0xD6))?
+        .map(|value| value.value() as u32)
+        .map_err(|error| format!("无法读取显示器电源 VCP 0xD6：{}", error))
 }
 
 #[cfg(test)]
@@ -649,36 +505,23 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
     }
 }
 
-/// BetterDisplay 必须已安装且正在运行，CLI 才可用
-fn betterdisplay_available() -> bool {
-    if !std::path::Path::new(BETTERDISPLAY).exists() {
-        return false;
+/// Use the layout helper bundled inside the app, or the repository copy for development.
+fn displayplacer_path() -> Option<std::path::PathBuf> {
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(contents) = executable.parent().and_then(|p| p.parent()) {
+            let bundled = contents.join("Resources/resources/displayplacer/displayplacer");
+            if bundled.is_file() { return Some(bundled); }
+        }
     }
-    run_cmd("pgrep", &["-x", "BetterDisplay"])
-        .map(|o| !o.trim().is_empty())
-        .unwrap_or(false)
-}
-
-fn displayplacer_path() -> Option<&'static str> {
-    [
-        "/opt/homebrew/bin/displayplacer",
-        "/usr/local/bin/displayplacer",
-        "/opt/local/bin/displayplacer",
-    ]
-    .into_iter()
-    .find(|p| std::path::Path::new(p).exists())
-    .or_else(|| which("displayplacer").then_some("displayplacer"))
+    let development = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("resources/displayplacer/displayplacer");
+    if development.is_file() { return Some(development); }
+    None
 }
 
 fn run_displayplacer(args: &[&str]) -> Result<String, String> {
-    let path = displayplacer_path().ok_or_else(|| {
-        "找不到 displayplacer。请安装：brew install displayplacer".to_string()
-    })?;
-    run_cmd(path, args).map_err(|e| format!("displayplacer 执行失败：{}", e.trim()))
-}
-
-fn displayplacer_available() -> bool {
-    displayplacer_path().is_some()
+    let path = displayplacer_path().ok_or_else(|| "Screenguard 内置布局组件缺失；请重新安装 Screenguard".to_string())?;
+    run_cmd(&path.to_string_lossy(), args).map_err(|e| format!("显示器布局操作失败：{}", e.trim()))
 }
 
 fn mode_property<'a>(prop: &'a str, prefix: &str, props: &'a [&'a str], index: usize) -> Option<&'a str> {
@@ -864,7 +707,7 @@ pub fn get_display_modes(display_id: &str) -> Result<Vec<DisplayMode>, String> {
         .find(|screen| screen.id == display_id && screen.enabled)
         .ok_or_else(|| "未找到该显示器；请刷新显示器列表".to_string())?;
     if screen.modes.is_empty() {
-        return Err("displayplacer 没有返回可用分辨率档位".into());
+        return Err("Screenguard 内置显示布局组件没有返回可用分辨率档位；请刷新显示器列表后重试".into());
     }
     Ok(screen
         .modes
@@ -950,19 +793,15 @@ fn role_name(is_main: bool) -> String {
 }
 
 pub fn get_displays() -> Vec<DisplayInfo> {
-    if !displayplacer_available() {
-        return Vec::new();
-    }
     let screens = parse_screens();
-    let bd = betterdisplay_available();
     screens
         .into_iter()
         .map(|s| {
-            let (b, vol) = match (s.ctx, bd) {
-                (Some(c), true) => (read_ddc_brightness(c), read_ddc_volume(c)),
+            let (b, vol) = match s.ctx {
+                Some(c) => (read_ddc_brightness(c), read_ddc_volume(c)),
                 _ => (None, None),
             };
-            let prof = if bd { s.ctx.and_then(read_color_profile) } else { None };
+            let prof = s.ctx.and_then(read_color_profile);
             DisplayInfo {
                 id: s.id.clone(),
                 name: role_name(s.main),
@@ -980,128 +819,187 @@ pub fn get_displays() -> Vec<DisplayInfo> {
         .collect()
 }
 
-// BetterDisplay 的 get 返回小数亮度（0-1），换算成 0-100
+// DDC/CI 标准亮度 VCP 0x10，使用显示器报告的最大值换算成百分比。
 fn read_ddc_brightness(cgid: u32) -> Option<u32> {
-    let out = run_cmd(BETTERDISPLAY, &["get", &ddctl(cgid), "-hardwareBrightness"]).ok()?;
-    out.trim()
-        .parse::<f64>()
-        .ok()
-        .map(|f| (f * 100.0).round() as u32)
+    read_vcp_percent(cgid, 0x10)
 }
 fn read_ddc_volume(cgid: u32) -> Option<u32> {
-    let out = run_cmd(BETTERDISPLAY, &["get", &ddctl(cgid), "-volume"]).ok()?;
-    out.trim()
-        .parse::<f64>()
-        .ok()
-        .map(|f| (f * 100.0).round() as u32)
+    read_vcp_percent(cgid, 0x62)
 }
-fn ddctl(cgid: u32) -> String {
-    format!("-displayID={}", cgid)
+
+static DDC_CALL_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+struct DdcCallGuard;
+
+impl Drop for DdcCallGuard {
+    fn drop(&mut self) {
+        DDC_CALL_IN_FLIGHT.store(false, Ordering::Release);
+    }
+}
+
+/// Run DDC off the caller thread. IOAVService calls cannot be cancelled, so a
+/// timeout blocks later requests for this app session instead of accumulating
+/// more stalled worker threads.
+fn with_ddc_monitor<T: Send + 'static>(
+    cgid: u32,
+    operation: impl FnOnce(&mut ddc_macos::Monitor) -> T + Send + 'static,
+) -> Result<T, String> {
+    DDC_CALL_IN_FLIGHT
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| "DDC 通道正在处理请求，或此前请求无响应；请稍后重试，若持续发生请重启 Screenguard".to_string())?;
+
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let guard = DdcCallGuard;
+        let result = ddc_macos::Monitor::enumerate()
+            .map_err(|error| format!("无法枚举 DDC 显示器：{}", error))
+            .and_then(|monitors| {
+                let mut monitor = monitors
+                    .into_iter()
+                    .find(|monitor| monitor.handle().id == cgid)
+                    .ok_or_else(|| "无法连接此显示器的 DDC/CI 通道".to_string())?;
+                Ok(operation(&mut monitor))
+            });
+        drop(guard);
+        let _ = sender.send(result);
+    });
+
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(6))
+        .map_err(|error| match error {
+            std::sync::mpsc::RecvTimeoutError::Timeout =>
+                "DDC 请求超过 6 秒无响应；本次运行已暂停后续 DDC 访问，以避免堆积阻塞任务。请重启 Screenguard 后再试".to_string(),
+            std::sync::mpsc::RecvTimeoutError::Disconnected => "DDC 工作线程异常结束".to_string(),
+        })?
+}
+
+fn read_vcp_percent(cgid: u32, code: u8) -> Option<u32> {
+    use ddc::Ddc;
+    with_ddc_monitor(cgid, move |monitor| monitor.get_vcp_feature(code))
+        .ok()?
+        .ok()
+        .and_then(|value| {
+            let max = value.maximum();
+            (max > 0).then(|| ((value.value() as u32 * 100 + max as u32 / 2) / max as u32).min(100))
+        })
 }
 
 /// 按 displayplacer 持久 id 找到对应显示器的 DDC 句柄
 fn find_ddc_id(display_id: &str) -> Result<u32, String> {
-    let disp = get_displays()
+    let screen = parse_screens()
         .into_iter()
-        .find(|d| d.id == display_id)
+        .find(|screen| screen.id == display_id && screen.enabled)
         .ok_or("未找到显示器")?;
-    disp.ddc_id
-        .ok_or("该显示器不支持 DDC/CI（或 BetterDisplay 未运行）".into())
-}
-
-fn ensure_betterdisplay() -> Result<(), String> {
-    if betterdisplay_available() {
-        Ok(())
-    } else if std::path::Path::new(BETTERDISPLAY).exists() {
-        Err("BetterDisplay 未在运行，请先启动它（菜单栏/LaunchAgent）".into())
-    } else {
-        Err("未安装 BetterDisplay（DDC/CI 控制依赖它）".into())
-    }
+    screen.ctx
+        .ok_or("该显示器或当前连接链路无法访问 DDC/CI".into())
 }
 
 /// 设置亮度 0-100
 pub fn set_brightness(display_id: &str, value: u32) -> Result<(), String> {
-    ensure_betterdisplay()?;
+    use ddc::Ddc;
     let cgid = find_ddc_id(display_id)?;
-    let frac = format!("{:.4}", (value.clamp(0, 100) as f64) / 100.0);
-    run_cmd(
-        BETTERDISPLAY,
-        &[
-            "set",
-            &ddctl(cgid),
-            &format!("-hardwareBrightness={}", frac),
-        ],
-    )
-    .map(|_| ())
+    with_ddc_monitor(cgid, move |monitor| {
+        monitor.get_vcp_feature(0x10).and_then(|current| {
+            let max = current.maximum();
+            if max == 0 { return Err(ddc_macos::Error::Ddc(ddc::ErrorCode::Invalid("monitor reported no brightness range".into()))); }
+            monitor.set_vcp_feature(0x10, ((value.clamp(0, 100) as u32 * max as u32 + 50) / 100) as u16)
+        })
+    })?
+    .map_err(|e| format!("DDC/CI 亮度写入失败：{}", e))
 }
 
 /// 设置音量 0-100
 pub fn set_volume(display_id: &str, value: u32) -> Result<(), String> {
-    ensure_betterdisplay()?;
+    use ddc::Ddc;
     let cgid = find_ddc_id(display_id)?;
-    let frac = format!("{:.4}", (value.clamp(0, 100) as f64) / 100.0);
-    run_cmd(
-        BETTERDISPLAY,
-        &["set", &ddctl(cgid), &format!("-volume={}", frac)],
-    )
-    .map(|_| ())
+    with_ddc_monitor(cgid, move |monitor| {
+        monitor.get_vcp_feature(0x62).and_then(|current| {
+            let max = current.maximum();
+            if max == 0 { return Err(ddc_macos::Error::Ddc(ddc::ErrorCode::Invalid("monitor reported no volume range".into()))); }
+            monitor.set_vcp_feature(0x62, ((value.clamp(0, 100) as u32 * max as u32 + 50) / 100) as u16)
+        })
+    })?
+    .map_err(|e| format!("DDC/CI 音量写入失败：{}", e))
 }
 
 // ===== 色彩 / 布局 =====
 /// 读某显示器当前 ColorSync profile 文件名
 fn read_color_profile(cgid: u32) -> Option<String> {
-    let out = run_cmd(BETTERDISPLAY, &["get", &ddctl(cgid), "-colorProfileURL"]).ok()?;
-    out.trim()
-        .rsplit('/')
-        .next()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    let _ = cgid;
+    None
 }
 
-fn space_profile_url(space: &str) -> &'static str {
-    match space {
-        "p3" => "file:///System/Library/ColorSync/Profiles/Display%20P3.icc",
-        "adobeRGB" => "file:///System/Library/ColorSync/Profiles/AdobeRGB1998.icc",
-        _ => "file:///System/Library/ColorSync/Profiles/sRGB%20Profile.icc",
-    }
+fn system_color_profile(space: &str) -> Result<std::path::PathBuf, String> {
+    let filename = match space {
+        "sRGB" | "srgb" => "sRGB Profile.icc",
+        "p3" => "Display P3.icc",
+        "adobergb" | "adobeRGB" => "AdobeRGB1998.icc",
+        "dcip3" => "DCI(P3) RGB.icc",
+        "rec709" => "ITU-709.icc",
+        "rec2020" => "ITU-2020.icc",
+        "gray" => "Generic Gray Gamma 2.2 Profile.icc",
+        "prophoto" => return Err("当前 macOS 没有内置 ProPhoto RGB 配置文件；请改用系统已有色彩空间".into()),
+        _ => return Err("未知的色彩空间".into()),
+    };
+    let path = std::path::PathBuf::from("/System/Library/ColorSync/Profiles").join(filename);
+    if path.is_file() { Ok(path) } else { Err(format!("macOS 未找到系统色彩配置文件：{}", filename)) }
 }
 
-/// 把目标色彩配置应用到所有显示器（软件侧可落地的"色彩同步"）
-pub fn apply_color_space(space: &str) -> Result<(), String> {
-    ensure_betterdisplay()?;
-    let profile = space_profile_url(space);
-    let displays = get_displays();
-    let mut applied = 0;
-    let mut last_err = String::new();
-    for d in &displays {
-        if let Some(cgid) = d.ddc_id {
-            match run_cmd(
-                BETTERDISPLAY,
-                &[
-                    "set",
-                    &ddctl(cgid),
-                    &format!("-colorProfileURL={}", profile),
-                ],
-            ) {
-                Ok(_) => applied += 1,
-                Err(e) => last_err = e,
-            }
+fn set_color_profile(cgid: u32, profile_path: &std::path::Path) -> Result<(), String> {
+    let display_class = CFString::new("display");
+    let profile_url = CFURL::from_path(profile_path, false)
+        .ok_or("无法创建 ColorSync 配置文件 URL")?;
+    let default_profile_key = unsafe {
+        CFString::wrap_under_get_rule(kColorSyncDeviceDefaultProfileID.cast())
+    };
+    let entries = [(default_profile_key.as_CFType(), profile_url.as_CFType())];
+    let profiles = CFDictionary::<CFType, CFType>::from_CFType_pairs(&entries);
+    let uuid_ref = unsafe { CGDisplayCreateUUIDFromDisplayID(cgid) };
+    if uuid_ref.is_null() { return Err("macOS 无法为显示器生成 ColorSync 标识".into()); }
+    let uuid = unsafe { CFUUID::wrap_under_create_rule(uuid_ref.cast()) };
+    let applied = unsafe {
+        ColorSyncDeviceSetCustomProfiles(
+            display_class.as_concrete_TypeRef().cast(),
+            uuid.as_concrete_TypeRef().cast(),
+            profiles.as_concrete_TypeRef().cast(),
+        )
+    };
+    if applied { Ok(()) } else { Err("ColorSync 拒绝设置此显示器的色彩配置".into()) }
+}
+
+fn apply_profile_to_screens(screens: impl Iterator<Item = Screen>, space: &str) -> Result<String, String> {
+    let profile = system_color_profile(space)?;
+    let screens: Vec<Screen> = screens.collect();
+    if screens.is_empty() { return Err("没有可设置色彩配置的显示器".into()); }
+    let mut applied = 0usize;
+    let mut errors = Vec::new();
+    for screen in &screens {
+        match screen.ctx.ok_or_else(|| "无法取得显示器 ColorSync 标识".to_string())
+            .and_then(|id| set_color_profile(id, &profile)) {
+            Ok(()) => applied += 1,
+            Err(error) => errors.push(format!("{}：{}", screen.type_raw, error)),
         }
     }
-    if applied == 0 {
-        Err(if last_err.is_empty() {
-            "未能应用色彩配置（未找到可控制的显示器）".into()
-        } else {
-            last_err
-        })
+    if applied == screens.len() {
+        Ok(format!("已通过 macOS ColorSync 设置 {} 台显示器的 {} 配置", applied, space))
+    } else if applied == 0 {
+        Err(format!("ColorSync 未能应用色彩配置：{}", errors.join("；")))
     } else {
-        Ok(())
+        Err(format!("仅有 {}/{} 台显示器接受了 ColorSync 配置；{}", applied, screens.len(), errors.join("；")))
     }
+}
+
+/// Set the system ColorSync display profile on every connected display.
+pub fn apply_color_space(space: &str) -> Result<(), String> {
+    apply_profile_to_screens(parse_screens().into_iter().filter(|screen| screen.enabled), space)
+        .map(|_| ())
 }
 
 pub fn match_mac() -> Result<(), String> {
-    // Apple 内建屏为 Display P3，将外接屏全部对齐到 Display P3（软件可落地的"对齐 Mac"）
-    apply_color_space("p3")
+    let external_screens = parse_screens().into_iter().filter(|screen| {
+        screen.enabled && screen.ctx.is_some_and(|id| unsafe { !CGDisplayIsBuiltin(id) })
+    });
+    apply_profile_to_screens(external_screens, "p3").map(|_| ())
 }
 
 /// 用 displayplacer 完整设置两块屏的布局（主屏保持现状，只动副屏的 res/方向）
@@ -1516,8 +1414,8 @@ fn apply_screen_layout(screens: &[Screen]) -> Result<(), String> {
     run_displayplacer(&args).map(|_| ())
 }
 
-/// BetterDisplay actions are restricted to the controls exposed by the UI.
-pub fn betterdisplay_action(
+/// macOS native display actions exposed by the UI.
+pub fn display_action(
     action: &str,
     display_id: &str,
     target_id: Option<&str>,
@@ -1571,57 +1469,42 @@ pub fn betterdisplay_action(
         return Ok(format!("已将「{}」移到目标屏幕{}侧", source.type_raw, direction));
     }
 
-    ensure_betterdisplay()?;
-    let cgid = source.ctx.ok_or("无法取得 BetterDisplay 显示器标识")?;
-    let display_arg = format!("-displayID={}", cgid);
-    let mut args = Vec::<String>::new();
     match action {
-        "set-main" => args.extend(["set".into(), display_arg, "-main=on".into()]),
-        "mirror-on" | "pip-on" | "stream-on" => {
-            let target = target.ok_or("此操作需要选择目标显示器")?;
-            let target_cgid = target.ctx.ok_or("无法取得目标显示器标识")?;
-            let feature = match action {
-                "mirror-on" => "mirror",
-                "pip-on" => "pip",
-                _ => "stream",
-            };
-            args.extend([
-                "set".into(),
-                display_arg,
-                format!("-{}=on", feature),
-                format!("-targetDisplayID={}", target_cgid),
-            ]);
+        "set-main" => {
+            let mut arranged = screens.clone();
+            let old_main = arranged.iter().find(|screen| screen.main).map(|screen| (screen.ox, screen.oy));
+            if let Some(screen) = arranged.iter_mut().find(|screen| screen.id == display_id) {
+                screen.ox = 0;
+                screen.oy = 0;
+                if let Some((x, y)) = old_main.filter(|_| !source.main) {
+                    if let Some(previous) = arranged.iter_mut().find(|s| s.main && s.id != display_id) {
+                        previous.ox = x.max(1);
+                        previous.oy = y;
+                    }
+                }
+            }
+            apply_screen_origins_only(&arranged)?;
+            Ok("已通过 macOS CoreGraphics 设置主屏".into())
         }
-        "mirror-off" | "pip-off" | "stream-off" |
-        "hdr-on" | "hdr-off" | "connect-on" | "connect-off" |
-        "protect-resolution-on" | "protect-resolution-off" |
-        "protect-refresh-on" | "protect-refresh-off" |
-        "protect-rotation-on" | "protect-rotation-off" |
-        "protect-main-on" | "protect-main-off" => {
-            let (feature, enabled) = match action {
-                "mirror-off" => ("mirror", false),
-                "pip-off" => ("pip", false),
-                "stream-off" => ("stream", false),
-                "hdr-on" => ("hdr", true),
-                "hdr-off" => ("hdr", false),
-                "connect-on" => ("connected", true),
-                "connect-off" => ("connected", false),
-                "protect-resolution-on" => ("protectResolution", true),
-                "protect-resolution-off" => ("protectResolution", false),
-                "protect-refresh-on" => ("protectRefreshRate", true),
-                "protect-refresh-off" => ("protectRefreshRate", false),
-                "protect-rotation-on" => ("protectRotation", true),
-                "protect-rotation-off" => ("protectRotation", false),
-                "protect-main-on" => ("protectAsMain", true),
-                _ => ("protectAsMain", false),
-            };
-            args.extend([
-                "set".into(),
-                display_arg,
-                format!("-{}={}", feature, if enabled { "on" } else { "off" }),
-            ]);
+        "mirror-on" | "mirror-off" => {
+            let source_id = source.ctx.ok_or("无法取得显示器系统标识")?;
+            let master_id = if action == "mirror-on" {
+                target.ok_or("镜像操作需要选择目标显示器")?.ctx.ok_or("无法取得目标显示器系统标识")?
+            } else { 0 };
+            let mut config = std::ptr::null_mut();
+            let begin = unsafe { CGBeginDisplayConfiguration(&mut config) };
+            if begin != 0 { return Err(format!("无法开始显示配置事务：CoreGraphics {}", begin)); }
+            let configure = unsafe { CGConfigureDisplayMirrorOfDisplay(config, source_id, master_id) };
+            if configure != 0 {
+                unsafe { CGCancelDisplayConfiguration(config); }
+                return Err(format!("macOS 拒绝更改镜像配置：CoreGraphics {}", configure));
+            }
+            let complete = unsafe { CGCompleteDisplayConfiguration(config, K_CG_CONFIGURE_PERMANENTLY) };
+            if complete != 0 { return Err(format!("macOS 未能提交镜像配置：CoreGraphics {}", complete)); }
+            Ok(if action == "mirror-on" { "已提交 macOS 镜像配置；请检查显示器画面" } else { "已提交关闭镜像请求；请检查显示器画面" }.into())
         }
         "input-source" => {
+            use ddc::Ddc;
             let code = value
                 .ok_or("请输入显示器支持的输入源 VCP 代码")?
                 .parse::<u32>()
@@ -1629,54 +1512,20 @@ pub fn betterdisplay_action(
             if !(1..=255).contains(&code) {
                 return Err("输入源代码必须是 1 到 255 的整数".into());
             }
-            args.extend([
-                "set".into(),
-                display_arg,
-                "-ddc".into(),
-                "-vcp=0x60".into(),
-                format!("-value={}", code),
-            ]);
+            let cgid = source.ctx.ok_or("无法取得显示器系统标识")?;
+            with_ddc_monitor(cgid, move |monitor| monitor.set_vcp_feature(0x60, code as u16))?
+                .map_err(|error| format!("输入源切换失败：{}", error))?;
+            return Ok("已发送 DDC/CI 输入源切换命令；实际输入源取决于显示器支持".into());
         }
-        "virtual-16-9" | "virtual-21-9" => {
-            let (name, width, height) = if action == "virtual-21-9" {
-                ("Screenguard Virtual 21x9", 21, 9)
-            } else {
-                ("Screenguard Virtual 16x9", 16, 9)
-            };
-            run_cmd(
-                BETTERDISPLAY,
-                &[
-                    "create",
-                    "-deviceType=virtualScreen",
-                    &format!("-virtualScreenName={}", name),
-                    &format!("-aspectWidth={}", width),
-                    &format!("-aspectHeight={}", height),
-                ],
-            )?;
-            run_cmd(
-                BETTERDISPLAY,
-                &["set", &format!("-name={}", name), "-connected=on"],
-            )?;
-            return Ok(format!("已创建并连接「{}」；可在显示器设置中断开", name));
-        }
-        _ => return Err("不支持的 BetterDisplay 操作".into()),
+        "pip-on" | "pip-off" | "stream-on" | "stream-off" |
+        "hdr-on" | "hdr-off" | "connect-on" | "connect-off" |
+        "protect-resolution-on" | "protect-resolution-off" |
+        "protect-refresh-on" | "protect-refresh-off" |
+        "protect-rotation-on" | "protect-rotation-off" |
+        "protect-main-on" | "protect-main-off" | "virtual-16-9" | "virtual-21-9" =>
+            return Err("此功能目前没有可随 Screenguard 分发的可靠原生实现，已从单应用支持范围停用。".into()),
+        _ => return Err("不支持的 macOS 显示操作".into()),
     }
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    run_cmd(BETTERDISPLAY, &args)?;
-    Ok(match action {
-        "set-main" => "已请求将所选显示器设为主屏".into(),
-        "mirror-on" => "已请求镜像到目标显示器".into(),
-        "mirror-off" => "已请求关闭显示器镜像".into(),
-        "pip-on" => "已请求在目标显示器打开画中画（需要 BetterDisplay Pro）".into(),
-        "pip-off" => "已请求关闭画中画".into(),
-        "stream-on" => "已请求开启屏幕串流（需要 BetterDisplay Pro）".into(),
-        "stream-off" => "已请求关闭屏幕串流".into(),
-        "connect-on" => "已请求连接所选显示器".into(),
-        "connect-off" => "已请求断开所选显示器；虚拟屏配置会保留".into(),
-        "hdr-on" | "hdr-off" => "已发送 HDR 设置请求；请检查显示器状态".into(),
-        "input-source" => "已发送输入源切换请求；实际输入源取决于显示器支持".into(),
-        _ => "已更新显示器配置保护设置".into(),
-    })
 }
 
 /// Apply only desktop origins through Quartz. This avoids resubmitting already
@@ -1901,11 +1750,11 @@ fn mode_matches(actual: &Screen, wanted: &ScreenMode, degree: u32) -> bool {
 pub fn align_report() -> Result<String, String> {
     let screens = parse_screens();
     if screens.len() < 2 {
-        return Err("双屏对齐需要两块已连接显示器；请确认已安装 displayplacer".into());
+        return Err("双屏对齐需要两块已连接的显示器".into());
     }
     let (main, sec) = main_secondary(&screens)?;
     if main.modes.is_empty() || sec.modes.is_empty() {
-        return Err("displayplacer 没有提供可用模式列表；请更新 displayplacer 后重试".into());
+        return Err("Screenguard 内置显示布局组件没有提供可用模式列表；请刷新显示器列表后重试".into());
     }
     let common: std::collections::BTreeSet<u32> = main
         .modes
@@ -1934,14 +1783,14 @@ pub fn align_report() -> Result<String, String> {
 pub fn align_apply() -> Result<String, String> {
     let original = parse_screens();
     if original.len() < 2 {
-        return Err("双屏对齐需要两块已连接显示器；请确认已安装 displayplacer".into());
+        return Err("双屏对齐需要两块已连接的显示器".into());
     }
     let (main, sec) = main_secondary(&original)?;
     if main.modes.is_empty() || sec.modes.is_empty() {
-        return Err("displayplacer 未列出两屏可用模式，无法安全对齐；请更新 displayplacer".into());
+        return Err("内置显示布局组件未列出两屏可用模式，无法安全对齐；请重新安装 Screenguard 后重试".into());
     }
     if main.active_mode().is_none() || sec.active_mode().is_none() {
-        return Err("displayplacer 未能标记两屏当前模式，无法安全推算逻辑桌面尺寸；请更新 displayplacer 后重试".into());
+        return Err("内置显示布局组件无法识别两屏当前模式，无法安全计算桌面尺寸；请重新安装 Screenguard 后重试".into());
     }
     let side_by_side = main.ox + main.frame_w() as i32 <= sec.ox || sec.ox + sec.frame_w() as i32 <= main.ox;
     if !side_by_side {
@@ -2286,7 +2135,7 @@ fn union_or_primary(mode: u32) -> Result<(i32, i32, i32, i32), String> {
     }
     if mode == 1 {
         if screens.iter().any(|s| s.enabled && s.layout_mode().is_none()) {
-            return Err("无法识别当前显示模式的桌面尺寸；请更新 displayplacer 后重试，未调整窗口".into());
+            return Err("无法识别当前显示模式的桌面尺寸；请重新安装 Screenguard 后重试，未调整窗口".into());
         }
         let active: Vec<&Screen> = screens.iter().filter(|s| s.enabled).collect();
         let main = active.iter().copied().find(|s| s.main).ok_or("未找到主屏")?;
@@ -2480,114 +2329,4 @@ pub fn restore_foreground() -> Result<(), String> {
         return Err(format!("窗口未能完全还原：原位置 ({},{}) {}x{}，当前 ({},{}) {}x{}；还原信息已保留", saved.x, saved.y, saved.w, saved.h, actual.x, actual.y, actual.w, actual.h));
     }
     std::fs::remove_file(path).map_err(|e| format!("窗口已还原，但清除状态失败：{}", e))
-}
-
-// ===== 视频跨屏（VLC）= 按当前真实布局铺满所有屏的并集 =====
-pub fn span_video() -> Result<(), String> {
-    let installed =
-        which("vlc") || std::path::Path::new("/Applications/VLC.app/Contents/MacOS/VLC").exists();
-    if !installed {
-        return Err("未安装 VLC".into());
-    }
-    let screens = parse_screens();
-    if screens.iter().filter(|s| s.enabled).count() < 2 {
-        return Err("需要至少两块屏幕才能双屏铺满".into());
-    }
-    let (x0, y0, x1, y1) = union_bounds(&screens).ok_or("无法计算屏幕布局")?;
-
-    // 用 osascript 统一处理：activate 启动 VLC → 等主窗口出现 → 铺到包围盒
-    let script = format!(
-        r#"
-on run
-  tell application "VLC" to activate
-  delay 2.0
-  set bx1 to {}
-  set by1 to {}
-  set bx2 to {}
-  set by2 to {}
-  tell application "VLC"
-    set targetWindow to missing value
-    set maxArea to 0
-    repeat 30 times
-      try
-        set targetWindow to missing value
-        set maxArea to 0
-        repeat with wnd in windows
-          try
-            set {{x1, y1, x2, y2}} to bounds of wnd
-            set area to (x2 - x1) * (y2 - y1)
-            if area > maxArea then
-              set maxArea to area
-              set targetWindow to wnd
-            end if
-          end try
-        end repeat
-        if targetWindow is not missing value then
-          set bounds of targetWindow to {{bx1, by1, bx2, by2}}
-          delay 0.4
-        end if
-      end try
-    end repeat
-  end tell
-end run
-"#,
-        x0, y0, x1, y1
-    );
-    run_cmd("osascript", &["-e", &script])?;
-    Ok(())
-}
-
-pub fn restore_video() -> Result<(), String> {
-    // 把 VLC 主窗口恢复为铺满主屏（退出跨屏状态）
-    let screens = parse_screens();
-    let main = screens
-        .iter()
-        .find(|s| s.enabled && s.main)
-        .ok_or("未找到主屏")?;
-    if main.layout_mode().is_none() {
-        return Err("无法识别主屏当前桌面尺寸；请更新 displayplacer 后重试，未调整 VLC 窗口".into());
-    }
-    let x0 = main.ox;
-    let y0 = main.oy;
-    let x1 = x0 + main.frame_w() as i32;
-    let y1 = y0 + main.frame_h() as i32;
-    let script = format!(
-        r#"
-on run
-  tell application "VLC" to activate
-  delay 1.0
-  set bx1 to {}
-  set by1 to {}
-  set bx2 to {}
-  set by2 to {}
-  tell application "VLC"
-    set targetWindow to missing value
-    set maxArea to 0
-    repeat 10 times
-      try
-        set targetWindow to missing value
-        set maxArea to 0
-        repeat with wnd in windows
-          try
-            set {{x1, y1, x2, y2}} to bounds of wnd
-            set area to (x2 - x1) * (y2 - y1)
-            if area > maxArea then
-              set maxArea to area
-              set targetWindow to wnd
-            end if
-          end try
-        end repeat
-        if targetWindow is not missing value then
-          set bounds of targetWindow to {{bx1, by1, bx2, by2}}
-          delay 0.4
-        end if
-      end try
-    end repeat
-  end tell
-end run
-"#,
-        x0, y0, x1, y1
-    );
-    run_cmd("osascript", &["-e", &script])?;
-    Ok(())
 }

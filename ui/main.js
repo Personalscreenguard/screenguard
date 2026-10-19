@@ -132,7 +132,7 @@ async function refreshDisplays() {
     setStatus('读取显示器…');
     const displays = await invoke('get_displays');
     renderDisplays(displays);
-    loadBetterDisplayTargets(displays);
+    loadNativeDisplayTargets(displays);
     setStatus('就绪');
   } catch (e) {
     renderDisplays([]);
@@ -140,10 +140,10 @@ async function refreshDisplays() {
   }
 }
 
-function loadBetterDisplayTargets(displays) {
-  const card = document.getElementById('betterdisplay-card');
-  const source = document.getElementById('bd-source');
-  const target = document.getElementById('bd-target');
+function loadNativeDisplayTargets(displays) {
+  const card = document.getElementById('native-display-card');
+  const source = document.getElementById('nd-source');
+  const target = document.getElementById('nd-target');
   if (!card || !source || !target || card.style.display === 'none') return;
   const previousSource = source.value;
   const previousTarget = target.value;
@@ -171,24 +171,23 @@ function loadBetterDisplayTargets(displays) {
   else source.value = (displays || []).find(d => d.main)?.id || options[0]?.id || '';
   if (options.some(d => d.id === previousTarget)) target.value = previousTarget;
   else target.value = options.find(d => d.id !== source.value)?.id || '';
-  for (const button of card.querySelectorAll('[data-bd-action]')) {
-    const action = button.dataset.bdAction || '';
-    button.disabled = !options.length || (action.startsWith('place-') ||
-      ['mirror-on','pip-on','stream-on'].includes(action)) && options.length < 2;
+  for (const button of card.querySelectorAll('[data-native-action]')) {
+    const action = button.dataset.nativeAction || '';
+    button.disabled = !options.length || (action.startsWith('place-') || action === 'mirror-on') && options.length < 2;
   }
 }
 
-document.querySelectorAll('#betterdisplay-card [data-bd-action]').forEach(button => {
+document.querySelectorAll('#native-display-card [data-native-action]').forEach(button => {
   button.addEventListener('click', async () => {
-    const source = document.getElementById('bd-source');
-    const target = document.getElementById('bd-target');
-    const hint = document.getElementById('bd-hint');
-    const action = button.dataset.bdAction;
-    const input = document.getElementById('bd-input-code');
+    const source = document.getElementById('nd-source');
+    const target = document.getElementById('nd-target');
+    const hint = document.getElementById('nd-hint');
+    const action = button.dataset.nativeAction;
+    const input = document.getElementById('nd-input-code');
     button.disabled = true;
     hint.textContent = '正在执行…';
     try {
-      const result = await invoke('betterdisplay_action', {
+      const result = await invoke('display_action', {
         action,
         displayId: source.value,
         targetId: target.value || null,
@@ -202,7 +201,7 @@ document.querySelectorAll('#betterdisplay-card [data-bd-action]').forEach(button
       setStatus('高级显示控制失败：' + errText(error), false);
     } finally {
       button.disabled = false;
-      loadBetterDisplayTargets(await invoke('get_displays').catch(() => []));
+      loadNativeDisplayTargets(await invoke('get_displays').catch(() => []));
     }
   });
 });
@@ -464,15 +463,20 @@ async function loadBatteries() {
 
 // ===== 按平台调整文案（各平台能力/依赖不同，避免误导） =====
 function applyPlatformCopy(p) {
+  activePlatform = p;
   const matchMac = document.getElementById('match-mac');
   const note = document.getElementById('color-note');
   const hdrNote = document.getElementById('hdr-note');
+  const restoreNote = document.getElementById('restore-note');
   if (p === 'windows') {
+    const hdrButton = document.getElementById('hdr-sync');
+    if (hdrButton) hdrButton.disabled = false;
     // Windows 没有内建 P3 屏，「对齐 Mac 内建屏」改为语义成立的「对齐主屏色彩」
     matchMac.textContent = '对齐主屏色彩';
     matchMac.title = '把主屏当前关联的 ICC 配置应用到其余屏幕';
     if (note) note.textContent = 'P3 / Adobe RGB 需自备 .icc 放到 %LOCALAPPDATA%\\screenguard_icc｜变更显示器色彩配置需管理员权限';
     if (hdrNote) hdrNote.innerHTML = '⚠️ <b>HDR 状态可读取；本机切换请求被厂商服务接管且系统拒绝应用</b>（错误 87 / AsHDRControl）。请通过「设置 → 系统 → 显示 → HDR」或华硕工具切换。';
+    if (restoreNote) restoreNote.innerHTML = '覆盖范围：总亮度（回到原始曲线）、HDR、色彩配置、被铺满的窗口、屏幕电源、音量 —— 全部回到<b>软件启动时</b>的状态（启动时会自动存一份「基线」，所以乱调之后总能一键回到好的状态）。<b>硬件层面的设置不受影响</b>（显示器自己的亮度/音量、KVM 都不动）。';
   } else if (p === 'linux') {
     matchMac.disabled = true;
     matchMac.title = 'Linux 版暂未实现';
@@ -480,10 +484,21 @@ function applyPlatformCopy(p) {
     if (apply) { apply.disabled = true; apply.title = 'Linux 版暂未实现'; }
     if (note) note.textContent = 'Linux 版色彩同步暂未实现（可先用系统级 colord 配置）';
     if (hdrNote) hdrNote.textContent = 'Linux 版 HDR 与显示器色彩控制暂未实现。';
+    const hdrButton = document.getElementById('hdr-sync');
+    if (hdrButton) { hdrButton.disabled = true; hdrButton.textContent = '🌈 HDR：Linux 暂不支持'; }
   } else {
     matchMac.title = '外接屏对齐 Mac 内建屏（Display P3）';
-    if (note) note.textContent = '使用 macOS ColorSync 配置文件对齐色彩空间；深度校准仍需硬件校色仪（DisplayCAL）。';
-    if (hdrNote) hdrNote.innerHTML = 'macOS 的 HDR 请求通过 BetterDisplay CLI 发送；是否生效取决于显示器、BetterDisplay 集成状态与授权。执行后请检查系统 HDR 状态。';
+    const applyColor = document.getElementById('apply-color');
+    if (applyColor) { applyColor.disabled = false; applyColor.title = '通过 macOS ColorSync 设置系统显示器配置'; }
+    matchMac.disabled = false;
+    if (note) note.textContent = '通过 macOS ColorSync 设置系统显示器配置；可用配置取决于系统配置文件库。当前系统没有 ProPhoto RGB 配置文件；深度校准仍需硬件校色仪。';
+    if (hdrNote) hdrNote.textContent = 'HDR 状态和切换由 macOS 与显示器驱动管理；Screenguard 暂不提供该控制。';
+    const hdrButton = document.getElementById('hdr-sync');
+    if (hdrButton) { hdrButton.disabled = true; hdrButton.textContent = '🌈 HDR：macOS 暂不支持'; hdrButton.title = 'macOS HDR 由系统和显示器驱动管理，Screenguard 当前不提供切换'; }
+    const nativeHint = document.getElementById('nd-hint');
+    if (nativeHint) nativeHint.textContent = '此处由 Screenguard 使用 macOS 系统显示 API 与 DDC/CI 控制主屏、镜像、排列和输入源。实际能力取决于显示器及连接链路。';
+    const powerNote = document.getElementById('pw-note');
+    if (powerNote) powerNote.textContent = '一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。电源联动由 Screenguard 内置 DDC/CI 实现，显示器或连接链路不支持时，不能检测物理关屏状态。';
   }
 }
 
@@ -535,12 +550,23 @@ document.getElementById('bri-sync').onclick = async () => {
 // HDR：按钮直接显示**当前状态**（开 / 关 / 混合），点一下才把所有屏设成一致。
 // 说明：本机实测 Windows 的 HDR 设置 API 返回成功但状态可能不变（被厂商/驱动接管），
 // 所以结果里会带上逐台原始明细，不给你一个漂亮但不实的结论。
+let activePlatform = '';
 let hdrStat = { sup: 0, on: 0, total: 0 };
 async function loadHdrStatus() {
   const btn = document.getElementById('hdr-sync');
   if (!btn) return;
+  if (activePlatform === 'macos') {
+    btn.disabled = true;
+    btn.textContent = '🌈 HDR：macOS 暂不支持';
+    return;
+  }
   try {
     const raw = String(await invoke('hdr_states') || '');
+    if (activePlatform === 'macos') {
+      btn.disabled = true;
+      btn.textContent = '🌈 HDR：macOS 暂不支持';
+      return;
+    }
     let sup = 0, on = 0, total = 0;
     for (const line of raw.split('\n')) {
       const p = line.split('|');
@@ -559,6 +585,11 @@ async function loadHdrStatus() {
     btn.textContent = '🌈 ' + txt;
     btn.title = '点一下把所有屏的 HDR 设成一致';
   } catch (e) {
+    if (activePlatform === 'macos') {
+      btn.disabled = true;
+      btn.textContent = '🌈 HDR：macOS 暂不支持';
+      return;
+    }
     btn.textContent = '🌈 HDR：读取失败';
   }
 }
@@ -995,7 +1026,7 @@ document.getElementById('mute-btn').onclick = async () => {
     const names = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
     setBadge(names[p] || p);
     applyPlatformCopy(p);
-    if (p === 'macos') document.getElementById('betterdisplay-card').style.display = '';
+    if (p === 'macos') document.getElementById('native-display-card').style.display = '';
     if (p === 'windows' || p === 'macos') {
       // Windows 枚举 CoreAudio 端点；macOS 仅控制系统默认输出。
       document.getElementById('audio-card').style.display = '';

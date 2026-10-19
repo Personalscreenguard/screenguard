@@ -1,13 +1,13 @@
 {
   "name": "screenguard",
   "private": true,
-  "version": "0.4.46",
+  "version": "0.4.47",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
+    "prebuild": "node tools/fetch-displayplacer.mjs",
     "build": "tauri build",
-    "build:win": "tauri build --bundles nsis",
-    "build:linux": "tauri build --target x86_64-unknown-linux-gnu"
+    "build:win": "tauri build --bundles nsis"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4"

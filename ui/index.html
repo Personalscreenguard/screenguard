@@ -40,63 +40,37 @@
       </div>
     </section>
 
-    <!-- BetterDisplay 风格的 macOS 高级显示控制，命令由本机 BetterDisplay CLI 执行。 -->
-    <section class="card" id="betterdisplay-card" style="display:none">
+    <!-- macOS 原生显示控制：仅展示有可靠实现的操作。 -->
+    <section class="card" id="native-display-card" style="display:none">
       <div class="card-head">
         <h2>🧰 高级显示器控制</h2>
-        <span class="hint">BetterDisplay 集成</span>
+        <span class="hint">Screenguard 内置控制</span>
       </div>
       <div class="color-row">
-        <label for="bd-source">操作屏幕</label>
-        <select id="bd-source"><option value="">读取中…</option></select>
+        <label for="nd-source">操作屏幕</label>
+        <select id="nd-source"><option value="">读取中…</option></select>
       </div>
       <div class="color-row">
-        <label for="bd-target">目标屏幕</label>
-        <select id="bd-target"><option value="">读取中…</option></select>
+        <label for="nd-target">目标屏幕</label>
+        <select id="nd-target"><option value="">读取中…</option></select>
       </div>
       <div class="btn-row">
-        <button class="ghost" data-bd-action="set-main">设为主屏</button>
-        <button class="ghost" data-bd-action="protect-main-on">保护主屏身份</button>
-        <button class="ghost" data-bd-action="protect-main-off">取消主屏保护</button>
-        <button class="ghost" data-bd-action="mirror-on">镜像到目标</button>
-        <button class="ghost" data-bd-action="mirror-off">停止镜像</button>
+        <button class="ghost" data-native-action="set-main">设为主屏</button>
+        <button class="ghost" data-native-action="mirror-on">镜像到目标</button>
+        <button class="ghost" data-native-action="mirror-off">停止镜像</button>
       </div>
       <div class="btn-row">
-        <button class="ghost" data-bd-action="place-left">排列到左侧</button>
-        <button class="ghost" data-bd-action="place-right">排列到右侧</button>
-        <button class="ghost" data-bd-action="place-above">排列到上方</button>
-        <button class="ghost" data-bd-action="place-below">排列到下方</button>
-      </div>
-      <div class="btn-row">
-        <button class="ghost" data-bd-action="pip-on">画中画到目标</button>
-        <button class="ghost" data-bd-action="pip-off">关闭画中画</button>
-        <button class="ghost" data-bd-action="stream-on">屏幕串流</button>
-        <button class="ghost" data-bd-action="stream-off">停止串流</button>
-      </div>
-      <div class="btn-row">
-        <button class="ghost" data-bd-action="hdr-on">开启 HDR</button>
-        <button class="ghost" data-bd-action="hdr-off">关闭 HDR</button>
-        <button class="ghost" data-bd-action="protect-resolution-on">保护分辨率</button>
-        <button class="ghost" data-bd-action="protect-resolution-off">取消保护</button>
-      </div>
-      <div class="btn-row">
-        <button class="ghost" data-bd-action="protect-refresh-on">保护刷新率</button>
-        <button class="ghost" data-bd-action="protect-refresh-off">取消刷新率保护</button>
-        <button class="ghost" data-bd-action="protect-rotation-on">保护旋转</button>
-        <button class="ghost" data-bd-action="protect-rotation-off">取消旋转保护</button>
+        <button class="ghost" data-native-action="place-left">排列到左侧</button>
+        <button class="ghost" data-native-action="place-right">排列到右侧</button>
+        <button class="ghost" data-native-action="place-above">排列到上方</button>
+        <button class="ghost" data-native-action="place-below">排列到下方</button>
       </div>
       <div class="color-row">
-        <label for="bd-input-code">输入源代码</label>
-        <input id="bd-input-code" inputmode="numeric" placeholder="显示器 VCP 代码" style="max-width:180px">
-        <button class="ghost" data-bd-action="input-source">切换输入源</button>
+        <label for="nd-input-code">输入源代码</label>
+        <input id="nd-input-code" inputmode="numeric" placeholder="显示器 VCP 代码" style="max-width:180px">
+        <button class="ghost" data-native-action="input-source">切换输入源</button>
       </div>
-      <div class="btn-row">
-        <button class="ghost" data-bd-action="virtual-16-9">创建并连接 16:9 虚拟屏</button>
-        <button class="ghost" data-bd-action="virtual-21-9">创建并连接 21:9 虚拟屏</button>
-        <button class="ghost" data-bd-action="connect-on">重新连接所选屏</button>
-        <button class="ghost" data-bd-action="connect-off">断开所选屏</button>
-      </div>
-      <div class="hint" id="bd-hint">镜像、画中画、串流与虚拟屏由 BetterDisplay CLI 执行；部分功能需要 BetterDisplay Pro。排列与 HDR 命令会直接改变显示设置，请确认所选屏幕。输入源代码由显示器型号决定（常见 VCP 0x60）。</div>
+      <div class="hint" id="nd-hint">使用 macOS 系统显示 API 与 DDC/CI；镜像和输入源取决于系统、显示器及连接链路。</div>
     </section>
 
     <!-- ===== 屏幕电源 ===== -->
@@ -112,7 +86,7 @@
       <div class="btn-row">
         <button class="ghost" id="power-link-btn" aria-pressed="false">🔗 电源联动：关</button>
       </div>
-      <div class="hint" id="pw-note">一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。开启电源联动后需保持 Screenguard 运行。Windows 按 DDC/CI VCP 0xD6 同步；macOS 原生后台服务优先经 BetterDisplay 读取/设置 VCP 0xD6，并以显示器断开/重连事件兜底。具体效果取决于显示器和连接链路是否支持 DDC；不支持时不能检测物理关屏状态。</div>
+      <div class="hint" id="pw-note">一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。开启电源联动后需保持 Screenguard 运行。Windows 与 macOS 都由应用直接读写 DDC/CI VCP 0xD6；具体效果取决于显示器和连接链路是否支持 DDC，不支持时不能检测物理关屏状态。</div>
       <div class="hint" id="hk-note" style="margin-top:6px">全局快捷键：读取中…</div>
     </section>
 
@@ -186,7 +160,7 @@
       </div>
       <div class="btn-row">
         <button class="ghost" id="bri-sync">☀️ 亮度同步（各屏取齐）</button>
-        <button class="ghost" id="hdr-sync">🌈 HDR：读取中…</button>
+        <button class="ghost" id="hdr-sync" disabled>🌈 HDR：读取中…</button>
       </div>
       <div class="calib-note" id="color-note">支持 8 种目标色彩空间（sRGB / P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto / 灰度）｜Windows 只自带 sRGB，其它需把 .icc 放进 %LOCALAPPDATA%\screenguard_icc\（按文件名自动识别）｜深度校准仍需硬件校色仪（DisplayCAL）</div>
       <div class="hint" id="hdr-note">⚠️ <b>HDR 按钮是「读取并显示当前状态」</b>（开 / 关 / 混合）。本机实测：切换指令能发出，但系统拒绝 Apply（错误 87），HDR 被厂商服务 <b>AsHDRControl</b> 接管 —— 所以点它<b>不会真的改变</b> HDR，要改请用「设置 → 系统 → 显示 → HDR」或华硕工具。「色彩空间」若和目标本来就一致（例如两块屏都是 sRGB），也不会有视觉变化，这是正常的。</div>
@@ -246,7 +220,7 @@
       <div class="hint" id="diag-dir">日志目录：读取中…</div>
     </section>
 
-    <!-- ===== 视频跨屏 ===== -->
+    <!-- ===== 任意窗口跨屏 ===== -->
     <section class="card">
       <div class="card-head">
         <h2>🎬 双屏铺满</h2>
@@ -272,7 +246,7 @@
         <button class="ghost" id="span-fg">铺满当前前台窗口</button>
         <button class="ghost" id="restore-fg">↩ 还原</button>
       </div>
-      <div class="hint">推荐：点「刷新窗口列表」→ 在「目标窗口」里选中 → 点「铺满选中窗口」。<b>任何窗口都能铺满</b>（浏览器里的抖音全屏、PotPlayer、VLC…）。铺满后点「还原」即可回到原位置；Windows 也可按 <b>Ctrl+Alt+R</b>。macOS 需要允许 Screenguard 使用「辅助功能」调整窗口；如窗口标题显示为未命名，可在「屏幕与系统音频录制」中授权以读取完整窗口信息。不同屏幕的边框仍是物理间隔，跨屏画面只能按两屏布局延展。</div>
+      <div class="hint">推荐：点「刷新窗口列表」→ 在「目标窗口」里选中 → 点「铺满选中窗口」。<b>任意已打开的应用窗口都能铺满</b>，无需安装播放器。铺满后点「还原」即可回到原位置；Windows 也可按 <b>Ctrl+Alt+R</b>。macOS 需要允许 Screenguard 使用「辅助功能」调整窗口；如窗口标题显示为未命名，可在「屏幕与系统音频录制」中授权以读取完整窗口信息。不同屏幕的边框仍是物理间隔，跨屏画面只能按两屏布局延展。</div>
     </section>
 
     <!-- ===== 一键恢复默认（安全阀） ===== -->
@@ -289,7 +263,7 @@
           <input type="checkbox" id="revert-exit">退出软件时自动还原（推荐）
         </label>
       </div>
-      <div class="hint" id="restore-note">覆盖范围：总亮度（回到原始曲线）、HDR、色彩配置、被铺满的窗口、屏幕电源、音量 —— 全部回到<b>软件启动时</b>的状态（启动时会自动存一份「基线」，所以乱调之后总能一键回到好的状态）。<b>硬件层面的设置不受影响</b>（显示器自己的亮度/音量、KVM 都不动）。</div>
+      <div class="hint" id="restore-note">覆盖范围：总亮度（回到原始曲线）、色彩配置、被铺满的窗口、屏幕电源、音量 —— 全部回到<b>软件启动时</b>的状态（启动时会自动存一份「基线」，所以乱调之后总能一键回到好的状态）。<b>硬件层面的设置不受影响</b>（显示器自己的亮度/音量、KVM 都不动）。</div>
     </section>
 
   </main>

@@ -38,7 +38,7 @@ def ok(msg):
 
 
 def check_versions():
-    print("[1/4] 版本一致性")
+    print("[1/6] 版本一致性")
     good = True
     cargo = open(os.path.join(ROOT, "src-tauri", "Cargo.toml"), encoding="utf-8").read()
     m = re.search(r'^version\s*=\s*"([^"]+)"', cargo, re.M)
@@ -60,9 +60,14 @@ def check_versions():
 
 
 def check_bundle_refs():
-    print("[2/4] tauri.conf.json 引用完整性")
+    print("[2/6] tauri.conf.json 引用与 Windows WebView2 打包模式")
     conf = json.load(open(os.path.join(ROOT, "src-tauri", "tauri.conf.json"), encoding="utf-8"))
     good = True
+    webview_mode = conf.get("bundle", {}).get("windows", {}).get("webviewInstallMode", {}).get("type")
+    if webview_mode != "offlineInstaller":
+        good = fail(f"Windows WebView2 必须使用 offlineInstaller，当前为: {webview_mode}") and good
+    else:
+        ok("Windows WebView2 离线安装器随 Screenguard 安装包分发")
     lic = conf.get("bundle", {}).get("licenseFile")
     if lic:
         p = os.path.normpath(os.path.join(ROOT, "src-tauri", lic))
@@ -73,6 +78,55 @@ def check_bundle_refs():
             good = fail(f"图标不存在: {icon}")
     if good:
         ok(f"全部 {len(conf.get('bundle', {}).get('icon', []))} 个图标存在")
+    return good
+
+
+def check_single_app_dependencies():
+    """Protect the promise that supported display controls ship with Screenguard."""
+    print("[3/6] 单应用依赖与随包组件")
+    good = True
+
+    package = json.load(open(os.path.join(ROOT, "package.json"), encoding="utf-8"))
+    prebuild = package.get("scripts", {}).get("prebuild", "")
+    if "tools/fetch-displayplacer.mjs" not in prebuild:
+        good = fail("macOS 构建必须执行固定版本的 displayplacer 随包脚本") and good
+    else:
+        ok("macOS 构建会准备 Screenguard 内置 displayplacer")
+
+    conf = json.load(open(os.path.join(ROOT, "src-tauri", "tauri.conf.json"), encoding="utf-8"))
+    resources = conf.get("bundle", {}).get("resources", [])
+    if not any("resources/displayplacer" in item.replace("\\", "/") for item in resources):
+        good = fail("tauri bundle.resources 必须包含 resources/displayplacer") and good
+    else:
+        ok("macOS 安装包会包含 displayplacer")
+
+    fetcher = open(os.path.join(ROOT, "tools", "fetch-displayplacer.mjs"), encoding="utf-8").read()
+    has_arch_hashes = all(
+        re.search(rf"{arch}:\s*\{{(?:(?!\n\s*\}}).)*sha256:\s*'[0-9a-f]{{64}}'",
+                  fetcher, re.S)
+        for arch in ("arm64", "x64")
+    )
+    if "createHash('sha256')" not in fetcher or not has_arch_hashes:
+        good = fail("displayplacer 必须按 arm64/x64 固定 SHA-256 校验") and good
+    else:
+        ok("arm64 与 x64 displayplacer 均固定 SHA-256")
+
+    runtime_roots = [os.path.join(ROOT, "src-tauri", "src"), UI]
+    runtime_files = []
+    for directory in runtime_roots:
+        for current, _, names in os.walk(directory):
+            runtime_files.extend(
+                os.path.join(current, name) for name in names
+                if name.endswith((".rs", ".js", ".html"))
+            )
+    references = [
+        os.path.relpath(path, ROOT) for path in runtime_files
+        if "betterdisplay" in open(path, encoding="utf-8").read().lower()
+    ]
+    if references:
+        good = fail("运行时代码重新出现 BetterDisplay 依赖字样: " + ", ".join(references)) and good
+    else:
+        ok(f"已扫描 {len(runtime_files)} 个 Rust/前端运行时代码文件，未引用 BetterDisplay")
     return good
 
 
@@ -100,7 +154,7 @@ def node_check(label, code):
 
 
 def check_js():
-    print("[3/4] 前端 JS 语法（node --check；临时文件按 CommonJS 解析，顶层 await 会报错）")
+    print("[4/6] 前端 JS 语法（node --check；临时文件按 CommonJS 解析，顶层 await 会报错）")
     if not node_available():
         print("  ⚠️ node 不可用，跳过（CI 中会执行此检查）")
         return True
@@ -126,7 +180,7 @@ def check_js():
 
 def check_csharp_quote():
     """windows.rs 的 CORE_CS 内不允许出现单引号（PS 单引号包裹会截断）——与 check_cs.py 同规则的前置防线"""
-    print("[4/4] windows.rs CORE_CS 单引号检查")
+    print("[5/6] windows.rs CORE_CS 单引号检查")
     src = open(os.path.join(ROOT, "src-tauri", "src", "platform", "windows.rs"), encoding="utf-8").read()
     m = re.search(r'const CORE_CS: &str = r#"(.*?)"#;', src, re.S)
     if not m:
@@ -136,11 +190,24 @@ def check_csharp_quote():
     return ok("无单引号")
 
 
+def check_release_architectures():
+    """Both supported Mac architectures must be included in the signed release workflow."""
+    print("[6/6] 正式发布架构")
+    path = os.path.join(ROOT, ".github", "workflows", "release.yml")
+    release = open(path, encoding="utf-8").read()
+    required = ("aarch64-apple-darwin", "x86_64-apple-darwin", "release-macos-${{ matrix.arch }}")
+    missing = [item for item in required if item not in release]
+    if missing:
+        return fail("正式发布工作流缺少架构配置: " + ", ".join(missing))
+    return ok("正式发布包含 Apple Silicon 与 Intel 两种 Mac DMG")
+
+
 def main():
     print("=" * 60)
     print("screenguard 仓库自检")
     print("=" * 60)
-    good = all([check_versions(), check_bundle_refs(), check_js(), check_csharp_quote()])
+    good = all([check_versions(), check_bundle_refs(), check_single_app_dependencies(),
+                check_js(), check_csharp_quote(), check_release_architectures()])
     print("=" * 60)
     print("✅ 全部通过" if good else "❌ 存在问题")
     sys.exit(0 if good else 1)
