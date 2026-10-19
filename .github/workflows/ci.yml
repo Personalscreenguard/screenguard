@@ -67,6 +67,22 @@ jobs:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: 验证 Windows 签名脚本语法
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: .
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts/sign_windows_installer.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "Windows 签名脚本语法无效"
+          }
       - name: 安装前端依赖
         run: npm ci
       - name: 构建 macOS App 与 DMG
