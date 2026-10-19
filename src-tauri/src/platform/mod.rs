@@ -346,13 +346,13 @@ pub fn set_display_mode(_display_id: &str, _mode: u32) -> Result<String, String>
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn betterdisplay_action(
+pub fn display_action(
     _action: &str,
     _display_id: &str,
     _target_id: Option<&str>,
     _value: Option<&str>,
 ) -> Result<String, String> {
-    Err("BetterDisplay 集成控制目前仅支持 macOS".to_string())
+    Err("此显示控制目前仅支持 macOS".to_string())
 }
 
 // ---------- 屏幕电源控制 ----------

@@ -1,6 +1,6 @@
 # 🖥️ 屏幕守护 Screenguard
 
-跨平台显示器控制与多屏助手（Tauri 2 + Rust）。
+面向 macOS 与 Windows 的显示器控制和多屏助手（Tauri 2 + Rust）。
 
 面向**双屏日常用户**：主屏 27" 4K + 便携副屏（横/竖切换）的亮度/音量/色彩/布局一体化控制，支持跨屏看电影（VLC 无边框铺满）。
 
@@ -8,32 +8,31 @@
 
 ## 功能
 
-| 模块 | 说明 | macOS | Windows | Linux |
-|---|---|---|---|---|
-| 显示器列表 | 分辨率/刷新率/主副屏/DDC 能力；macOS 可切换显示模式并回读核验 | ✅ | ✅ | 🟡（部分） |
-| BetterDisplay 菜单控制 | macOS：主屏、镜像、排列、HDR、输入源、画中画、串流、配置保护与虚拟屏；依赖 BetterDisplay CLI，部分需 Pro | ✅（部分受硬件/Pro限制） | — | — |
-| 屏幕电源 | 全部待机/唤醒（macOS 使用 pmset / caffeinate；Windows 使用系统显示器电源控制） | ✅ | ✅ | ⏳ |
-| 亮度/音量 DDC | 滑块实时控制（需硬件支持 DDC/CI） | ✅ | ✅ | ✅ |
-| 色彩同步 | 一键把全部屏对齐 sRGB / Display P3 / Adobe RGB | ✅ | ✅（P3/Adobe 需自备 .icc） | ⏳ |
-| 对齐色彩 | macOS：外接屏对齐内建屏（Display P3）；Windows：其余屏对齐主屏当前 ICC | ✅ | ✅ | ⏳ |
-| 窗口跨屏等大 | 副屏对齐 2x 逻辑档，窗口拖动不变小（**不会**降 4K 物理分辨率） | ✅ | ✅（诊断+指引） | ⏳ |
-| 副屏横竖切换 | 一键旋转/恢复（按真实布局动态计算，无硬编码） | ✅ | ✅ | ⏳ |
-| 双屏铺满 | macOS/Windows 可选择应用窗口或当前前台窗口跨屏铺满并可还原；macOS 需授权辅助功能 | ✅（需 macOS 辅助功能/自动化权限） | ✅（PotPlayer/VLC/任意窗口） | ⏳ |
-| 电源联动 | 主窗口和菜单栏共用持久化开关；Windows/macOS 使用 Rust 原生后台监测，不依赖隐藏面板定时器；需应用运行 | 🟡（物理关屏若仍留在系统显示列表且 DDC 不可读则无法检测） | ✅（DDC/CI VCP 0xD6） | ⏳ |
-| 电池状态 | macOS 读取内置电池电量/电源状态；Windows 枚举内置及可识别的外设电池 | ✅（内置电池） | ✅ | ⏳ |
-| ADB 联网增强 | 通过 Android Platform-Tools 连接支持网络调试的显示器并发送电源/音量命令 | ✅（官方 macOS 包） | ✅（自动下载） | ⏳ |
-| 系统音量 | Windows 可选择 CoreAudio 输出端点；macOS 控制系统默认输出音量/静音，不支持在应用内切换输出设备 | ✅（按系统输出能力） | ✅ | ⏳ |
-| 开机自启 | 面板开关直接管理（macOS LaunchAgent / Windows 注册表 / Linux autostart） | ✅ | ✅ | ✅ |
+| 模块 | 说明 | macOS | Windows |
+|---|---|---|---|
+| 显示器列表 | 分辨率/刷新率/主副屏/DDC 能力；macOS 可切换显示模式并回读核验 | ✅ | ✅ |
+| 高级显示控制 | macOS：主屏、镜像、排列和标准 DDC/CI 输入源；使用 CoreGraphics、DDC/CI 与随安装包分发的布局组件 | ✅（取决于 macOS 与显示器） | — |
+| 屏幕电源 | 全部待机/唤醒（macOS 使用 pmset / caffeinate；Windows 使用系统显示器电源控制） | ✅ | ✅ |
+| 亮度/音量 DDC | 滑块实时控制（需硬件支持 DDC/CI） | ✅ | ✅ |
+| 色彩同步 | 一键把全部屏对齐 sRGB / Display P3 / Adobe RGB | ✅ | ✅（P3/Adobe 需自备 .icc） |
+| 对齐色彩 | macOS：外接屏对齐内建屏（Display P3）；Windows：其余屏对齐主屏当前 ICC | ✅ | ✅ |
+| 窗口跨屏等大 | 副屏对齐 2x 逻辑档，窗口拖动不变小（**不会**降 4K 物理分辨率） | ✅ | ✅（诊断+指引） |
+| 副屏横竖切换 | 一键旋转/恢复（按真实布局动态计算，无硬编码） | ✅ | ✅ |
+| 双屏铺满 | macOS/Windows 可选择应用窗口或当前前台窗口跨屏铺满并可还原；macOS 需授权辅助功能 | ✅（需 macOS 辅助功能/自动化权限） | ✅（任意前台窗口） |
+| 电源联动 | 主窗口和菜单栏共用持久化开关；Windows/macOS 使用 Rust 原生后台监测，不依赖隐藏面板定时器；需应用运行 | 🟡（物理关屏若仍留在系统显示列表且 DDC 不可读则无法检测） | ✅（DDC/CI VCP 0xD6） |
+| 电池状态 | macOS 读取内置电池电量/电源状态；Windows 枚举内置及可识别的外设电池 | ✅（内置电池） | ✅ |
+| ADB 联网增强 | 通过 Android Platform-Tools 连接支持网络调试的显示器并发送电源/音量命令 | ✅（应用内获取） | ✅（应用内获取） |
+| 系统音量 | Windows 可选择 CoreAudio 输出端点；macOS 控制系统默认输出音量/静音，不支持在应用内切换输出设备 | ✅（按系统输出能力） | ✅ |
+| 开机自启 | 面板开关直接管理（macOS LaunchAgent / Windows 注册表） | ✅ | ✅ |
 
-| 显示器状态 | Windows：事件日志检测 / 重协商修复 / 自动修复 + 掉线提醒；macOS：Quartz 逐屏睡眠状态只读诊断 | ✅（修复需谨慎使用） | 🟡（只读系统睡眠状态，不代表物理断电） | ⏳ |
-
+| 显示器状态 | Windows：事件日志检测 / 重协商修复 / 自动修复 + 掉线提醒；macOS：Quartz 逐屏睡眠状态只读诊断 | ✅（修复需谨慎使用） | 🟡（只读系统睡眠状态，不代表物理断电） |
 ✅ = 完整实现；🟡 = 部分实现；⏳ = 暂未实现（点击会明确报错，不假成功）
 
 ## 依赖
 
-- **macOS**：`displayplacer`（`brew install displayplacer`）、[BetterDisplay](https://betterdisplay.pro)（DDC 读写，需保持运行；电源联动还需在 Settings > Application > Integration 开启 CLI access 和 notification based integration，并启用目标屏的 DDC Control）；任意窗口跨屏首次使用需在“系统设置 → 隐私与安全性 → 辅助功能”允许 Screenguard 控制窗口；如窗口标题无法读取，检查“屏幕与系统音频录制”权限。
-- **Windows**：DDC 走系统 `dxva2.dll`（PowerShell 注入，无需额外软件）；VLC 可选
-- **Linux**：`ddcutil`（`apt install ddcutil`）；VLC 可选
+- **macOS**：显示器枚举、模式列表和 MIT 许可的 `displayplacer` 布局组件随安装包分发；DDC/CI 由应用内 Rust 组件直接访问，不要求安装或运行 BetterDisplay。DDC 能力取决于显示器与连接链路。跨屏视频播放功能需要另行安装 VLC；普通窗口跨屏不需要播放器。任意窗口跨屏首次使用需在“系统设置 → 隐私与安全性 → 辅助功能”允许 Screenguard 控制窗口；如窗口标题无法读取，检查“屏幕与系统音频录制”权限。
+- **Windows**：DDC 走系统 `dxva2.dll`（无需额外显示器控制软件）；NSIS 安装包内含 WebView2 引导程序，缺少 WebView2 时安装器会联网自动安装。跨屏视频播放功能需要 PotPlayer 或 VLC；普通前台窗口跨屏不需要播放器。ADB 仅用于支持网络调试的显示器，可在应用内获取 Google Platform-Tools。
+- Linux 当前不在支持或打包范围内。
 
 > 国内构建 Rust 依赖若直连 crates.io 失败，配置镜像：
 > ```toml
@@ -53,12 +52,12 @@ npm install            # 安装 Tauri CLI
 npm run dev            # 开发模式
 npm run build          # macOS 打包（app + dmg）
 npm run build:win      # Windows 打包（需对应 target）
-npm run build:linux    # Linux 打包
 ```
 
 产物：`src-tauri/target/release/bundle/`
 
 ## 版本历史
+- **v0.4.47**（2026-10-19）：Mac 版移除 BetterDisplay 运行依赖。DDC/CI 亮度、音量、电源状态和输入源改由应用内 Rust 组件直接访问；ColorSync 使用 macOS 系统 API；MIT 许可的 `displayplacer` v1.4.0 在构建时按架构下载、校验并随 DMG 分发。停用当前没有可靠原生实现的 HDR、画中画、串流、虚拟屏及配置保护功能。Windows 端依赖路径保持不变。
 - **v0.4.46**（2026-10-17）：修正主窗口电源联动开关提示，说明 macOS 同时监测 DDC、Quartz 睡眠和显示器连接变化，并明确物理关屏没有产生系统可见状态变化时无法检测。
 - **v0.4.45**（2026-10-17）：修复 macOS 窗口铺满还原时上层命令无条件二次还原显示布局的问题；macOS 只在本次铺满确实调整过屏幕模式时回滚布局，Windows 保持原来的窗口与模式还原流程。
 - **v0.4.44**（2026-10-17）：Mac 电源诊断同时显示联动开关、Quartz 逐屏睡眠状态和 DDC VCP 0xD6 只读结果，便于区分传感器不可读与联动未开启。

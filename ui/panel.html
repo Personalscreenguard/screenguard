@@ -116,7 +116,7 @@
   <div style="padding:0 8px">
     <div class="grp" id="bdp-grp" style="display:none">
       <div class="grp-h" id="bdp-head" role="button" tabindex="0" aria-expanded="false">
-        <div><div class="grp-title">🧰 BetterDisplay 控制</div><div class="grp-meta">镜像 · 排列 · 画中画 · 虚拟屏</div></div>
+        <div><div class="grp-title">🧰 高级显示控制</div><div class="grp-meta">主屏 · 镜像 · 排列 · 输入源</div></div>
         <div class="grp-right"><span class="badge">macOS</span><span id="bdp-caret">▸</span></div>
       </div>
       <div class="grp-body">
@@ -166,7 +166,7 @@
           <input id="bdp-input-code" inputmode="numeric" placeholder="VCP 代码 1–255">
           <button class="ibtn" data-bdp-action="input-source">切换</button>
         </div>
-        <div class="hint" id="bdp-hint">需要 BetterDisplay 正在运行并启用 CLI 集成；PIP/串流等部分能力需要 Pro。断开操作保留虚拟屏配置。</div>
+        <div class="hint" id="bdp-hint">基础显示操作由 Screenguard 原生实现。HDR、画中画、串流、虚拟屏和配置保护暂不支持。</div>
       </div>
     </div>
   </div>
@@ -337,9 +337,9 @@ function setupBetterDisplayPanel(){
       }
       const previousDisabled = button.disabled;
       button.disabled = true;
-      bdpSetHint('正在执行 BetterDisplay 操作…');
+      bdpSetHint('正在执行显示操作…');
       try {
-        const result = await invoke('betterdisplay_action', {
+        const result = await invoke('display_action', {
           action,
           displayId: source.value,
           targetId: target.value || null,
@@ -965,7 +965,7 @@ async function linkTick(){
     if (link.last === null) {
       link.last = sample;
       if (!sample.power.size && link.platform !== 'macos') {
-        pwHint('联动已开启，但目前无法读取显示器电源状态；检查 BetterDisplay CLI 集成。', true);
+        pwHint('联动已开启，但目前无法读取显示器电源状态；请检查显示器 DDC/CI 设置和连接链路。', true);
       }
       return;
     }
@@ -1101,9 +1101,9 @@ async function startLink(){
   if (link.platform === 'macos') {
     const unreadable = initial.unreadable.length;
     if (unreadable) {
-      pwHint('联动已开启，但当前有 '+unreadable+' 台屏幕读不到 DDC VCP 0xD6。请启动 BetterDisplay，在 Settings > Application > Integration 开启 CLI access 和 notification based integration，并确认该屏的 DDC Control 已开启。仍会同时监测 macOS Quartz 单屏睡眠状态和显示器断开/重连；若屏幕物理断电后仍在线且系统仍报告唤醒，则 macOS 无法识别这次物理关屏。', true);
+      pwHint('联动已开启，但当前有 '+unreadable+' 台屏幕读不到 DDC VCP 0xD6。请检查显示器 OSD 的 DDC/CI 设置和连接链路。仍会同时监测 macOS Quartz 单屏睡眠状态和显示器断开/重连；若屏幕物理断电后仍在线且系统仍报告唤醒，则 macOS 无法识别这次物理关屏。', true);
     } else {
-      pwHint('联动已开启：当前显示器可读取 BetterDisplay DDC VCP 0xD6。请保持 Screenguard 和 BetterDisplay 运行；显示器是否响应电源命令仍取决于 DDC/CI 和连接链路。');
+      pwHint('联动已开启：当前显示器可读取 DDC VCP 0xD6。请保持 Screenguard 运行；显示器是否响应电源命令仍取决于 DDC/CI 和连接链路。');
     }
     return;
   }
@@ -1169,7 +1169,7 @@ invoke('get_platform').then(p=>{
   } else {
     const linkEl = document.getElementById('cell-link');
     linkEl.title = p === 'macos'
-      ? '原生后台服务读取 BetterDisplay DDC VCP 0xD6、Quartz 单屏睡眠状态及显示器连接事件'
+      ? 'Screenguard 原生后台读取 DDC VCP 0xD6、Quartz 单屏睡眠状态及显示器连接事件'
       : '显示器需支持 DDC/CI VCP 0xD6 电源控制';
     invoke('get_power_link_preference').then(enabled=>{
       localStorage.setItem(LINK_KEY, enabled ? '1' : '0');
