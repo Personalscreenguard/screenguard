@@ -19,7 +19,7 @@ PR CI 包不是面向普通用户的已签名正式发行包：Windows 安装器
 - Windows NSIS 包使用 WebView2 `offlineInstaller`，内含 Evergreen 离线运行时。首次安装不要求联网或预装 WebView2，代价是安装包约增加 127 MB；CI 检查 NSIS 大于 100 MiB 防止误删该运行时。
 - ADB 联网增强为可选功能。用户主动启用时，Screenguard 从 Google 获取 Platform-Tools 并放在应用数据目录；该增强需要网络，不影响普通显示器控制，也不要求用户自行下载/安装 ADB。
 - PowerShell、注册表、`dxva2.dll` 以及 macOS `pmset`、`caffeinate`、`osascript`、`launchctl` 属于系统自带组件，不是用户需另行安装的软件。Linux 不在支持范围。
-- 没有可靠原生替代的 BetterDisplay 专属 HDR/PIP/串流/虚拟显示器/配置保护已从支持范围排除；用户放弃的小米屏幕电源联动也不属于产品目标。
+- macOS HDR 控制明确停用；PIP、串流、虚拟显示器和配置保护没有随应用分发的可靠替代实现，控制入口已移除，旧调用会返回“不在支持范围”。Windows HDR 使用 Windows 原生接口，但状态读取/切换受 GPU 驱动和厂商服务影响；当前运行代码与 UI 已记录 AsHDRControl 导致 Apply 返回错误 87、不能真正改变 HDR 的情况。证据：`ui/main.js` 在 macOS 禁用 HDR 并标注不支持，Windows 显示未生效提示；`src-tauri/src/platform/macos.rs` 对上述旧控制命令拒绝执行，`src-tauri/src/platform/windows.rs` 检查 Apply 错误并报告未生效。用户放弃的小米屏幕电源联动也不属于产品目标。
 
 ### 当前发布目标与缺口
 

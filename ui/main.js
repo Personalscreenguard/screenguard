@@ -467,6 +467,7 @@ function applyPlatformCopy(p) {
   const matchMac = document.getElementById('match-mac');
   const note = document.getElementById('color-note');
   const hdrNote = document.getElementById('hdr-note');
+  const restoreNote = document.getElementById('restore-note');
   if (p === 'windows') {
     const hdrButton = document.getElementById('hdr-sync');
     if (hdrButton) hdrButton.disabled = false;
@@ -475,6 +476,7 @@ function applyPlatformCopy(p) {
     matchMac.title = '把主屏当前关联的 ICC 配置应用到其余屏幕';
     if (note) note.textContent = 'P3 / Adobe RGB 需自备 .icc 放到 %LOCALAPPDATA%\\screenguard_icc｜变更显示器色彩配置需管理员权限';
     if (hdrNote) hdrNote.innerHTML = '⚠️ <b>HDR 状态可读取；本机切换请求被厂商服务接管且系统拒绝应用</b>（错误 87 / AsHDRControl）。请通过「设置 → 系统 → 显示 → HDR」或华硕工具切换。';
+    if (restoreNote) restoreNote.innerHTML = '覆盖范围：总亮度（回到原始曲线）、HDR、色彩配置、被铺满的窗口、屏幕电源、音量 —— 全部回到<b>软件启动时</b>的状态（启动时会自动存一份「基线」，所以乱调之后总能一键回到好的状态）。<b>硬件层面的设置不受影响</b>（显示器自己的亮度/音量、KVM 都不动）。';
   } else if (p === 'linux') {
     matchMac.disabled = true;
     matchMac.title = 'Linux 版暂未实现';
