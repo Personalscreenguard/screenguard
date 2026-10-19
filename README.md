@@ -30,7 +30,7 @@
 
 ## 依赖
 
-- **用户安装项**：macOS 与 Windows 用户只需下载并安装 Screenguard；无需另行安装 BetterDisplay、displayplacer 或其他显示器控制软件。
+- **用户安装项**：核心显示器控制无需另行安装 BetterDisplay、displayplacer 或其他显示器控制软件。注意：当前 PR 的 CI 安装包是验收构建，不是可直接面向普通用户发布的签名包；本轮 macOS App 为 ad-hoc 签名且 Gatekeeper 实测拒绝，Windows 安装器没有 Authenticode 签名。正式分发前仍需完成相应平台签名（macOS 还需公证）。
 - **macOS 随包组件**：MIT 许可的 `displayplacer` 布局工具在构建时按架构下载并校验，随 Screenguard 安装包分发。显示器枚举、DDC/CI 和色彩控制走应用内组件或 macOS 系统 API。DDC 能力取决于显示器和连接链路。任意窗口跨屏首次使用需在“系统设置 → 隐私与安全性 → 辅助功能”允许 Screenguard 控制窗口；如窗口标题无法读取，检查“屏幕与系统音频录制”权限。
 - **Windows 随包/系统组件**：DDC 走 Windows 自带的 `dxva2.dll`，不需要另装显示器控制软件。NSIS 安装包包含 WebView2 引导程序；若电脑缺少 WebView2，安装器会联网自动安装运行时。离线电脑只有在已具备 WebView2 时才能完成首次安装启动。
 - **可选联网显示器功能**：连接支持网络调试的显示器时，Screenguard 可在用户主动选择后从 Google 获取 Android Platform-Tools（ADB），存放在应用数据目录中；无需用户自行寻找或安装 ADB。该功能需要网络，并按界面提示确认 Google SDK 条款，不影响普通显示器控制功能。
