@@ -648,7 +648,9 @@ loadGamma();
   const el = document.getElementById('hk-note');
   try {
     const hk = await invoke('hotkey_start');
-    el.innerHTML = `全局快捷键：<span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">${hk}</span> 切换「全部屏幕待机 / 唤醒」 ｜ <span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">Ctrl+Alt+R</span> 还原被铺满的窗口（铺满后界面被盖住也能用）`;
+    const platform = await invoke('get_platform');
+    const restoreKey = platform === 'macos' ? 'Control+Option+R' : 'Ctrl+Alt+R';
+    el.innerHTML = `全局快捷键：<span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">${hk}</span> 切换「全部屏幕待机 / 唤醒」 ｜ <span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">${restoreKey}</span> 还原被铺满的窗口（铺满后界面被盖住也能用）`;
   } catch (e) { el.textContent = '全局快捷键：' + errText(e); }
 })();
 
