@@ -40,11 +40,11 @@
       </div>
     </section>
 
-    <!-- BetterDisplay 风格的 macOS 高级显示控制，命令由本机 BetterDisplay CLI 执行。 -->
+    <!-- 使用 macOS CoreGraphics 与 Screenguard 内置 DDC/CI 实现。 -->
     <section class="card" id="betterdisplay-card" style="display:none">
       <div class="card-head">
         <h2>🧰 高级显示器控制</h2>
-        <span class="hint">BetterDisplay 集成</span>
+        <span class="hint">Screenguard 内置控制</span>
       </div>
       <div class="color-row">
         <label for="bd-source">操作屏幕</label>
@@ -96,7 +96,7 @@
         <button class="ghost" data-bd-action="connect-on">重新连接所选屏</button>
         <button class="ghost" data-bd-action="connect-off">断开所选屏</button>
       </div>
-      <div class="hint" id="bd-hint">镜像、画中画、串流与虚拟屏由 BetterDisplay CLI 执行；部分功能需要 BetterDisplay Pro。排列与 HDR 命令会直接改变显示设置，请确认所选屏幕。输入源代码由显示器型号决定（常见 VCP 0x60）。</div>
+      <div class="hint" id="bd-hint">主屏、镜像、排列与标准 DDC/CI 输入源由 Screenguard 控制。可用功能取决于 macOS、显示器和连接链路。</div>
     </section>
 
     <!-- ===== 屏幕电源 ===== -->
@@ -112,7 +112,7 @@
       <div class="btn-row">
         <button class="ghost" id="power-link-btn" aria-pressed="false">🔗 电源联动：关</button>
       </div>
-      <div class="hint" id="pw-note">一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。开启电源联动后需保持 Screenguard 运行。Windows 按 DDC/CI VCP 0xD6 同步；macOS 原生后台服务优先经 BetterDisplay 读取/设置 VCP 0xD6，并以显示器断开/重连事件兜底。具体效果取决于显示器和连接链路是否支持 DDC；不支持时不能检测物理关屏状态。</div>
+      <div class="hint" id="pw-note">一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。开启电源联动后需保持 Screenguard 运行。Windows 与 macOS 都由应用直接读写 DDC/CI VCP 0xD6；具体效果取决于显示器和连接链路是否支持 DDC，不支持时不能检测物理关屏状态。</div>
       <div class="hint" id="hk-note" style="margin-top:6px">全局快捷键：读取中…</div>
     </section>
 

@@ -116,7 +116,7 @@
   <div style="padding:0 8px">
     <div class="grp" id="bdp-grp" style="display:none">
       <div class="grp-h" id="bdp-head" role="button" tabindex="0" aria-expanded="false">
-        <div><div class="grp-title">🧰 BetterDisplay 控制</div><div class="grp-meta">镜像 · 排列 · 画中画 · 虚拟屏</div></div>
+        <div><div class="grp-title">🧰 Screenguard 显示控制</div><div class="grp-meta">主屏 · 镜像 · 排列 · DDC 输入源</div></div>
         <div class="grp-right"><span class="badge">macOS</span><span id="bdp-caret">▸</span></div>
       </div>
       <div class="grp-body">
@@ -162,11 +162,11 @@
           <button class="ibtn" data-bdp-action="connect-off">断开所选屏</button>
         </div>
         <div class="srow" style="grid-template-columns:72px minmax(0,1fr) auto;gap:6px">
-          <label for="bdp-input-code">输入源码</label>
+          <label for="bdp-input-code">输入源代码</label>
           <input id="bdp-input-code" inputmode="numeric" placeholder="VCP 代码 1–255">
           <button class="ibtn" data-bdp-action="input-source">切换</button>
         </div>
-        <div class="hint" id="bdp-hint">需要 BetterDisplay 正在运行并启用 CLI 集成；PIP/串流等部分能力需要 Pro。断开操作保留虚拟屏配置。</div>
+        <div class="hint" id="bdp-hint">由 Screenguard 内置控制；画中画、串流、虚拟屏、HDR 与配置保护目前不支持。DDC 功能取决于显示器和连接链路。</div>
       </div>
     </div>
   </div>
@@ -333,9 +333,9 @@ function setupBetterDisplayPanel(){
       }
       const previousDisabled = button.disabled;
       button.disabled = true;
-      bdpSetHint('正在执行 BetterDisplay 操作…');
+      bdpSetHint('正在执行显示控制操作…');
       try {
-        const result = await invoke('betterdisplay_action', {
+        const result = await invoke('display_action', {
           action,
           displayId: source.value,
           targetId: target.value || null,
@@ -915,7 +915,7 @@ async function linkTick(){
     if (link.last === null) {
       link.last = sample;
       if (!sample.power.size && link.platform !== 'macos') {
-        pwHint('联动已开启，但目前无法读取显示器电源状态；检查 BetterDisplay CLI 集成。', true);
+        pwHint('联动已开启，但目前无法读取显示器电源状态；检查显示器 OSD 中的 DDC/CI 设置和连接链路。', true);
       }
       return;
     }
@@ -1051,9 +1051,9 @@ async function startLink(){
   if (link.platform === 'macos') {
     const unreadable = initial.unreadable.length;
     if (unreadable) {
-      pwHint('联动已开启，但当前有 '+unreadable+' 台屏幕读不到 DDC VCP 0xD6。请启动 BetterDisplay，在 Settings > Application > Integration 开启 CLI access 和 notification based integration，并确认该屏的 DDC Control 已开启。否则只能检测 macOS 显示器断开/重连；物理关屏后若仍留在系统显示器列表中，macOS 无法识别其电源状态。', true);
+      pwHint('联动已开启，但当前有 '+unreadable+' 台屏幕读不到 DDC VCP 0xD6。请检查显示器 OSD 的 DDC/CI 设置与连接链路。否则只能检测 macOS 显示器断开/重连；物理关屏后若仍留在系统显示器列表中，macOS 无法识别其电源状态。', true);
     } else {
-      pwHint('联动已开启：当前显示器可读取 BetterDisplay DDC VCP 0xD6。请保持 Screenguard 和 BetterDisplay 运行；显示器是否响应电源命令仍取决于 DDC/CI 和连接链路。');
+      pwHint('联动已开启：当前显示器可读取 DDC VCP 0xD6。请保持 Screenguard 运行；显示器是否响应电源命令仍取决于 DDC/CI 和连接链路。');
     }
     return;
   }
@@ -1108,7 +1108,20 @@ invoke('get_platform').then(p=>{
   link.platform = p;
   link.supported = p === 'windows' || p === 'macos';
   const betterDisplayGroup = document.getElementById('bdp-grp');
-  if (betterDisplayGroup) betterDisplayGroup.style.display = p === 'macos' ? '' : 'none';
+  if (betterDisplayGroup) {
+    betterDisplayGroup.style.display = p === 'macos' ? '' : 'none';
+    if (p === 'macos') {
+      const unsupported = new Set([
+        'pip-on','pip-off','stream-on','stream-off','hdr-on','hdr-off',
+        'protect-resolution-on','protect-resolution-off','protect-refresh-on','protect-refresh-off',
+        'protect-rotation-on','protect-rotation-off','connect-on','connect-off',
+        'protect-main-on','protect-main-off','virtual-16-9','virtual-21-9'
+      ]);
+      document.querySelectorAll('#bdp-grp [data-bdp-action]').forEach(button => {
+        if (unsupported.has(button.dataset.bdpAction)) button.hidden = true;
+      });
+    }
+  }
   setupBetterDisplayPanel();
   if (!link.supported) {
     const linkEl = document.getElementById('cell-link');
@@ -1118,7 +1131,7 @@ invoke('get_platform').then(p=>{
   } else {
     const linkEl = document.getElementById('cell-link');
     linkEl.title = p === 'macos'
-      ? '原生后台服务优先读取 BetterDisplay DDC VCP 0xD6；失败时回退到系统显示器断开/重连事件'
+      ? 'Screenguard 直接读取 DDC VCP 0xD6；失败时回退到系统显示器断开/重连事件'
       : '显示器需支持 DDC/CI VCP 0xD6 电源控制';
     invoke('get_power_link_preference').then(enabled=>{
       localStorage.setItem(LINK_KEY, enabled ? '1' : '0');

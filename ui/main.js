@@ -188,7 +188,7 @@ document.querySelectorAll('#betterdisplay-card [data-bd-action]').forEach(button
     button.disabled = true;
     hint.textContent = '正在执行…';
     try {
-      const result = await invoke('betterdisplay_action', {
+      const result = await invoke('display_action', {
         action,
         displayId: source.value,
         targetId: target.value || null,
@@ -480,8 +480,24 @@ function applyPlatformCopy(p) {
     if (hdrNote) hdrNote.textContent = 'Linux 版 HDR 与显示器色彩控制暂未实现。';
   } else {
     matchMac.title = '外接屏对齐 Mac 内建屏（Display P3）';
-    if (note) note.textContent = '使用 macOS ColorSync 配置文件对齐色彩空间；深度校准仍需硬件校色仪（DisplayCAL）。';
-    if (hdrNote) hdrNote.innerHTML = 'macOS 的 HDR 请求通过 BetterDisplay CLI 发送；是否生效取决于显示器、BetterDisplay 集成状态与授权。执行后请检查系统 HDR 状态。';
+    const applyColor = document.getElementById('apply-color');
+    if (applyColor) { applyColor.disabled = false; applyColor.title = '通过 macOS ColorSync 设置系统显示器配置'; }
+    matchMac.disabled = false;
+    if (note) note.textContent = '通过 macOS ColorSync 设置系统显示器配置；可用配置取决于系统配置文件库。当前系统没有 ProPhoto RGB 配置文件；深度校准仍需硬件校色仪。';
+    if (hdrNote) hdrNote.textContent = 'HDR 状态和切换由 macOS 与显示器驱动管理；Screenguard 暂不提供该控制。';
+    const bdHint = document.getElementById('bd-hint');
+    if (bdHint) bdHint.textContent = '此处由 Screenguard 原生控制显示器排列、主屏、镜像与标准 DDC/CI 输入源。画中画、串流、虚拟屏、HDR 和配置保护目前不在 macOS 支持范围。DDC 是否有效取决于显示器和连接链路。';
+    const unsupported = new Set([
+      'pip-on','pip-off','stream-on','stream-off','hdr-on','hdr-off',
+      'protect-resolution-on','protect-resolution-off','protect-refresh-on','protect-refresh-off',
+      'protect-rotation-on','protect-rotation-off','connect-on','connect-off',
+      'protect-main-on','protect-main-off','virtual-16-9','virtual-21-9'
+    ]);
+    document.querySelectorAll('#betterdisplay-card [data-bd-action]').forEach(button => {
+      if (unsupported.has(button.dataset.bdAction)) button.hidden = true;
+    });
+    const powerNote = document.getElementById('pw-note');
+    if (powerNote) powerNote.textContent = '一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。电源联动由 Screenguard 内置 DDC/CI 实现，显示器或连接链路不支持时，不能检测物理关屏状态。';
   }
 }
 

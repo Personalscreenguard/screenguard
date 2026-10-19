@@ -9,17 +9,17 @@
 | 模块 | 说明 | macOS | Windows | Linux |
 |---|---|---|---|---|
 | 显示器列表 | 分辨率/刷新率/主副屏/DDC 能力；macOS 可切换显示模式并回读核验 | ✅ | ✅ | 🟡（部分） |
-| BetterDisplay 菜单控制 | macOS：主屏、镜像、排列、HDR、输入源、画中画、串流、配置保护与虚拟屏；依赖 BetterDisplay CLI，部分需 Pro | ✅（部分受硬件/Pro限制） | — | — |
+| 高级显示控制 | macOS：主屏、镜像、排列、标准 DDC/CI 输入源；主屏/镜像使用 CoreGraphics，布局工具随安装包分发 | ✅（取决于 macOS 与显示器） | — | — |
 | 屏幕电源 | 全部待机/唤醒（macOS 使用 pmset / caffeinate；Windows 使用系统显示器电源控制） | ✅ | ✅ | ⏳ |
-| 亮度/音量 DDC | 滑块实时控制（需硬件支持 DDC/CI） | ✅ | ✅ | ✅ |
-| 色彩同步 | 一键把全部屏对齐 sRGB / Display P3 / Adobe RGB | ✅ | ✅（P3/Adobe 需自备 .icc） | ⏳ |
-| 对齐色彩 | macOS：外接屏对齐内建屏（Display P3）；Windows：其余屏对齐主屏当前 ICC | ✅ | ✅ | ⏳ |
+| 亮度/音量 DDC | 滑块实时控制（需硬件支持 DDC/CI） | 🟡（Apple Silicon 使用私有 IOKit 接口，需实机及分发审核） | ✅ | ✅ |
+| 色彩同步 | 一键通过系统配置文件设置全部屏色彩空间 | ✅（macOS ColorSync） | ✅（P3/Adobe 需自备 .icc） | ⏳ |
+| 对齐色彩 | macOS：外接屏对齐内建屏 Display P3；Windows：其余屏对齐主屏 ICC | ✅ | ✅ | ⏳ |
 | 窗口跨屏等大 | 副屏对齐 2x 逻辑档，窗口拖动不变小（**不会**降 4K 物理分辨率） | ✅ | ✅（诊断+指引） | ⏳ |
 | 副屏横竖切换 | 一键旋转/恢复（按真实布局动态计算，无硬编码） | ✅ | ✅ | ⏳ |
 | 双屏铺满 | macOS/Windows 可选择应用窗口或当前前台窗口跨屏铺满并可还原；macOS 需授权辅助功能 | ✅（需 macOS 辅助功能/自动化权限） | ✅（PotPlayer/VLC/任意窗口） | ⏳ |
 | 电源联动 | 主窗口和菜单栏共用持久化开关；Windows/macOS 使用 Rust 原生后台监测，不依赖隐藏面板定时器；需应用运行 | 🟡（物理关屏若仍留在系统显示列表且 DDC 不可读则无法检测） | ✅（DDC/CI VCP 0xD6） | ⏳ |
 | 电池状态 | macOS 读取内置电池电量/电源状态；Windows 枚举内置及可识别的外设电池 | ✅（内置电池） | ✅ | ⏳ |
-| ADB 联网增强 | 通过 Android Platform-Tools 连接支持网络调试的显示器并发送电源/音量命令 | ✅（官方 macOS 包） | ✅（自动下载） | ⏳ |
+| ADB 联网增强 | 通过 Android Platform-Tools 连接支持网络调试的显示器并发送电源/音量命令 | ✅（应用内获取官方工具） | ✅（应用内获取） | ⏳ |
 | 开机自启 | 面板开关直接管理（macOS LaunchAgent / Windows 注册表 / Linux autostart） | ✅ | ✅ | ✅ |
 
 | 显示器健康 | 链路异常检测（读事件日志）/ 一键修复（强制重协商）/ 自动修复 + 掉线提醒 | ⏳（当前版本明确显示不可用；Windows 事件日志未移植） | ✅ | ⏳ |
@@ -28,9 +28,15 @@
 
 ## 依赖
 
-- **macOS**：`displayplacer`（`brew install displayplacer`）、[BetterDisplay](https://betterdisplay.pro)（DDC 读写，需保持运行；电源联动还需在 Settings > Application > Integration 开启 CLI access 和 notification based integration，并启用目标屏的 DDC Control）；任意窗口跨屏首次使用需在“系统设置 → 隐私与安全性 → 辅助功能”允许 Screenguard 控制窗口；如窗口标题无法读取，检查“屏幕与系统音频录制”权限。
-- **Windows**：DDC 走系统 `dxva2.dll`（PowerShell 注入，无需额外软件）；VLC 可选
-- **Linux**：`ddcutil`（`apt install ddcutil`）；VLC 可选
+- **macOS**：显示器枚举、模式列表和 `displayplacer` 布局组件随 DMG 一起分发；标准 DDC/CI 由应用内 Rust 组件直接访问，不要求安装或运行 BetterDisplay。DDC 能力仍取决于显示器和连接链路是否支持。任意窗口跨屏首次使用需在“系统设置 → 隐私与安全性 → 辅助功能”允许 Screenguard 控制窗口；如窗口标题无法读取，检查“屏幕与系统音频录制”权限。
+- **Windows**：显示器控制使用 Windows 自带 API 和 PowerShell，不要求安装第三方显示器控制软件。
+- **可选 Android 显示器控制（ADB）**：仅网络调试显示器需要。用户可在 Screenguard 中按提示获取 Google Android Platform-Tools；macOS 下载前会显示 SDK 条款确认。工具保存在 Screenguard 用户数据目录中，不需要另行安装；不使用该可选功能不影响其他显示器控制。
+- **可选视频播放器**：VLC 或其他播放器只在播放/调用播放器专属控制时需要；跨屏铺满可作用于 Screenguard 支持的任意应用窗口。
+- **Linux**：不在当前支持目标内；Linux DDC 代码需要系统安装 `ddcutil`。
+
+Apple Silicon 上，当前 `ddc-macos` 组件通过 `IOAVService` 私有 IOKit 符号访问 DDC/CI。该路径已编译，但尚未在用户显示器上验收，也尚未完成正式分发审核；若审核不允许使用该接口，macOS DDC 硬件控制需从支持范围移除。当前本地 DMG 使用临时签名；公开下载分发还需 Developer ID 签名和 Apple 公证。
+
+macOS 安装包会携带 MIT 许可的 `displayplacer` 布局组件，构建时从上游固定版本下载并校验 SHA-256。macOS 的 DDC/CI 通过应用内 `ddc-macos` Rust 库实现；显示器或连接链路不支持 DDC 时，该硬件功能仍不可用。BetterDisplay 不再是运行依赖；macOS 色彩同步通过系统 ColorSync 设置显示器配置，当前不支持 HDR、画中画、串流、虚拟屏和配置保护。
 
 > 国内构建 Rust 依赖若直连 crates.io 失败，配置镜像：
 > ```toml
@@ -56,6 +62,7 @@ npm run build:linux    # Linux 打包
 产物：`src-tauri/target/release/bundle/`
 
 ## 版本历史
+- **v0.4.34**（2026-10-19）：Mac 版移除 BetterDisplay 运行依赖：DDC/CI 亮度、音量、电源状态与输入源由应用内 `ddc-macos` 直接访问；色彩配置通过系统 ColorSync API 设置；MIT 许可的 `displayplacer` v1.4.0 在构建时按芯片架构下载、SHA-256 校验并随 DMG 分发。macOS HDR、画中画、串流、虚拟屏与配置保护从当前支持范围停用；Windows 侧依赖路径不变。
 - **v0.4.33**（2026-10-16）：macOS 电源联动将 DDC 状态变化与系统显示器断开/重连事件统一为可测试的转换判断；同时出现多个显示器电源变化时不猜测来源，避免错误联动，并新增未知、单屏变化、并发变化及连接事件单测。
 - **v0.4.28**（2026-10-15）：拉取 Windows 端显示信号核验与跨屏窗口边界回读修正；macOS 端保留最新模式事务/回滚实现，并接入选定显示模式、BetterDisplay 控件及 VCP 0xD6 电源联动轮询。硬件 DDC 支持和实际跨屏显示仍需目标 Mac/显示器验收。
 - **v0.4.29**（2026-10-16）：macOS BetterDisplay DDC 电源读取和写入增加 6 秒超时，避免显示器无响应时阻塞原生联动线程；主窗口开始显示后台电源联动状态与错误。此改进提升可诊断性，不改变 macOS 对“不掉线且 DDC 不可读”的物理关屏检测边界。

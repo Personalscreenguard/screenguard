@@ -66,16 +66,16 @@ async fn set_display_mode(display_id: String, mode: u32) -> Result<String, Strin
         .map_err(|e| format!("后台任务失败：{}", e))?
 }
 
-/// 执行固定白名单内的 BetterDisplay 菜单操作。
+/// 执行固定白名单内的 macOS 原生显示控制操作。
 #[tauri::command]
-async fn betterdisplay_action(
+async fn display_action(
     action: String,
     display_id: String,
     target_id: Option<String>,
     value: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        platform::betterdisplay_action(&action, &display_id, target_id.as_deref(), value.as_deref())
+        platform::display_action(&action, &display_id, target_id.as_deref(), value.as_deref())
     })
     .await
     .map_err(|e| format!("后台任务失败：{}", e))?
@@ -1063,13 +1063,13 @@ fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
                         .to_string()
                 } else if readable == current.len() {
                     format!(
-                        "macOS 后台联动已启动；{}/{} 台显示器可读取 DDC 电源状态。请保持 Screenguard 和 BetterDisplay 运行。",
+                        "macOS 后台联动已启动；{}/{} 台显示器可读取 DDC 电源状态。请保持 Screenguard 运行。",
                         readable,
                         current.len(),
                     )
                 } else {
                     format!(
-                        "macOS 后台联动已启动；仅 {}/{} 台显示器可读取 DDC 电源状态。请启动 BetterDisplay，并在 设置 > Application > Integration 中开启 CLI access and notification based integration；同时检查显示器的 DDC Control。不可读的屏幕只能在 macOS 检测到断开/重连时联动；若物理关屏后仍留在显示器列表中，macOS 无法识别其关屏状态。",
+                        "macOS 后台联动已启动；仅 {}/{} 台显示器可读取 DDC 电源状态。请检查显示器 OSD 的 DDC/CI 设置和连接链路。不可读的屏幕只能在 macOS 检测到断开/重连时联动；若物理关屏后仍留在显示器列表中，macOS 无法识别其关屏状态。",
                         readable,
                         current.len(),
                     )
@@ -1488,7 +1488,7 @@ pub fn run() {
             get_displays,
             get_display_modes,
             set_display_mode,
-            betterdisplay_action,
+            display_action,
             set_brightness,
             set_volume,
             get_system_audio,
