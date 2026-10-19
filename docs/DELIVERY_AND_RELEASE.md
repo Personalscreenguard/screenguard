@@ -6,7 +6,13 @@
 
 本地当前 Apple Silicon DMG SHA-256 为 `260c1953eea0596cc5c377c78f3a6a968c0ad4e58dd65e32a4ad7ce94cc4b148`，`hdiutil verify` 为 VALID；App 深层 `codesign` 校验通过但签名为 ad-hoc、没有 Team ID，`spctl --assess` 明确返回 `rejected`。App 内的 arm64 `displayplacer` SHA-256 为 `0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0`，随包许可文件存在。仓库无 Apple 发布 secrets；本机唯一签名 identity 是自签名的 Smart Media Backup Developer，不是 Developer ID。正式 Mac 发布仍需账号所有者配置七项签名/公证 secrets。当前 PR CI 包是验收构建：Windows 安装器没有 Authenticode 签名，macOS App 未公证且 Gatekeeper 拒绝；不能称为普通用户可直接运行的正式发行包。
 
-Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。BetterDisplay 不再是运行依赖，主窗口和菜单栏已移除残留的 BetterDisplay 风格旧入口，只保留原生支持的显示操作；macOS HDR 等无法可靠替代的控制标为不支持。窗口跨屏不再提供要求 VLC/PotPlayer 的专用播放器入口；Linux 不在支持范围。Windows 的 WebView2 缺失时由 NSIS 安装程序引导安装，ADB Platform-Tools 只在用户使用兼容显示器联网增强时由应用内获取。上述代码和 CI 结果仍不代替真实设备验收、签名公证或正式发布。
+Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。BetterDisplay 不再是运行依赖，主窗口和菜单栏已移除残留的 BetterDisplay 风格旧入口，只保留原生支持的显示操作；macOS HDR 等无法可靠替代的控制标为不支持。窗口跨屏不再提供要求 VLC/PotPlayer 的专用播放器入口；Linux 不在支持范围。Windows 的 WebView2 离线运行时随 NSIS 包分发；ADB Platform-Tools 只在用户使用兼容显示器联网增强时由应用内获取。上述代码和 CI 结果仍不代替真实设备验收、签名公证或正式发布。
+
+### 单安装包收口（2026-10-19，待 CI 验证）
+
+- Windows NSIS 配置由 `embedBootstrapper` 切换为 WebView2 `offlineInstaller`，把 Evergreen 离线运行时安装器放进 Screenguard 安装包。首次安装不需要网络，也不要求用户预装 WebView2；预计安装包增加约 127 MB。该变化基于 [Tauri Windows Installer 文档](https://v2.tauri.app/distribute/windows-installer/)；具体包体与离线安装效果仍待本分支 CI 和 Windows 实机核验。
+- Windows tag 发布流程新增 Authenticode 签名步骤，要求 `WINDOWS_CERTIFICATE`（Base64 编码的 PFX）、`WINDOWS_CERTIFICATE_PASSWORD` 和 `WINDOWS_SIGNING_CERT_THUMBPRINT` 三项 GitHub Actions secrets。签名后验证证书指纹、签名链状态和可信时间戳；缺 secret、证书过期或验证失败时阻止 Draft Release 生成。
+- 该分支没有 Windows 代码签名证书，未运行 tag 发布。PR CI 的 Windows 验收包仍为未签名构建，用户 Windows 实机、离线安装与 SmartScreen 验收未完成。
 
 本文后续历史记录按当时日期与源码版本保留；不要把下方旧快照的状态误认为当前状态。
 
@@ -183,7 +189,7 @@ Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。B
 `.github/workflows/release.yml` 只处理 `v*` tag：
 
 1. tag 对应的版本必须与 `package.json`、`src-tauri/tauri.conf.json` 和 `Cargo.toml` 一致。
-2. macOS 运行仓库检查和 Rust 单测，导入 Developer ID Application 身份，构建 DMG 并对 App 签名，向 Apple 公证并装订票据，然后验证签名、Team ID、公证和 Gatekeeper；Windows 运行仓库检查、C# 桥接检查和 Rust 单测，构建 x64 NSIS 包。macOS 发布需预先配置本节列出的七项 GitHub Actions secrets。
+2. macOS 运行仓库检查和 Rust 单测，导入 Developer ID Application 身份，构建 DMG 并对 App 签名，向 Apple 公证并装订票据，然后验证签名、Team ID、公证和 Gatekeeper；Windows 运行仓库检查、C# 桥接检查和 Rust 单测，构建含 WebView2 离线运行时的 x64 NSIS 包、签名并验证 Authenticode 与时间戳。macOS 发布需预先配置七项 Apple GitHub Actions secrets；Windows 发布需配置 `WINDOWS_CERTIFICATE`、`WINDOWS_CERTIFICATE_PASSWORD`、`WINDOWS_SIGNING_CERT_THUMBPRINT`。
 3. 两个安装包均生成 SHA-256 文件。
 4. 仅当 tag 的提交已合入 `main` 且双平台构建成功时，自动创建或更新 GitHub Draft Release。
 5. Draft 不会自动公开。只有实机验收、升级/回滚检查均有证据后，维护者才可手动发布；macOS 的 Developer ID 签名、公证和 Gatekeeper 检查是 tag 构建的硬门槛。
