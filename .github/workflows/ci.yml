@@ -107,6 +107,17 @@ jobs:
         run: npm ci
       - name: 构建 Windows NSIS 安装包
         run: npm run build:win
+      - name: 确认离线 WebView2 运行时已打入安装包
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if ($installers.Count -ne 1) { throw "预期一个 NSIS 安装包，实际数量: $($installers.Count)" }
+          $size = (Get-Item $installers[0].FullName).Length
+          $minimum = [long](100MB)
+          if ($size -lt $minimum) {
+            throw "NSIS 包只有 $size bytes；低于 100 MiB，疑似未嵌入 WebView2 离线运行时"
+          }
+          Write-Host "NSIS 包大小 $size bytes；已满足离线 WebView2 运行时体积门槛。"
       - name: 静默安装与卸载 NSIS 包烟雾检查
         shell: pwsh
         run: |

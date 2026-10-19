@@ -12,6 +12,7 @@ Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。B
 
 - Windows NSIS 配置由 `embedBootstrapper` 切换为 WebView2 `offlineInstaller`，把 Evergreen 离线运行时安装器放进 Screenguard 安装包。首次安装不需要网络，也不要求用户预装 WebView2；Tauri 文档预估安装包增加约 127 MB。本分支 CI run [39211091245](https://github.com/Personalscreenguard/screenguard/actions/runs/39211091245) 六项全绿，Windows NSIS 构建、静默安装/卸载 smoke 通过。Windows artifact `12167718962` 的 GitHub 压缩包大小为 219,304,989 bytes（digest `52e4cd414fb2e347e3e360d3df46e4829e7f7922fd4c5804747820366789a7d2`）；由于大文件回读连接被重置，本轮没有核实归档内安装器的精确大小和运行时文件清单，首次离线安装仍需 Windows 实机验收。
 - Windows tag 发布流程新增 Authenticode 签名步骤，要求 `WINDOWS_CERTIFICATE`（Base64 编码的 PFX）、`WINDOWS_CERTIFICATE_PASSWORD` 和 `WINDOWS_SIGNING_CERT_THUMBPRINT` 三项 GitHub Actions secrets。签名后验证证书指纹、签名链状态和可信时间戳；缺 secret、证书过期或验证失败时阻止 Draft Release 生成。
+- 仓库自检现锁定 Windows Tauri 配置必须为 `offlineInstaller`；Windows CI 还会检查生成的 NSIS 安装器大于 100 MiB，作为 WebView2 离线运行时随包的回归门槛。此新门槛尚待下一轮 CI 验证。
 - 该分支没有 Windows 代码签名证书，未运行 tag 发布。PR CI 的 Windows 验收包仍为未签名构建，用户 Windows 实机、离线安装与 SmartScreen 验收未完成。
 
 本文后续历史记录按当时日期与源码版本保留；不要把下方旧快照的状态误认为当前状态。

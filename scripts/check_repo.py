@@ -60,9 +60,14 @@ def check_versions():
 
 
 def check_bundle_refs():
-    print("[2/4] tauri.conf.json 引用完整性")
+    print("[2/4] tauri.conf.json 引用与 Windows WebView2 打包模式")
     conf = json.load(open(os.path.join(ROOT, "src-tauri", "tauri.conf.json"), encoding="utf-8"))
     good = True
+    webview_mode = conf.get("bundle", {}).get("windows", {}).get("webviewInstallMode", {}).get("type")
+    if webview_mode != "offlineInstaller":
+        good = fail(f"Windows WebView2 必须使用 offlineInstaller，当前为: {webview_mode}") and good
+    else:
+        ok("Windows WebView2 离线安装器随 Screenguard 安装包分发")
     lic = conf.get("bundle", {}).get("licenseFile")
     if lic:
         p = os.path.normpath(os.path.join(ROOT, "src-tauri", lic))
