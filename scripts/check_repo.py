@@ -111,12 +111,22 @@ def check_single_app_dependencies():
     else:
         ok("arm64 与 x64 displayplacer 均固定 SHA-256")
 
-    macos = open(os.path.join(ROOT, "src-tauri", "src", "platform", "macos.rs"),
-                 encoding="utf-8").read().lower()
-    if "betterdisplay" in macos:
-        good = fail("macOS 运行代码重新出现 BetterDisplay 依赖字样，请确认无需外装软件") and good
+    runtime_roots = [os.path.join(ROOT, "src-tauri", "src"), UI]
+    runtime_files = []
+    for directory in runtime_roots:
+        for current, _, names in os.walk(directory):
+            runtime_files.extend(
+                os.path.join(current, name) for name in names
+                if name.endswith((".rs", ".js", ".html"))
+            )
+    references = [
+        os.path.relpath(path, ROOT) for path in runtime_files
+        if "betterdisplay" in open(path, encoding="utf-8").read().lower()
+    ]
+    if references:
+        good = fail("运行时代码重新出现 BetterDisplay 依赖字样: " + ", ".join(references)) and good
     else:
-        ok("macOS 平台运行代码未引用 BetterDisplay")
+        ok(f"已扫描 {len(runtime_files)} 个 Rust/前端运行时代码文件，未引用 BetterDisplay")
     return good
 
 
