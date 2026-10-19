@@ -2,9 +2,9 @@
 
 ## 发布策略更新（2026-10-20）
 
-桌面版不提交 App Store 或 Microsoft Store，采用免费网页下载；iPhone 端维持 PWA。按用户决定，不购买或配置 Apple Developer ID / Windows Authenticode 证书，也不做 Apple 公证（macOS Tauri 构建可能保留无开发者身份的本地 ad-hoc 签名）。GitHub Actions 不再要求任何 Apple/Windows 签名 secrets，也不创建临时签名钥匙串；`KEYCHAIN_PASSWORD` 原本只是 CI 临时钥匙串的解锁口令，在此策略下不需要。macOS 首次运行可能需要用户手动允许打开，Windows 可能出现未知发布者或 SmartScreen 提示。
+桌面版不提交 App Store 或 Microsoft Store，用户直接从公开的 GitHub Release 免费下载；iPhone 端维持 PWA。按用户决定，不购买或配置 Apple Developer ID / Windows Authenticode 证书，也不做 Apple 公证（macOS Tauri 构建可能保留无开发者身份的本地 ad-hoc 签名）。GitHub Actions 不再要求任何 Apple/Windows 签名 secrets，也不创建临时签名钥匙串；`KEYCHAIN_PASSWORD` 原本只是 CI 临时钥匙串的解锁口令，在此策略下不需要。macOS 首次运行可能需要用户手动允许打开，Windows 可能出现未知发布者或 SmartScreen 提示。
 
-网站目前没有在本工作流中配置自动上传目标；本工作流生成未签名的双平台安装包和 SHA-256 校验文件，并保存在 GitHub Draft Release。把附件链接接入实际网站仍是单独的发布步骤，需确认网站所在仓库/托管方式后完成。
+本工作流生成双平台安装包和 SHA-256 校验文件，放入 GitHub Draft Release；审核后由维护者发布，用户即可直接从 GitHub 下载，不需要另建或接入网站。
 
 ## 当前状态快照（2026-10-20，产品版本 0.4.47）
 
@@ -202,7 +202,7 @@
 2. macOS 运行仓库检查和 Rust 单测，构建无 Developer ID/公证 DMG 并校验镜像完整性；Windows 运行仓库检查、C# 桥接检查和 Rust 单测，构建含 WebView2 离线运行时且不做 Authenticode 签名的 x64 NSIS 包并进行静默安装/卸载 smoke。无需 Apple、Windows 签名 secrets。
 3. 两个安装包均生成 SHA-256 文件。
 4. 仅当 tag 的提交已合入 `main` 且双平台构建成功时，自动创建或更新 GitHub Draft Release。
-5. Draft 不会自动公开。只有实机验收、升级/回滚检查均有证据后，维护者才可手动发布。网站下载页需单独链接到已公开 Release 的安装包和 SHA-256 校验文件。
+5. Draft 不会自动公开。只有实机验收、升级/回滚检查均有证据后，维护者才可手动发布。用户从已公开的 GitHub Release 获取安装包和 SHA-256 校验文件。
 
 正式打 tag 前要先完成 PR 审核并合入 `main`，确认仓库版本字段一致，再创建 `vX.Y.Z` tag 并推送。不要在未合入 main 的 PR commit 上创建正式版本 tag；工作流会拒绝这种 tag。
 
