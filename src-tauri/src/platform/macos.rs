@@ -707,7 +707,7 @@ pub fn get_display_modes(display_id: &str) -> Result<Vec<DisplayMode>, String> {
         .find(|screen| screen.id == display_id && screen.enabled)
         .ok_or_else(|| "未找到该显示器；请刷新显示器列表".to_string())?;
     if screen.modes.is_empty() {
-        return Err("displayplacer 没有返回可用分辨率档位".into());
+        return Err("Screenguard 内置显示布局组件没有返回可用分辨率档位；请刷新显示器列表后重试".into());
     }
     Ok(screen
         .modes
@@ -1750,11 +1750,11 @@ fn mode_matches(actual: &Screen, wanted: &ScreenMode, degree: u32) -> bool {
 pub fn align_report() -> Result<String, String> {
     let screens = parse_screens();
     if screens.len() < 2 {
-        return Err("双屏对齐需要两块已连接显示器；请确认已安装 displayplacer".into());
+        return Err("双屏对齐需要两块已连接的显示器".into());
     }
     let (main, sec) = main_secondary(&screens)?;
     if main.modes.is_empty() || sec.modes.is_empty() {
-        return Err("displayplacer 没有提供可用模式列表；请更新 displayplacer 后重试".into());
+        return Err("Screenguard 内置显示布局组件没有提供可用模式列表；请刷新显示器列表后重试".into());
     }
     let common: std::collections::BTreeSet<u32> = main
         .modes
@@ -1783,14 +1783,14 @@ pub fn align_report() -> Result<String, String> {
 pub fn align_apply() -> Result<String, String> {
     let original = parse_screens();
     if original.len() < 2 {
-        return Err("双屏对齐需要两块已连接显示器；请确认已安装 displayplacer".into());
+        return Err("双屏对齐需要两块已连接的显示器".into());
     }
     let (main, sec) = main_secondary(&original)?;
     if main.modes.is_empty() || sec.modes.is_empty() {
-        return Err("displayplacer 未列出两屏可用模式，无法安全对齐；请更新 displayplacer".into());
+        return Err("内置显示布局组件未列出两屏可用模式，无法安全对齐；请重新安装 Screenguard 后重试".into());
     }
     if main.active_mode().is_none() || sec.active_mode().is_none() {
-        return Err("displayplacer 未能标记两屏当前模式，无法安全推算逻辑桌面尺寸；请更新 displayplacer 后重试".into());
+        return Err("内置显示布局组件无法识别两屏当前模式，无法安全计算桌面尺寸；请重新安装 Screenguard 后重试".into());
     }
     let side_by_side = main.ox + main.frame_w() as i32 <= sec.ox || sec.ox + sec.frame_w() as i32 <= main.ox;
     if !side_by_side {
@@ -2135,7 +2135,7 @@ fn union_or_primary(mode: u32) -> Result<(i32, i32, i32, i32), String> {
     }
     if mode == 1 {
         if screens.iter().any(|s| s.enabled && s.layout_mode().is_none()) {
-            return Err("无法识别当前显示模式的桌面尺寸；请更新 displayplacer 后重试，未调整窗口".into());
+            return Err("无法识别当前显示模式的桌面尺寸；请重新安装 Screenguard 后重试，未调整窗口".into());
         }
         let active: Vec<&Screen> = screens.iter().filter(|s| s.enabled).collect();
         let main = active.iter().copied().find(|s| s.main).ok_or("未找到主屏")?;
