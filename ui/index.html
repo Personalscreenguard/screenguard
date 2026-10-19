@@ -40,63 +40,37 @@
       </div>
     </section>
 
-    <!-- 使用 macOS CoreGraphics 与 Screenguard 内置 DDC/CI 实现。 -->
-    <section class="card" id="betterdisplay-card" style="display:none">
+    <!-- macOS 原生显示控制：仅展示有可靠实现的操作。 -->
+    <section class="card" id="native-display-card" style="display:none">
       <div class="card-head">
         <h2>🧰 高级显示器控制</h2>
         <span class="hint">Screenguard 内置控制</span>
       </div>
       <div class="color-row">
-        <label for="bd-source">操作屏幕</label>
-        <select id="bd-source"><option value="">读取中…</option></select>
+        <label for="nd-source">操作屏幕</label>
+        <select id="nd-source"><option value="">读取中…</option></select>
       </div>
       <div class="color-row">
-        <label for="bd-target">目标屏幕</label>
-        <select id="bd-target"><option value="">读取中…</option></select>
+        <label for="nd-target">目标屏幕</label>
+        <select id="nd-target"><option value="">读取中…</option></select>
       </div>
       <div class="btn-row">
-        <button class="ghost" data-bd-action="set-main">设为主屏</button>
-        <button class="ghost" data-bd-action="protect-main-on">保护主屏身份</button>
-        <button class="ghost" data-bd-action="protect-main-off">取消主屏保护</button>
-        <button class="ghost" data-bd-action="mirror-on">镜像到目标</button>
-        <button class="ghost" data-bd-action="mirror-off">停止镜像</button>
+        <button class="ghost" data-native-action="set-main">设为主屏</button>
+        <button class="ghost" data-native-action="mirror-on">镜像到目标</button>
+        <button class="ghost" data-native-action="mirror-off">停止镜像</button>
       </div>
       <div class="btn-row">
-        <button class="ghost" data-bd-action="place-left">排列到左侧</button>
-        <button class="ghost" data-bd-action="place-right">排列到右侧</button>
-        <button class="ghost" data-bd-action="place-above">排列到上方</button>
-        <button class="ghost" data-bd-action="place-below">排列到下方</button>
-      </div>
-      <div class="btn-row">
-        <button class="ghost" data-bd-action="pip-on">画中画到目标</button>
-        <button class="ghost" data-bd-action="pip-off">关闭画中画</button>
-        <button class="ghost" data-bd-action="stream-on">屏幕串流</button>
-        <button class="ghost" data-bd-action="stream-off">停止串流</button>
-      </div>
-      <div class="btn-row">
-        <button class="ghost" data-bd-action="hdr-on">开启 HDR</button>
-        <button class="ghost" data-bd-action="hdr-off">关闭 HDR</button>
-        <button class="ghost" data-bd-action="protect-resolution-on">保护分辨率</button>
-        <button class="ghost" data-bd-action="protect-resolution-off">取消保护</button>
-      </div>
-      <div class="btn-row">
-        <button class="ghost" data-bd-action="protect-refresh-on">保护刷新率</button>
-        <button class="ghost" data-bd-action="protect-refresh-off">取消刷新率保护</button>
-        <button class="ghost" data-bd-action="protect-rotation-on">保护旋转</button>
-        <button class="ghost" data-bd-action="protect-rotation-off">取消旋转保护</button>
+        <button class="ghost" data-native-action="place-left">排列到左侧</button>
+        <button class="ghost" data-native-action="place-right">排列到右侧</button>
+        <button class="ghost" data-native-action="place-above">排列到上方</button>
+        <button class="ghost" data-native-action="place-below">排列到下方</button>
       </div>
       <div class="color-row">
-        <label for="bd-input-code">输入源代码</label>
-        <input id="bd-input-code" inputmode="numeric" placeholder="显示器 VCP 代码" style="max-width:180px">
-        <button class="ghost" data-bd-action="input-source">切换输入源</button>
+        <label for="nd-input-code">输入源代码</label>
+        <input id="nd-input-code" inputmode="numeric" placeholder="显示器 VCP 代码" style="max-width:180px">
+        <button class="ghost" data-native-action="input-source">切换输入源</button>
       </div>
-      <div class="btn-row">
-        <button class="ghost" data-bd-action="virtual-16-9">创建并连接 16:9 虚拟屏</button>
-        <button class="ghost" data-bd-action="virtual-21-9">创建并连接 21:9 虚拟屏</button>
-        <button class="ghost" data-bd-action="connect-on">重新连接所选屏</button>
-        <button class="ghost" data-bd-action="connect-off">断开所选屏</button>
-      </div>
-      <div class="hint" id="bd-hint">主屏、镜像、排列与标准 DDC/CI 输入源由 Screenguard 控制。可用功能取决于 macOS、显示器和连接链路。</div>
+      <div class="hint" id="nd-hint">使用 macOS 系统显示 API 与 DDC/CI；镜像和输入源取决于系统、显示器及连接链路。</div>
     </section>
 
     <!-- ===== 屏幕电源 ===== -->
@@ -186,7 +160,7 @@
       </div>
       <div class="btn-row">
         <button class="ghost" id="bri-sync">☀️ 亮度同步（各屏取齐）</button>
-        <button class="ghost" id="hdr-sync">🌈 HDR：读取中…</button>
+        <button class="ghost" id="hdr-sync" disabled>🌈 HDR：读取中…</button>
       </div>
       <div class="calib-note" id="color-note">支持 8 种目标色彩空间（sRGB / P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto / 灰度）｜Windows 只自带 sRGB，其它需把 .icc 放进 %LOCALAPPDATA%\screenguard_icc\（按文件名自动识别）｜深度校准仍需硬件校色仪（DisplayCAL）</div>
       <div class="hint" id="hdr-note">⚠️ <b>HDR 按钮是「读取并显示当前状态」</b>（开 / 关 / 混合）。本机实测：切换指令能发出，但系统拒绝 Apply（错误 87），HDR 被厂商服务 <b>AsHDRControl</b> 接管 —— 所以点它<b>不会真的改变</b> HDR，要改请用「设置 → 系统 → 显示 → HDR」或华硕工具。「色彩空间」若和目标本来就一致（例如两块屏都是 sRGB），也不会有视觉变化，这是正常的。</div>

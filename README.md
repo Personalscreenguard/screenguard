@@ -57,7 +57,7 @@ npm run build:win      # Windows 打包（需对应 target）
 产物：`src-tauri/target/release/bundle/`
 
 ## 版本历史
-- **v0.4.47**（2026-10-19）：Mac 版移除 BetterDisplay 运行依赖。DDC/CI 亮度、音量、电源状态和输入源改由应用内 Rust 组件直接访问；ColorSync 使用 macOS 系统 API；MIT 许可的 `displayplacer` v1.4.0 在构建时按架构下载、校验并随 DMG 分发。停用当前没有可靠原生实现的 HDR、画中画、串流、虚拟屏及配置保护功能；窗口跨屏使用 Screenguard 自身能力，无需额外播放器。Windows 端依赖路径保持不变。
+- **v0.4.47**（2026-10-19）：Mac 版移除 BetterDisplay 运行依赖。DDC/CI 亮度、音量、电源状态和输入源改由应用内 Rust 组件直接访问；ColorSync 使用 macOS 系统 API；MIT 许可的 `displayplacer` v1.4.0 在构建时按架构下载、校验并随 DMG 分发。停用当前没有可靠原生实现的 HDR、画中画、串流、虚拟屏及配置保护功能，并从主窗口和菜单栏移除这些旧入口；只保留原生支持的主屏、镜像、排列和输入源控制。窗口跨屏使用 Screenguard 自身能力，无需额外播放器。Windows 端依赖路径保持不变。
 - **v0.4.46**（2026-10-17）：修正主窗口电源联动开关提示，说明 macOS 同时监测 DDC、Quartz 睡眠和显示器连接变化，并明确物理关屏没有产生系统可见状态变化时无法检测。
 - **v0.4.45**（2026-10-17）：修复 macOS 窗口铺满还原时上层命令无条件二次还原显示布局的问题；macOS 只在本次铺满确实调整过屏幕模式时回滚布局，Windows 保持原来的窗口与模式还原流程。
 - **v0.4.44**（2026-10-17）：Mac 电源诊断同时显示联动开关、Quartz 逐屏睡眠状态和 DDC VCP 0xD6 只读结果，便于区分传感器不可读与联动未开启。

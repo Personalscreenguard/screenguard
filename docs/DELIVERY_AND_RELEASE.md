@@ -2,9 +2,9 @@
 
 ## 当前状态快照（2026-10-19，源码版本 0.4.47）
 
-当前工作分支 `codex/screenguard-single-app` 对应 Draft PR #3，head `a46ef65e7ca9d3e987e9db673b72593644a36b24`。CI run [39201683225](https://github.com/Personalscreenguard/screenguard/actions/runs/39201683225) 六个 job 全部成功，包含 Windows NSIS 静默安装/卸载 smoke 和 macOS ARM/Intel DMG 构建。实际下载并挂载检查两个干净 runner DMG 后，arm64 helper SHA-256 为 `0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0`，x86_64 helper SHA-256 为 `13ec0351ed7849b22e945974f1d4ac91eca30b38b09ec962c497feb8297eac2b`，均与锁定值一致；两份 DMG 的 `hdiutil verify` 均为 VALID。旧 CI DMG 的遗漏根因是下载脚本没有接入构建流程；本轮已加 npm `prebuild`，并移除对用户自行安装版本的回退。
+当前工作分支 `codex/screenguard-single-app` 对应 Draft PR #3。功能代码 head `a46ef65e7ca9d3e987e9db673b72593644a36b24` 的 CI run [39201683225](https://github.com/Personalscreenguard/screenguard/actions/runs/39201683225) 六个 job 全部成功，包含 Windows NSIS 静默安装/卸载 smoke 和 macOS ARM/Intel DMG 构建。实际下载并挂载检查两个干净 runner DMG 后，arm64 helper SHA-256 为 `0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0`，x86_64 helper SHA-256 为 `13ec0351ed7849b22e945974f1d4ac91eca30b38b09ec962c497feb8297eac2b`，均与锁定值一致；两份 DMG 的 `hdiutil verify` 均为 VALID。文档 head `438a9f84abf988c2eacedf61831bf206b533257f` 的 CI run `39202482407` 也已全绿。本轮随后清理了主窗口/菜单栏残留的 BetterDisplay 风格控件并禁用 macOS HDR 按钮，本机 Apple Silicon Release/DMG 构建成功；这批 UI 修改的干净 runner CI 待推送后核验。旧 CI DMG 的遗漏根因是下载脚本没有接入构建流程；现已加 npm `prebuild`，并移除对用户自行安装版本的回退。
 
-Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。BetterDisplay 不再是运行依赖；窗口跨屏不再提供要求 VLC/PotPlayer 的专用播放器入口；Linux 不在支持范围。Windows 的 WebView2 缺失时由 NSIS 安装程序引导安装，ADB Platform-Tools 只在用户使用兼容显示器联网增强时由应用内获取。上述代码和 CI 结果仍不代替真实设备验收、签名公证或正式发布。
+Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。BetterDisplay 不再是运行依赖，主窗口和菜单栏已移除残留的 BetterDisplay 风格旧入口，只保留原生支持的显示操作；macOS HDR 等无法可靠替代的控制标为不支持。窗口跨屏不再提供要求 VLC/PotPlayer 的专用播放器入口；Linux 不在支持范围。Windows 的 WebView2 缺失时由 NSIS 安装程序引导安装，ADB Platform-Tools 只在用户使用兼容显示器联网增强时由应用内获取。上述代码和 CI 结果仍不代替真实设备验收、签名公证或正式发布。
 
 本文后续历史记录按当时日期与源码版本保留；不要把下方旧快照的状态误认为当前状态。
 
