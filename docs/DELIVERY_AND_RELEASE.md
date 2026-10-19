@@ -2,7 +2,7 @@
 
 ## 当前状态快照（2026-10-19，源码版本 0.4.47）
 
-当前工作分支 `codex/screenguard-single-app` 对应 Draft PR #3。该分支上一轮 CI 的 Windows 构建/静默安装卸载 smoke、macOS ARM/Intel DMG 构建和跨平台 Rust 检查均通过，但随后对 ARM DMG 实际检查发现包内缺少 `displayplacer` 可执行文件（许可证文件存在）。本轮已将架构固定、SHA-256 校验的下载脚本接入 macOS npm 构建前置步骤，并移除对用户 Homebrew/MacPorts/PATH 中独立 `displayplacer` 的回退；修复后的干净 runner 包尚待新 CI 验证。
+当前工作分支 `codex/screenguard-single-app` 对应 Draft PR #3，head `a46ef65e7ca9d3e987e9db673b72593644a36b24`。CI run [39201683225](https://github.com/Personalscreenguard/screenguard/actions/runs/39201683225) 六个 job 全部成功，包含 Windows NSIS 静默安装/卸载 smoke 和 macOS ARM/Intel DMG 构建。实际下载并挂载检查两个干净 runner DMG 后，arm64 helper SHA-256 为 `0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0`，x86_64 helper SHA-256 为 `13ec0351ed7849b22e945974f1d4ac91eca30b38b09ec962c497feb8297eac2b`，均与锁定值一致；两份 DMG 的 `hdiutil verify` 均为 VALID。旧 CI DMG 的遗漏根因是下载脚本没有接入构建流程；本轮已加 npm `prebuild`，并移除对用户自行安装版本的回退。
 
 Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。BetterDisplay 不再是运行依赖；窗口跨屏不再提供要求 VLC/PotPlayer 的专用播放器入口；Linux 不在支持范围。Windows 的 WebView2 缺失时由 NSIS 安装程序引导安装，ADB Platform-Tools 只在用户使用兼容显示器联网增强时由应用内获取。上述代码和 CI 结果仍不代替真实设备验收、签名公证或正式发布。
 
@@ -12,8 +12,8 @@ Screenguard 的产品目标是 macOS 与 Windows 用户只安装 Screenguard。B
 
 | 平台 | 当前目标 | 最近自动化证据 | 尚缺证据 |
 |---|---|---|---|
-| Windows x64 | Screenguard NSIS 安装包 | PR #3 上一轮 CI：Rust 检查/测试、NSIS 构建、runner 静默安装卸载 smoke 通过 | 修复后重跑 CI；用户 Windows 实机安装、启动与功能验收；签名状态确认 |
-| macOS Apple Silicon / Intel | Screenguard DMG | PR #3 上一轮两种架构均构建成功；DMG 内容检查发现布局二进制遗漏，本轮已修复构建钩子，待重跑 CI | 修复后确认两架构 DMG 均含正确架构二进制；Mac 实机回归；Developer ID 签名与公证 |
+| Windows x64 | Screenguard NSIS 安装包 | CI run `39201683225`：Rust 检查/测试、NSIS 构建、runner 静默安装卸载 smoke 均通过；安装包 SHA-256 `0383f78c9623b71ce59e61ddefd515e026a6b6314b1266ca126a366a419ccb6e` | 用户 Windows 实机安装、启动与功能验收；签名状态确认 |
+| macOS Apple Silicon / Intel | Screenguard DMG | CI run `39201683225`：ARM/Intel 构建成功、DMG 均 VALID，且 helper 文件/架构/锁定哈希均已实包核验 | Mac 外接显示器回归；Developer ID 签名与公证 |
 
 历史发布记录：下方条目保留当时证据，不自动继承为当前版本结论。
 
