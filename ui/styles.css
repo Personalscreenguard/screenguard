@@ -108,6 +108,15 @@ body {
   gap: 10px;
   margin-top: 6px;
 }
+.slider-row.mode-row { grid-template-columns: 90px minmax(0, 1fr) 46px; }
+.display-mode-select {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.display-mode-select:disabled { opacity: .65; }
 .slider-row label { font-size: 12px; color: var(--text-dim); }
 .slider-row input[type=range] {
   -webkit-appearance: none;

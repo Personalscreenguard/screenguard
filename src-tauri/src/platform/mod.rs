@@ -21,6 +21,17 @@ pub struct DisplayInfo {
     pub ddc_id: Option<u32>,
 }
 
+/// macOS 当前旋转方向可用的显示模式。
+#[derive(Serialize, Clone, Debug)]
+pub struct DisplayMode {
+    pub mode: u32,
+    pub resolution: String,
+    pub hz: u32,
+    pub color_depth: u32,
+    pub scaled: bool,
+    pub current: bool,
+}
+
 /// 通用命令运行器：返回 stdout（成功）或错误信息。
 ///
 /// 注意：不能只看退出码。PowerShell 的 `-Command` 只要脚本里产生过任何 ErrorRecord
@@ -83,23 +94,23 @@ pub struct SystemAudio {
     pub form_factor: u32,
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn get_system_audio() -> Result<SystemAudio, String> {
     Err("系统音量控制仅支持 Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_system_volume(_v: u32) -> Result<(), String> {
     Err("系统音量控制仅支持 Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_system_mute(_on: bool) -> Result<(), String> {
     Err("系统音量控制仅支持 Windows".to_string())
 }
 
 /// 带电池的连接设备（笔记本内电池 / USB·2.4G 无线键鼠 / 蓝牙耳机鼠标等）
-/// Windows 经 Battery 设备类枚举；结构体放共享层，非 Windows 由存根兜底
+/// Windows 枚举内置/外设电池；macOS 返回内置电池；结构体放共享层。
 #[derive(Serialize, Clone, Debug)]
 pub struct BatteryInfo {
     /// 设备名（注册表友好名，兜底电池栈设备名）
@@ -120,10 +131,9 @@ pub struct BatteryInfo {
     pub full_mwh: u32,
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
-    // macOS/Linux 的外设电量走 IOKit/upower，后续版本再做；先明确告知
-    Err("电池设备监控仅支持 Windows".to_string())
+    Err("Linux 电池设备监控尚未实现".to_string())
 }
 
 // ---------- 软件层总亮度 / HDR / 前台窗口铺满 / 全局快捷键（非 Windows 存根） ----------
@@ -150,7 +160,7 @@ pub fn hdr_set(_on: bool) -> Result<String, String> {
 
 #[cfg(target_os = "linux")]
 pub fn span_foreground(_mode: u32) -> Result<String, String> {
-    Err("窗口铺满仅支持 Windows/macOS".to_string())
+    Err("窗口铺满仅支持 macOS / Windows".to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -158,13 +168,13 @@ pub fn restore_foreground() -> Result<(), String> {
     Err("窗口铺满仅支持 Windows/macOS".to_string())
 }
 
-/// 全局快捷键：仅 Windows 用原生 RegisterHotKey 注册
-#[cfg(not(target_os = "windows"))]
+/// Linux 尚未实现全局快捷键；macOS / Windows 由各自平台模块提供。
+#[cfg(target_os = "linux")]
 pub fn hotkey_start() -> Result<String, String> {
-    Err("全局快捷键仅支持 Windows".to_string())
+    Err("全局快捷键暂不支持 Linux".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn hotkey_label() -> String {
     String::new()
 }
@@ -196,30 +206,30 @@ pub struct AudioEndpoint {
 
 #[cfg(target_os = "linux")]
 pub fn list_windows() -> Result<String, String> {
-    Err("窗口列表仅支持 Windows/macOS".to_string())
+    Err("窗口列表仅支持 macOS / Windows".to_string())
 }
 
 #[cfg(target_os = "linux")]
 pub fn span_window(_hwnd: i64, _mode: u32) -> Result<String, String> {
-    Err("窗口铺满仅支持 Windows/macOS".to_string())
+    Err("窗口铺满仅支持 macOS / Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn audio_endpoints() -> Result<Vec<AudioEndpoint>, String> {
     Err("音频端点枚举仅支持 Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_audio_device(_id: &str) -> Result<(), String> {
     Err("音频端点选择仅支持 Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_system_volume_sel(_v: u32) -> Result<(), String> {
     Err("系统音量控制仅支持 Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_system_mute_sel(_on: bool) -> Result<(), String> {
     Err("系统静音控制仅支持 Windows".to_string())
 }
@@ -299,19 +309,19 @@ pub fn diag_log_path() -> String {
     String::new()
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn align_report() -> Result<String, String> {
-    Err("双屏对齐体检仅支持 Windows/macOS".to_string())
+    Err("当前平台暂不支持双屏对齐体检".to_string())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn align_apply() -> Result<String, String> {
-    Err("双屏对齐仅支持 Windows/macOS".to_string())
+    Err("当前平台暂不支持应用双屏对齐组合".to_string())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn align_restore_modes() -> Result<String, String> {
-    Err("显示布局还原仅支持 Windows/macOS".to_string())
+    Err("当前平台暂不支持还原双屏模式".to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -319,31 +329,48 @@ pub fn set_screen_inches(_manuf: &str, _inches: f64) -> Result<(), String> {
     Err("手动显示器物理尺寸设置暂不支持 Linux".to_string())
 }
 
-// ---------- 屏幕电源控制（方案A）：非 Windows 平台存根 ----------
-// macOS/Linux 可分别用 pmset displaysleepnow / xset dpms force off 实现，
-// 属后续版本；当前先明确告知，避免 UI 误以为可用。
+#[cfg(not(target_os = "macos"))]
+pub fn get_display_modes(_display_id: &str) -> Result<Vec<DisplayMode>, String> {
+    Err("当前平台暂不支持读取显示模式".to_string())
+}
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(target_os = "macos"))]
+pub fn set_display_mode(_display_id: &str, _mode: u32) -> Result<String, String> {
+    Err("当前平台暂不支持切换显示模式".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn betterdisplay_action(
+    _action: &str,
+    _display_id: &str,
+    _target_id: Option<&str>,
+    _value: Option<&str>,
+) -> Result<String, String> {
+    Err("BetterDisplay 集成控制目前仅支持 macOS".to_string())
+}
+
+// ---------- 屏幕电源控制 ----------
+#[cfg(target_os = "linux")]
 pub fn screen_off() -> Result<(), String> {
-    Err("屏幕待机控制暂仅支持 Windows".to_string())
+    Err("Linux 屏幕待机控制尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn screen_wake() -> Result<(), String> {
-    Err("屏幕唤醒暂仅支持 Windows".to_string())
+    Err("Linux 屏幕唤醒控制尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_display_power(_display_id: &str, _mode: u32) -> Result<(), String> {
-    Err("显示器电源模式控制暂仅支持 Windows".to_string())
+    Err("显示器电源模式控制暂仅支持 macOS / Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn get_display_power(_display_id: &str) -> Result<u32, String> {
-    Err("显示器电源模式控制暂仅支持 Windows".to_string())
+    Err("显示器电源模式控制暂仅支持 macOS / Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn display_snapshot() -> Vec<String> {
     Vec::new()
 }
@@ -376,39 +403,39 @@ pub struct AdbStatus {
     pub tip: String,
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn adb_status() -> AdbStatus {
     AdbStatus {
         available: false,
         path: String::new(),
         devices: Vec::new(),
-        tip: "ADB 联网控制仅支持 Windows".to_string(),
+        tip: "Linux 版 ADB 联网控制尚未实现".to_string(),
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn adb_connect(_addr: &str) -> Result<String, String> {
-    Err("ADB 联网控制仅支持 Windows".to_string())
+    Err("Linux 版 ADB 联网控制尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn adb_power(_serial: &str) -> Result<String, String> {
-    Err("ADB 联网控制仅支持 Windows".to_string())
+    Err("Linux 版 ADB 联网控制尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn adb_volume(_serial: &str, _up: bool) -> Result<String, String> {
-    Err("ADB 联网控制仅支持 Windows".to_string())
+    Err("Linux 版 ADB 联网控制尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn adb_shell(_serial: &str, _cmd: &str) -> Result<String, String> {
-    Err("ADB 联网控制仅支持 Windows".to_string())
+    Err("Linux 版 ADB 联网控制尚未实现".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn adb_download() -> Result<String, String> {
-    Err("ADB 联网控制仅支持 Windows".to_string())
+    Err("Linux 版 ADB 自动下载尚未实现".to_string())
 }
 
 #[cfg(target_os = "linux")]

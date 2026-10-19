@@ -50,6 +50,37 @@ async fn get_displays() -> Vec<DisplayInfo> {
         .unwrap_or_default()
 }
 
+/// 获取单屏可用分辨率与刷新率（macOS displayplacer）。
+#[tauri::command]
+async fn get_display_modes(display_id: String) -> Result<Vec<platform::DisplayMode>, String> {
+    tauri::async_runtime::spawn_blocking(move || platform::get_display_modes(&display_id))
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 切换单屏分辨率/刷新率，并回读验证；不匹配时恢复原显示配置。
+#[tauri::command]
+async fn set_display_mode(display_id: String, mode: u32) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || platform::set_display_mode(&display_id, mode))
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
+/// 执行固定白名单内的 BetterDisplay 菜单操作。
+#[tauri::command]
+async fn betterdisplay_action(
+    action: String,
+    display_id: String,
+    target_id: Option<String>,
+    value: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        platform::betterdisplay_action(&action, &display_id, target_id.as_deref(), value.as_deref())
+    })
+    .await
+    .map_err(|e| format!("后台任务失败：{}", e))?
+}
+
 #[tauri::command]
 async fn set_brightness(display_id: String, value: u32) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || platform::set_brightness(&display_id, value))
@@ -550,6 +581,76 @@ fn hide_panel(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Shared power-link preference for the main and menu-bar WebViews.
+/// WKWebView localStorage is not a reliable cross-window source of truth.
+#[tauri::command]
+fn get_power_link_preference(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri::Manager;
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法读取应用数据目录：{}", e))?
+        .join("power-link-enabled");
+    match std::fs::read_to_string(path) {
+        Ok(value) => Ok(value.trim() == "1"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("读取电源联动偏好失败：{}", error)),
+    }
+}
+
+/// Persist the shared power-link preference in the app data directory.
+#[tauri::command]
+fn set_power_link_preference(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri::Manager;
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法读取应用数据目录：{}", e))?;
+    std::fs::create_dir_all(&path).map_err(|e| format!("创建应用数据目录失败：{}", e))?;
+    std::fs::write(
+        path.join("power-link-enabled"),
+        if enabled { "1" } else { "0" },
+    )
+    .map_err(|e| format!("保存电源联动偏好失败：{}", e))?;
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.eval(&format!("window.applyPowerLinkUiState({})", enabled));
+    }
+    Ok(())
+}
+
+/// 从主窗口打开菜单栏控制面板，供主窗口里的电源联动开关显示运行状态。
+#[tauri::command]
+fn open_control_panel(app: tauri::AppHandle, power_link_enabled: bool) -> Result<(), String> {
+    use tauri::Manager;
+    let w = app
+        .get_webview_window("panel")
+        .ok_or_else(|| "控制面板窗口不可用".to_string())?;
+    if let Ok(Some(mon)) = w.primary_monitor() {
+        let pos = mon.position();
+        let size = mon.size();
+        let scale = mon.scale_factor();
+        let width = w
+            .outer_size()
+            .map(|s| s.width as i32)
+            .unwrap_or((382.0 * scale) as i32);
+        let gap = (10.0 * scale) as i32;
+        w.set_position(tauri::PhysicalPosition::new(
+            pos.x + size.width as i32 - width - gap,
+            pos.y + gap,
+        ))
+        .map_err(|e| format!("定位控制面板失败：{}", e))?;
+    }
+    w.show().map_err(|e| format!("打开控制面板失败：{}", e))?;
+    w.set_focus()
+        .map_err(|e| format!("聚焦控制面板失败：{}", e))?;
+    w.eval(&format!(
+        "window.applyPowerLinkPreference({})",
+        power_link_enabled
+    ))
+    .map_err(|e| format!("同步菜单栏电源联动状态失败：{}", e))?;
+    Ok(())
+}
+
 // ================= 显示器健康：自动修复 + 右下角气泡提醒 =================
 // 设计：后台线程每 45 秒查一次「设备突然离线」（事件 ID 1010）日志；
 // 发现新的显示器掉线 → 弹右下角小窗提醒；若开了自动修复且屏幕没自己回来，
@@ -577,7 +678,10 @@ pub(crate) fn health_cfg() -> HealthConfig {
     std::fs::read_to_string(health_cfg_path())
         .ok()
         .and_then(|s| serde_json::from_str::<HealthConfig>(&s).ok())
-        .unwrap_or(HealthConfig { auto_repair: false, notify: true })
+        .unwrap_or(HealthConfig {
+            auto_repair: false,
+            notify: true,
+        })
 }
 
 fn save_health_cfg(c: &HealthConfig) {
@@ -597,7 +701,10 @@ fn health_get_config() -> HealthConfig {
 
 #[tauri::command]
 fn health_set_config(auto_repair: bool, notify: bool) -> Result<(), String> {
-    save_health_cfg(&HealthConfig { auto_repair, notify });
+    save_health_cfg(&HealthConfig {
+        auto_repair,
+        notify,
+    });
     Ok(())
 }
 
@@ -616,7 +723,10 @@ fn notify_payload() -> &'static std::sync::Mutex<NotifyPayload> {
 
 #[tauri::command]
 fn get_notify_payload() -> NotifyPayload {
-    notify_payload().lock().map(|g| g.clone()).unwrap_or_default()
+    notify_payload()
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -768,7 +878,11 @@ fn spawn_health_watch(app: tauri::AppHandle) {
                         show_notify(
                             &app,
                             if ok { "🩺" } else { "❗" },
-                            if ok { "已自动修复显示配置" } else { "自动修复未成功" },
+                            if ok {
+                                "已自动修复显示配置"
+                            } else {
+                                "自动修复未成功"
+                            },
                             if ok {
                                 "检测到显示器没有自行恢复，已强制重新协商显示配置。若画面仍异常，可在面板点「深度修复」。"
                             } else {
@@ -778,6 +892,470 @@ fn spawn_health_watch(app: tauri::AppHandle) {
                     }
                 }
             }
+        }
+    });
+}
+
+/// macOS 电源联动使用原生后台轮询，不依赖隐藏菜单栏 WebView 的 JavaScript 定时器。
+/// macOS 优先用 DDC VCP 0xD6 检测单屏电源变化，无法读到时回退到连接/断开事件。
+#[cfg(any(target_os = "macos", test))]
+fn macos_power_transition(
+    previous_online: &[String],
+    current_online: &[String],
+    previous_power: &std::collections::HashMap<String, u32>,
+    current_power: &std::collections::HashMap<String, u32>,
+) -> Option<(String, &'static str)> {
+    let mut ddc_changes = Vec::new();
+    for (id, previous_mode) in previous_power {
+        let Some(current_mode) = current_power.get(id) else {
+            continue;
+        };
+        let direction = if *previous_mode == 1 && matches!(*current_mode, 2 | 4 | 5) {
+            Some("off")
+        } else if matches!(*previous_mode, 2 | 4 | 5) && *current_mode == 1 {
+            Some("on")
+        } else {
+            None
+        };
+        if let Some(direction) = direction {
+            ddc_changes.push((id.clone(), direction));
+        }
+    }
+
+    match ddc_changes.len() {
+        1 => return ddc_changes.pop(),
+        count if count > 1 => return None,
+        _ => {}
+    }
+
+    let removed = previous_online
+        .iter()
+        .any(|id| !current_online.contains(id));
+    let added = current_online
+        .iter()
+        .any(|id| !previous_online.contains(id));
+    match (removed, added) {
+        (true, false) => Some((String::new(), "off")),
+        (false, true) => Some((String::new(), "on")),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod macos_power_transition_tests {
+    use super::macos_power_transition;
+    use std::collections::HashMap;
+
+    fn readings(values: &[(&str, u32)]) -> HashMap<String, u32> {
+        values
+            .iter()
+            .map(|(id, mode)| ((*id).to_string(), *mode))
+            .collect()
+    }
+
+    fn ids(values: &[&str]) -> Vec<String> {
+        values.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    #[test]
+    fn detects_single_ddc_off_and_wake_transitions() {
+        let online = ids(&["main", "secondary"]);
+        let before = readings(&[("main", 1), ("secondary", 1)]);
+        let off = readings(&[("main", 4), ("secondary", 1)]);
+        let awake = readings(&[("main", 1), ("secondary", 1)]);
+
+        assert_eq!(
+            macos_power_transition(&online, &online, &before, &off),
+            Some(("main".into(), "off"))
+        );
+        assert_eq!(
+            macos_power_transition(&online, &online, &off, &awake),
+            Some(("main".into(), "on"))
+        );
+    }
+
+    #[test]
+    fn ignores_unreadable_and_ambiguous_ddc_changes() {
+        let online = ids(&["main", "secondary"]);
+        let before = readings(&[("main", 1), ("secondary", 1)]);
+        let unreadable = readings(&[("main", 1)]);
+        let conflicting_before = readings(&[("main", 1), ("secondary", 4)]);
+        let conflicting = readings(&[("main", 4), ("secondary", 1)]);
+        let two_changes = readings(&[("main", 4), ("secondary", 2)]);
+
+        assert_eq!(
+            macos_power_transition(&online, &online, &before, &unreadable),
+            None
+        );
+        assert_eq!(
+            macos_power_transition(&online, &online, &conflicting_before, &conflicting),
+            None
+        );
+        assert_eq!(
+            macos_power_transition(&online, &online, &before, &two_changes),
+            None
+        );
+    }
+
+    #[test]
+    fn uses_only_unambiguous_display_disconnect_or_reconnect_events() {
+        let power = HashMap::new();
+        let before = ids(&["main", "secondary"]);
+        assert_eq!(
+            macos_power_transition(&before, &ids(&["main"]), &power, &power),
+            Some((String::new(), "off"))
+        );
+        assert_eq!(
+            macos_power_transition(&ids(&["main"]), &before, &power, &power),
+            Some((String::new(), "on"))
+        );
+        assert_eq!(
+            macos_power_transition(&before, &ids(&["secondary", "new"]), &power, &power),
+            None
+        );
+    }
+}
+
+fn spawn_macos_power_link_watch(app: tauri::AppHandle) {
+    use std::collections::HashMap;
+    use std::time::Duration;
+    use tauri::{Emitter, Manager};
+
+    std::thread::spawn(move || {
+        let mut was_enabled = false;
+        let mut previous_online: Vec<String> = Vec::new();
+        let mut previous_power: HashMap<String, u32> = HashMap::new();
+        let mut pending: Option<(String, u8)> = None;
+
+        loop {
+            std::thread::sleep(Duration::from_millis(1200));
+
+            let enabled = app
+                .path()
+                .app_data_dir()
+                .ok()
+                .and_then(|path| std::fs::read_to_string(path.join("power-link-enabled")).ok())
+                .is_some_and(|value| value.trim() == "1");
+
+            if !enabled {
+                was_enabled = false;
+                previous_online.clear();
+                previous_power.clear();
+                pending = None;
+                continue;
+            }
+
+            let mut current = platform::display_snapshot();
+            current.sort();
+            if !was_enabled {
+                was_enabled = true;
+                previous_online = current.clone();
+                previous_power.clear();
+                for id in &current {
+                    if let Ok(mode) = platform::get_display_power(id) {
+                        previous_power.insert(id.clone(), mode);
+                    }
+                }
+                pending = None;
+                let readable = previous_power.len();
+                let status = if current.is_empty() {
+                    "macOS 电源联动已开启，但当前没有在线显示器；连接显示器后会自动开始检测。"
+                        .to_string()
+                } else if readable == current.len() {
+                    format!(
+                        "macOS 后台联动已启动；{}/{} 台显示器可读取 DDC 电源状态。请保持 Screenguard 和 BetterDisplay 运行。",
+                        readable,
+                        current.len(),
+                    )
+                } else {
+                    format!(
+                        "macOS 后台联动已启动；仅 {}/{} 台显示器可读取 DDC 电源状态。请启动 BetterDisplay，并在 设置 > Application > Integration 中开启 CLI access and notification based integration；同时检查显示器的 DDC Control。不可读的屏幕只能在 macOS 检测到断开/重连时联动；若物理关屏后仍留在显示器列表中，macOS 无法识别其关屏状态。",
+                        readable,
+                        current.len(),
+                    )
+                };
+                let _ = app.emit("power-link-status", status);
+                continue;
+            }
+
+            let mut readings = HashMap::new();
+            for id in &current {
+                let Ok(mode) = platform::get_display_power(id) else {
+                    continue;
+                };
+                readings.insert(id.clone(), mode);
+            }
+
+            // 多屏同时出现相反/并发电源变化时不猜测来源，避免把其它屏幕也反向切换。
+            // 旧显示器关机后从在线列表消失时，helper 会回退到稳定的断开/重连事件。
+            let transition =
+                macos_power_transition(&previous_online, &current, &previous_power, &readings);
+
+            let Some((source_id, direction)) = transition else {
+                previous_online = current.clone();
+                for (id, mode) in readings {
+                    previous_power.insert(id, mode);
+                }
+                previous_power.retain(|id, _| current.contains(id));
+                pending = None;
+                continue;
+            };
+
+            let signature = format!("{}:{}:{}", direction, source_id, current.join(","));
+            match pending.as_mut() {
+                Some((seen, count)) if *seen == signature => *count = count.saturating_add(1),
+                _ => pending = Some((signature.clone(), 1)),
+            }
+            let stable = pending
+                .as_ref()
+                .is_some_and(|(seen, count)| *seen == signature && *count >= 2);
+            if !stable {
+                continue;
+            }
+
+            pending = None;
+            previous_online = current.clone();
+            for (id, mode) in readings {
+                previous_power.insert(id, mode);
+            }
+            previous_power.retain(|id, _| current.contains(id));
+            let desired_mode = if direction == "off" { 2 } else { 1 };
+            let mut applied = 0usize;
+            let mut errors = Vec::new();
+            for id in &current {
+                if id == &source_id {
+                    continue;
+                }
+                match platform::set_display_power(id, desired_mode) {
+                    Ok(()) => {
+                        if platform::get_display_power(id).ok() == Some(desired_mode) {
+                            previous_power.insert(id.clone(), desired_mode);
+                            applied += 1;
+                        } else {
+                            errors.push(format!("{}：电源模式回读未确认", id));
+                        }
+                    }
+                    Err(error) => errors.push(format!("{}：{}", id, error)),
+                }
+            }
+
+            // If the source vanished from the active display list, use the OS-wide fallback.
+            let fallback = if source_id.is_empty() {
+                if direction == "off" {
+                    platform::screen_off()
+                } else {
+                    platform::screen_wake()
+                }
+            } else {
+                Ok(())
+            };
+            let message = match (applied, errors.is_empty(), fallback) {
+                (count, true, Ok(())) if count > 0 => format!(
+                    "检测到一台显示器{}，已同步{}台其他显示器。",
+                    if direction == "off" { "进入待机" } else { "已唤醒" },
+                    count
+                ),
+                (0, _, Ok(())) if source_id.is_empty() => format!(
+                    "检测到显示器{}，已发送 macOS 系统级{}请求。",
+                    if direction == "off" { "断开" } else { "重新连接" },
+                    if direction == "off" { "待机" } else { "唤醒" }
+                ),
+                (_, _, Err(error)) => format!("macOS 电源联动失败：{}", error),
+                (_, _, Ok(())) => format!("macOS 电源联动未完成：{}", errors.join("；")),
+            };
+            eprintln!("[screenguard] {}", message);
+            let _ = app.emit("power-link-status", message);
+        }
+    });
+}
+
+/// Windows 电源联动在 Rust 后台线程采样，避免菜单栏 WebView 隐藏后定时器被节流。
+#[cfg(target_os = "windows")]
+fn spawn_windows_power_link_watch(app: tauri::AppHandle) {
+    use std::collections::{HashMap, HashSet};
+    use std::time::{Duration, Instant};
+    use tauri::{Emitter, Manager};
+
+    std::thread::spawn(move || {
+        let mut was_enabled = false;
+        let mut previous_online: Vec<String> = Vec::new();
+        let mut previous_power: HashMap<String, bool> = HashMap::new();
+        let mut pending: Option<(String, u8)> = None;
+        let mut expected: HashMap<String, (bool, Instant)> = HashMap::new();
+
+        loop {
+            std::thread::sleep(Duration::from_millis(2500));
+
+            let enabled = app
+                .path()
+                .app_data_dir()
+                .ok()
+                .and_then(|path| std::fs::read_to_string(path.join("power-link-enabled")).ok())
+                .is_some_and(|value| value.trim() == "1");
+            if !enabled {
+                was_enabled = false;
+                previous_online.clear();
+                previous_power.clear();
+                pending = None;
+                expected.clear();
+                continue;
+            }
+
+            let mut online = platform::display_snapshot();
+            online.sort();
+            online.dedup();
+            if online.is_empty() {
+                continue;
+            }
+
+            let mut power = HashMap::new();
+            for id in &online {
+                let state = platform::get_display_power(id)
+                    .ok()
+                    .and_then(|mode| match mode {
+                        1 => Some(true),
+                        2 | 3 | 4 | 5 => Some(false),
+                        _ => None,
+                    });
+                if let Some(state) = state {
+                    power.insert(id.clone(), state);
+                } else if let Some(known) = previous_power.get(id) {
+                    // DDC 查询失败只表示未知；保留已知状态，不把通信故障推断成关屏。
+                    power.insert(id.clone(), *known);
+                }
+            }
+
+            if !was_enabled {
+                was_enabled = true;
+                previous_online = online;
+                previous_power = power;
+                pending = None;
+                expected.clear();
+                let _ = app.emit(
+                    "power-link-status",
+                    "Windows 原生后台联动已启动；检测 VCP 0xD6 与显示器连接状态。",
+                );
+                continue;
+            }
+
+            let mut changes: Vec<(String, bool)> = Vec::new();
+            for (id, state) in &power {
+                if let Some(old) = previous_power.get(id) {
+                    if old != state {
+                        changes.push((id.clone(), *state));
+                    }
+                }
+            }
+            for id in previous_online.iter().filter(|id| !online.contains(id)) {
+                if !changes.iter().any(|(changed_id, _)| changed_id == id) {
+                    changes.push((id.clone(), false));
+                }
+            }
+            for id in online.iter().filter(|id| !previous_online.contains(id)) {
+                if !changes.iter().any(|(changed_id, _)| changed_id == id) {
+                    changes.push((id.clone(), true));
+                }
+            }
+            changes.sort_by(|a, b| a.0.cmp(&b.0));
+
+            if changes.is_empty() {
+                previous_online = online;
+                previous_power = power;
+                pending = None;
+                expected.retain(|_, (_, at)| at.elapsed() < Duration::from_secs(20));
+                continue;
+            }
+
+            let signature = changes
+                .iter()
+                .map(|(id, on)| format!("{}:{}", id, if *on { "on" } else { "off" }))
+                .collect::<Vec<_>>()
+                .join("|");
+            match pending.as_mut() {
+                Some((seen, count)) if *seen == signature => *count = count.saturating_add(1),
+                _ => pending = Some((signature.clone(), 1)),
+            }
+            if !pending
+                .as_ref()
+                .is_some_and(|(seen, count)| *seen == signature && *count >= 2)
+            {
+                continue;
+            }
+
+            previous_online = online.clone();
+            previous_power = power;
+            pending = None;
+            expected.retain(|_, (_, at)| at.elapsed() < Duration::from_secs(20));
+
+            let mut external = Vec::new();
+            for (id, on) in changes {
+                let is_expected = expected.get(&id).is_some_and(|(wanted, at)| {
+                    *wanted == on && at.elapsed() < Duration::from_secs(20)
+                });
+                if is_expected {
+                    expected.remove(&id);
+                } else {
+                    external.push((id, on));
+                }
+            }
+            if external.is_empty() {
+                continue;
+            }
+
+            let directions: HashSet<bool> = external.iter().map(|(_, on)| *on).collect();
+            if directions.len() != 1 {
+                let _ = app.emit(
+                    "power-link-status",
+                    "检测到多块屏同时切换到不同电源状态；为避免互相覆盖，本次未联动。",
+                );
+                continue;
+            }
+
+            let turn_on = *directions.iter().next().expect("one direction");
+            let sources: HashSet<&str> = external.iter().map(|(id, _)| id.as_str()).collect();
+            let targets: Vec<String> = online
+                .iter()
+                .filter(|id| !sources.contains(id.as_str()))
+                .cloned()
+                .collect();
+            if targets.is_empty() {
+                let _ = app.emit(
+                    "power-link-status",
+                    "已检测到显示器状态变化；没有其它在线显示器可联动。",
+                );
+                continue;
+            }
+
+            let mode = if turn_on { 1 } else { 4 };
+            let mut succeeded = 0usize;
+            let mut first_error = None;
+            for id in targets {
+                expected.insert(id.clone(), (turn_on, Instant::now()));
+                match platform::set_display_power(&id, mode) {
+                    Ok(()) => succeeded += 1,
+                    Err(error) => {
+                        expected.remove(&id);
+                        if first_error.is_none() {
+                            first_error = Some(error);
+                        }
+                    }
+                }
+            }
+
+            let message = if let Some(error) = first_error {
+                format!(
+                    "Windows 屏幕电源联动完成 {} 台，部分失败：{}",
+                    succeeded, error
+                )
+            } else {
+                format!(
+                    "检测到一块屏{}，已发送 DDC 联动命令至其余 {} 台屏。",
+                    if turn_on { "打开" } else { "关闭" },
+                    succeeded
+                )
+            };
+            eprintln!("[screenguard] {}", message);
+            let _ = app.emit("power-link-status", message);
         }
     });
 }
@@ -869,6 +1447,14 @@ pub fn run() {
             // 显示器健康后台监控（掉线提醒 + 可选自动修复）
             spawn_health_watch(app.handle().clone());
 
+            // macOS 电源联动由原生后台线程执行，面板隐藏或关闭时仍持续监测。
+            #[cfg(target_os = "macos")]
+            spawn_macos_power_link_watch(app.handle().clone());
+
+            // Windows DDC 0xD6 联动也必须从原生后台线程启动，不能依赖 WebView 定时器。
+            #[cfg(target_os = "windows")]
+            spawn_windows_power_link_watch(app.handle().clone());
+
             // v0.3.3：启动后采集一次「基线快照」（供「一键恢复默认」和「退出自动还原」）
             // 延后几秒，等显示/音频栈就绪再读，避免采到空值
             std::thread::spawn(|| {
@@ -900,6 +1486,9 @@ pub fn run() {
             get_autostart,
             set_autostart,
             get_displays,
+            get_display_modes,
+            set_display_mode,
+            betterdisplay_action,
             set_brightness,
             set_volume,
             get_system_audio,
@@ -962,7 +1551,10 @@ pub fn run() {
             adb_download,
             open_main,
             quit_app,
-            hide_panel
+            hide_panel,
+            open_control_panel,
+            get_power_link_preference,
+            set_power_link_preference
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
