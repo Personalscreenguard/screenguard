@@ -174,13 +174,13 @@ pub fn restore_foreground() -> Result<(), String> {
     Err("窗口铺满仅支持 Windows/macOS".to_string())
 }
 
-/// 全局快捷键：仅 Windows 用原生 RegisterHotKey 注册
-#[cfg(not(target_os = "windows"))]
+/// Linux 尚未实现全局快捷键；macOS / Windows 由各自平台模块提供。
+#[cfg(target_os = "linux")]
 pub fn hotkey_start() -> Result<String, String> {
-    Err("全局快捷键仅支持 Windows".to_string())
+    Err("全局快捷键暂不支持 Linux".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn hotkey_label() -> String {
     String::new()
 }

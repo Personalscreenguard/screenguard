@@ -7,6 +7,7 @@ use core_foundation::uuid::CFUUID;
 use serde::{Deserialize, Serialize};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 type CGDisplayConfigRef = *mut std::ffi::c_void;
 
@@ -35,6 +36,199 @@ extern "C" {
 const K_CG_CONFIGURE_PERMANENTLY: u32 = 2;
 
 pub fn platform_name() -> &'static str { "macOS" }
+
+// Carbon global hotkeys do not require Accessibility permission. The app event
+// handler is installed once during Tauri setup and stays active for the process.
+type EventRef = *mut std::ffi::c_void;
+type EventHandlerProc = unsafe extern "C" fn(EventRef, EventRef, *mut std::ffi::c_void) -> i32;
+
+#[repr(C)]
+struct CarbonEventTypeSpec {
+    event_class: u32,
+    event_kind: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CarbonEventHotKeyId {
+    signature: u32,
+    id: u32,
+}
+
+#[link(name = "Carbon", kind = "framework")]
+extern "C" {
+    fn GetApplicationEventTarget() -> EventRef;
+    fn InstallEventHandler(
+        target: EventRef,
+        handler: EventHandlerProc,
+        count: u32,
+        types: *const CarbonEventTypeSpec,
+        user_data: *mut std::ffi::c_void,
+        out_handler: *mut EventRef,
+    ) -> i32;
+    fn RemoveEventHandler(handler: EventRef) -> i32;
+    fn RegisterEventHotKey(
+        key_code: u32,
+        modifiers: u32,
+        hotkey_id: CarbonEventHotKeyId,
+        target: EventRef,
+        options: u32,
+        out_hotkey: *mut EventRef,
+    ) -> i32;
+    fn UnregisterEventHotKey(hotkey: EventRef) -> i32;
+    fn GetEventParameter(
+        event: EventRef,
+        name: u32,
+        desired_type: u32,
+        actual_type: *mut u32,
+        buffer_size: u32,
+        actual_size: *mut u32,
+        data: *mut std::ffi::c_void,
+    ) -> i32;
+}
+
+const CARBON_EVENT_CLASS_KEYBOARD: u32 = u32::from_be_bytes(*b"keyb");
+const CARBON_EVENT_HOTKEY_PRESSED: u32 = 5;
+const CARBON_EVENT_PARAM_DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
+const CARBON_TYPE_EVENT_HOTKEY_ID: u32 = u32::from_be_bytes(*b"hkid");
+const CARBON_HOTKEY_SIGNATURE: u32 = u32::from_be_bytes(*b"SGHK");
+const CARBON_MODIFIER_CONTROL: u32 = 1 << 12;
+const CARBON_MODIFIER_OPTION: u32 = 1 << 11;
+const CARBON_KEY_L: u32 = 0x25;
+const CARBON_KEY_R: u32 = 0x0f;
+const CARBON_HOTKEY_TOGGLE_ID: u32 = 1;
+const CARBON_HOTKEY_RESTORE_ID: u32 = 2;
+
+fn hotkeys_registered() -> &'static AtomicBool {
+    static REGISTERED: AtomicBool = AtomicBool::new(false);
+    &REGISTERED
+}
+
+fn hotkey_screen_asleep() -> &'static Mutex<bool> {
+    static ASLEEP: OnceLock<Mutex<bool>> = OnceLock::new();
+    ASLEEP.get_or_init(|| Mutex::new(false))
+}
+
+unsafe extern "C" fn carbon_hotkey_handler(
+    _next_handler: EventRef,
+    event: EventRef,
+    _user_data: *mut std::ffi::c_void,
+) -> i32 {
+    let mut hotkey = CarbonEventHotKeyId { signature: 0, id: 0 };
+    let status = GetEventParameter(
+        event,
+        CARBON_EVENT_PARAM_DIRECT_OBJECT,
+        CARBON_TYPE_EVENT_HOTKEY_ID,
+        std::ptr::null_mut(),
+        std::mem::size_of::<CarbonEventHotKeyId>() as u32,
+        std::ptr::null_mut(),
+        (&mut hotkey as *mut CarbonEventHotKeyId).cast(),
+    );
+    if status != 0 || hotkey.signature != CARBON_HOTKEY_SIGNATURE {
+        return 0;
+    }
+
+    match hotkey.id {
+        CARBON_HOTKEY_TOGGLE_ID => {
+            std::thread::spawn(|| {
+                let mut asleep = hotkey_screen_asleep().lock().unwrap_or_else(|e| e.into_inner());
+                let observed = display_sleep_states();
+                let current_asleep = if observed.is_empty() {
+                    *asleep
+                } else {
+                    observed.iter().all(|display| display.asleep)
+                };
+                let result = if current_asleep { screen_wake() } else { screen_off() };
+                if let Err(error) = result {
+                    eprintln!("[screenguard] macOS 快捷键屏幕操作失败：{}", error);
+                } else {
+                    *asleep = !current_asleep;
+                }
+            });
+        }
+        CARBON_HOTKEY_RESTORE_ID => {
+            std::thread::spawn(|| {
+                if let Err(error) = restore_foreground() {
+                    eprintln!("[screenguard] macOS 快捷键窗口还原失败：{}", error);
+                }
+            });
+        }
+        _ => {}
+    }
+    0
+}
+
+/// Register Control+Option+L (all-screen sleep/wake toggle) and
+/// Control+Option+R (restore the previously spanned window).
+pub fn hotkey_start() -> Result<String, String> {
+    if hotkeys_registered().load(Ordering::Acquire) {
+        return Ok("Control+Option+L".to_string());
+    }
+
+    unsafe {
+        let target = GetApplicationEventTarget();
+        if target.is_null() {
+            return Err("无法获取 macOS 应用事件目标，未注册全局快捷键".into());
+        }
+        let event_type = CarbonEventTypeSpec {
+            event_class: CARBON_EVENT_CLASS_KEYBOARD,
+            event_kind: CARBON_EVENT_HOTKEY_PRESSED,
+        };
+        let mut handler = std::ptr::null_mut();
+        let status = InstallEventHandler(
+            target,
+            carbon_hotkey_handler,
+            1,
+            &event_type,
+            std::ptr::null_mut(),
+            &mut handler,
+        );
+        if status != 0 {
+            return Err(format!("安装 macOS 全局快捷键事件处理器失败（Carbon 错误码 {}）", status));
+        }
+
+        let mut toggle = std::ptr::null_mut();
+        let modifiers = CARBON_MODIFIER_CONTROL | CARBON_MODIFIER_OPTION;
+        let status = RegisterEventHotKey(
+            CARBON_KEY_L,
+            modifiers,
+            CarbonEventHotKeyId { signature: CARBON_HOTKEY_SIGNATURE, id: CARBON_HOTKEY_TOGGLE_ID },
+            target,
+            0,
+            &mut toggle,
+        );
+        if status != 0 {
+            RemoveEventHandler(handler);
+            return Err(format!("注册 Control+Option+L 失败（快捷键可能被占用，Carbon 错误码 {}）", status));
+        }
+
+        let mut restore = std::ptr::null_mut();
+        let status = RegisterEventHotKey(
+            CARBON_KEY_R,
+            modifiers,
+            CarbonEventHotKeyId { signature: CARBON_HOTKEY_SIGNATURE, id: CARBON_HOTKEY_RESTORE_ID },
+            target,
+            0,
+            &mut restore,
+        );
+        if status != 0 {
+            UnregisterEventHotKey(toggle);
+            RemoveEventHandler(handler);
+            return Err(format!("注册 Control+Option+R 失败（快捷键可能被占用，Carbon 错误码 {}）", status));
+        }
+
+        hotkeys_registered().store(true, Ordering::Release);
+    }
+    Ok("Control+Option+L".to_string())
+}
+
+pub fn hotkey_label() -> String {
+    if hotkeys_registered().load(Ordering::Acquire) {
+        "Control+Option+L".to_string()
+    } else {
+        String::new()
+    }
+}
 
 fn parse_internal_battery(output: &str) -> Option<BatteryInfo> {
     let header = output.lines().next().unwrap_or_default();

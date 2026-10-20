@@ -606,12 +606,9 @@ document.getElementById('mute-btn2').onclick = async ()=>{
   const el = document.getElementById('hotkey-line');
   try {
     const platform = await invoke('get_platform');
-    if (platform === 'macos') {
-      el.textContent = '全局快捷键：macOS 暂不支持；可用本面板的待机、唤醒和窗口还原按钮';
-      return;
-    }
     const hk = await invoke('hotkey_start');
-    el.innerHTML = '快捷键：<span class="hk">' + hk + '</span> 屏幕待机/唤醒　<span class="hk">Ctrl+Alt+R</span> 还原被铺满的窗口（铺满后界面被盖住也能按）';
+    const restoreKey = platform === 'macos' ? 'Control+Option+R' : 'Ctrl+Alt+R';
+    el.innerHTML = '快捷键：<span class="hk">' + hk + '</span> 屏幕待机/唤醒　<span class="hk">' + restoreKey + '</span> 还原被铺满的窗口（铺满后界面被盖住也能按）';
   } catch(e){
     el.textContent = '全局快捷键：' + (e && e.message ? e.message : '注册失败');
     el.style.color = '#e8a75c';
