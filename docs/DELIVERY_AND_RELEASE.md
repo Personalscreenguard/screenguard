@@ -8,9 +8,9 @@
 
 ## 当前状态快照（2026-10-20，产品版本 0.4.48）
 
-当前候选分支 `codex/windows-builtin-icc` 对应 [OPEN/DRAFT PR #8](https://github.com/Personalscreenguard/screenguard/pull/8)，当前 head 为 `3149b3bff6655bead95d6e57a464e1acbc93861f`；应用代码 head 为 `d71709e0a6a385643db3376ec365b541323d97ea`，其后提交只刷新本交付状态文档。改动让 Screenguard 在 Windows 上生成 sRGB、Display P3、DCI-P3、Adobe RGB 1998、Rec.709、Rec.2020、ProPhoto 标准参考 ICC；用户自备和 Windows 系统配置优先。生成配置不是显示器实测校准。代码位于隔离工作树，原主工作区未修改。
+当前候选分支 `codex/windows-builtin-icc` 对应 [OPEN/DRAFT PR #8](https://github.com/Personalscreenguard/screenguard/pull/8)。应用代码提交为 `d71709e0a6a385643db3376ec365b541323d97ea`；PR 后续提交只更新交付状态文档，PR Checks 页面是这些文档提交的最新 CI 依据。改动让 Screenguard 在 Windows 上生成 sRGB、Display P3、DCI-P3、Adobe RGB 1998、Rec.709、Rec.2020、ProPhoto 标准参考 ICC；用户自备和 Windows 系统配置优先。生成配置不是显示器实测校准。代码位于隔离工作树，原主工作区未修改。
 
-当前文档 head CI [39440783032](https://github.com/Personalscreenguard/screenguard/actions/runs/39440783032) 全部成功，Draft 发布配置 [39440784053](https://github.com/Personalscreenguard/screenguard/actions/runs/39440784053) 成功；PR 事件下 tag 发布任务按预期跳过。应用代码 head CI [39435532157](https://github.com/Personalscreenguard/screenguard/actions/runs/39435532157) 也全部成功，覆盖仓库检查、macOS/Windows Rust 检查和测试、Windows C# 桥接、NSIS 包装、离线 WebView2 体积门槛、静默安装/卸载 smoke，以及 Apple Silicon/Intel DMG。
+应用代码 head CI [39435532157](https://github.com/Personalscreenguard/screenguard/actions/runs/39435532157) 全部成功，覆盖仓库检查、macOS/Windows Rust 检查和测试、Windows C# 桥接、NSIS 包装、离线 WebView2 体积门槛、静默安装/卸载 smoke，以及 Apple Silicon/Intel DMG。PR #8 后续仅文档提交的检查结果应以该 PR 的 Checks 页面为准；tag 发布任务在 PR 事件下按预期跳过。
 
 三份 0.4.48 CI 产物均已下载核验：Windows NSIS EXE SHA-256 `bd8d0471534be6c88693dbdda370d7b146c37f4066b9c83763daa8fd19689c8a`；Apple Silicon DMG `hdiutil verify` 为 VALID，SHA-256 `72ace5ae947b62b2026d229c9ce38a45f1be210243c147edacfe71618c6bec50`；Intel DMG VALID，SHA-256 `9103ade7e7be2a950025c5d383e44ef53fe941cf5756a5ba230ac266ce3010ea`。Windows CI 安装卸载 smoke 不等于用户 Windows 实机验收；DMG 校验不等于 Gatekeeper 或 Mac 首次启动验收。
 
