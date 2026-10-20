@@ -14,7 +14,7 @@
 | 高级显示控制 | macOS：主屏、镜像、排列和标准 DDC/CI 输入源；使用 CoreGraphics、DDC/CI 与随安装包分发的布局组件 | ✅（取决于 macOS 与显示器） | — |
 | 屏幕电源 | 全部待机/唤醒（macOS 使用 pmset / caffeinate；Windows 使用系统显示器电源控制） | ✅ | ✅ |
 | 亮度/音量 DDC | 滑块实时控制（需硬件支持 DDC/CI） | ✅ | ✅ |
-| 色彩同步 | 一键把全部屏对齐 sRGB / Display P3 / Adobe RGB | ✅ | ✅（P3/Adobe 需自备 .icc） |
+| 色彩同步 | 一键把全部屏对齐 sRGB / Display P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto | ✅ | ✅（应用生成标准参考 ICC；自备显示器校准配置优先） |
 | 对齐色彩 | macOS：外接屏对齐内建屏（Display P3）；Windows：其余屏对齐主屏当前 ICC | ✅ | ✅ |
 | 窗口跨屏等大 | 副屏对齐 2x 逻辑档，窗口拖动不变小（**不会**降 4K 物理分辨率） | ✅ | ✅（诊断+指引） |
 | 副屏横竖切换 | 一键旋转/恢复（按真实布局动态计算，无硬编码） | ✅ | ✅ |
@@ -27,6 +27,8 @@
 
 | 显示器状态 | macOS：Quartz 逐屏睡眠状态只读诊断；Windows：事件日志检测 / 重协商修复 / 自动修复 + 掉线提醒 | 🟡（系统睡眠状态不代表物理断电） | ✅（修复需谨慎使用） |
 ✅ = 完整实现；🟡 = 部分实现；⏳ = 暂未实现（点击会明确报错，不假成功）
+
+Windows 标准 RGB 色彩空间配置由 Screenguard 首次使用时生成并保存在 `%LOCALAPPDATA%\Screenguard\icc-reference`，无需另找 ICC 文件。用户放入 `%LOCALAPPDATA%\screenguard_icc` 的显示器专属 ICC/ICM 文件优先使用。自动生成的参考配置描述目标色域和传递曲线，不会测量或校准具体显示器；色彩准确度仍取决于显示器能力，硬件校准需校色仪及对应设备配置。Windows 灰度目标不提供，因为灰度配置不能安全地用于 RGB 显示器。
 
 ## 依赖
 

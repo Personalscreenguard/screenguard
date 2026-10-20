@@ -1,4 +1,6 @@
 mod platform;
+#[cfg(any(target_os = "windows", test))]
+mod icc_profile;
 
 use platform::DisplayInfo;
 
