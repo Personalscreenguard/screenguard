@@ -2318,6 +2318,12 @@ fn core_dll_file() -> std::path::PathBuf {
     std::env::temp_dir().join("screenguard_core.dll")
 }
 
+/// Quote a value as a PowerShell single-quoted string literal.
+/// Windows profile paths can contain apostrophes (for example, in the user name).
+fn ps_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
 /// 确保 C# 桥接可用，返回可传给 PowerShell 的加载路径。
 ///
 /// 落盘原因：整段 C# 内联进 `Add-Type -TypeDefinition '<CORE_CS>'` 会撞 Windows 命令行
@@ -2351,9 +2357,9 @@ fn core_asm_ref() -> Result<String, String> {
     }
     // 3) 编译（失败就退回源码直载：慢，但至少能用，不会因为编译问题整个功能不可用）
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}' -OutputAssembly '{dll}'",
-        cs = cs_p,
-        dll = dll_p
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path {cs} -OutputAssembly {dll}",
+        cs = ps_literal(&cs_p),
+        dll = ps_literal(&dll_p)
     );
     if ps(&script).is_err() || !dll.exists() {
         return Ok(cs_p);
@@ -2365,8 +2371,8 @@ fn core_asm_ref() -> Result<String, String> {
 fn ps_core(call: &str) -> Result<String, String> {
     let cs = core_asm_ref()?;
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}';\n{call}",
-        cs = cs,
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path {cs};\n{call}",
+        cs = ps_literal(&cs),
         call = call
     );
     ps(&script)
@@ -2395,7 +2401,7 @@ fn display_devs() -> Result<Vec<String>, String> {
 
 /// 读某设备当前关联的 ICC 完整路径
 fn icc_get(dev: &str) -> Option<String> {
-    let out = ps_core(&format!("[SGCore]::IccGet('{d}')", d = dev)).ok()?;
+    let out = ps_core(&format!("[SGCore]::IccGet({})", ps_literal(dev))).ok()?;
     out.trim()
         .strip_prefix("OK:")
         .map(|s| s.trim().to_string())
@@ -2404,7 +2410,7 @@ fn icc_get(dev: &str) -> Option<String> {
 
 /// 安装 ICC 到系统色彩目录
 fn icc_install(profile: &str) -> Result<(), String> {
-    let out = ps_core(&format!("[SGCore]::IccInstall('{p}')", p = profile))?;
+    let out = ps_core(&format!("[SGCore]::IccInstall({})", ps_literal(profile)))?;
     let t = out.trim();
     if t == "OK" {
         Ok(())
@@ -2417,7 +2423,11 @@ fn icc_install(profile: &str) -> Result<(), String> {
 
 /// 关联 ICC（含回读校验，校验在 C# 侧完成）
 fn icc_set(dev: &str, profile: &str) -> Result<(), String> {
-    let out = ps_core(&format!("[SGCore]::IccSet('{d}','{p}')", d = dev, p = profile))?;
+    let out = ps_core(&format!(
+        "[SGCore]::IccSet({},{})",
+        ps_literal(dev),
+        ps_literal(profile)
+    ))?;
     let t = out.trim();
     if t == "OK" {
         Ok(())
@@ -3555,8 +3565,9 @@ pub fn restore_defaults() -> Result<String, String> {
             continue;
         }
         match ps_core(&format!(
-            "[SGCore]::IccSetPath('{}', '{}')",
-            p[0], p[1]
+            "[SGCore]::IccSetPath({}, {})",
+            ps_literal(p[0]),
+            ps_literal(p[1])
         )) {
             Ok(o) if o.trim().starts_with("OK") => {
                 done.push(format!("色彩配置 {} 已还原", p[0]));
@@ -5220,4 +5231,17 @@ pub fn align_report() -> Result<String, String> {
     }
     o.push_str("  提示：两块屏物理高度越接近，越容易对齐；竖向像素数相同是「不丢画面」的关键。\n");
     Ok(o)
+}
+
+#[cfg(test)]
+mod powershell_literal_tests {
+    use super::ps_literal;
+
+    #[test]
+    fn escapes_apostrophes_in_windows_user_and_profile_paths() {
+        assert_eq!(
+            ps_literal(r"C:\Users\O'Brien\AppData\Local\Screenguard\icc-reference\Display.icc"),
+            r"'C:\Users\O''Brien\AppData\Local\Screenguard\icc-reference\Display.icc'"
+        );
+    }
 }
