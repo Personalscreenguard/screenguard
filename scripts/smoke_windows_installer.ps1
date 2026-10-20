@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $installer = (Resolve-Path -LiteralPath $InstallerPath).Path
 $installDir = Join-Path $env:RUNNER_TEMP ("screenguard-smoke-" + [guid]::NewGuid().ToString('N'))
 $appExe = Join-Path $installDir 'screenguard.exe'
+$appProcess = $null
 $uninstaller = $null
 $uninstalled = $false
 
@@ -40,6 +41,34 @@ try {
     throw "安装后的主程序文件为空：$appExe"
   }
 
+  Write-Host '启动安装后的主程序并确认主窗口可用。'
+  $appProcess = Start-Process -FilePath $appExe -PassThru
+  $windowDeadline = (Get-Date).AddSeconds(30)
+  $windowReady = $false
+  do {
+    $appProcess.Refresh()
+    if ($appProcess.HasExited) {
+      throw "安装后的主程序提前退出，退出码为 $($appProcess.ExitCode)"
+    }
+    if ($appProcess.MainWindowHandle -ne [IntPtr]::Zero) {
+      $windowReady = $true
+      break
+    }
+    Start-Sleep -Milliseconds 250
+  } while ((Get-Date) -lt $windowDeadline)
+
+  if (-not $windowReady) {
+    throw '安装后的主程序未在 30 秒内创建主窗口。'
+  }
+  # Closing the main window hides Screenguard to the tray by design, so terminate
+  # this isolated CI process explicitly before uninstalling its files.
+  $appProcess.Kill()
+  if (-not $appProcess.WaitForExit(15000)) {
+    throw '安装烟雾测试主程序终止超时（15 秒）。'
+  }
+  $appProcess = $null
+  Write-Host '安装后的主程序启动并创建主窗口成功。'
+
   $uninstaller = Get-ChildItem -LiteralPath $installDir -Filter '*.exe' -File |
     Where-Object { $_.Name -match '(?i)^uninstall.*\.exe$' } |
     Select-Object -First 1
@@ -59,6 +88,17 @@ try {
   Write-Host 'NSIS 静默安装/卸载烟雾检查通过。'
 }
 finally {
+  if ($appProcess) {
+    try {
+      $appProcess.Refresh()
+      if (-not $appProcess.HasExited) {
+        $appProcess.Kill()
+        $appProcess.WaitForExit(5000) | Out-Null
+      }
+    } catch {
+      Write-Warning "安装烟雾测试主程序清理失败：$_"
+    }
+  }
   if (-not $uninstalled -and $uninstaller -and (Test-Path -LiteralPath $uninstaller.FullName)) {
     try {
       Invoke-WaitedProcess -FilePath $uninstaller.FullName -ArgumentList @('/S') -Label '失败清理时的 NSIS 卸载'

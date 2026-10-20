@@ -2217,6 +2217,7 @@ pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
 //   ③ 非管理员下 SetICMProfileW 同样返回 TRUE 却**不生效** → 必须回读校验（校验在 C# 侧 IccSet 内）
 //   ④ InstallColorProfileW 非管理员可用，可把用户自备的 P3 / AdobeRGB 装进系统色彩目录
 const COLOR_DIR: &str = "screenguard_icc";
+const REFERENCE_COLOR_DIR: &str = "Screenguard\\icc-reference";
 /// 系统色彩目录：Windows 只认这里的配置文件
 const SYSTEM_COLOR_DIR: &str = r"C:\Windows\System32\spool\drivers\color";
 
@@ -2243,27 +2244,22 @@ fn flatten_key(s: &str) -> String {
 }
 
 /// 定位目标 ICC 文件。
-/// 顺序：系统内置 sRGB → 用户目录 %LOCALAPPDATA%\screenguard_icc\ → 系统色彩目录，
-/// 按别名表模糊匹配文件名。找不到时给出可操作的指引（放哪个目录、从哪拷）。
+/// 顺序：用户自备文件 → Windows 系统色彩目录 → Screenguard 生成的标准参考配置。
+/// 用户自备的显示器校准配置优先；自动生成的配置只描述标准色域，不代表显示器已经校准。
 fn icc_path(space: &str) -> Result<String, String> {
     let key = flatten_key(space);
-    if key == "srgb" {
-        let p = format!(r"{}\sRGB Color Space Profile.icm", SYSTEM_COLOR_DIR);
-        if std::path::Path::new(&p).exists() {
-            return Ok(p);
-        }
+    if key == "gray" {
+        return Err("Windows 端灰度 ICC 不能安全地作为 RGB 显示器配置使用；请选择一种 RGB 色彩空间".to_string());
     }
     let wants: Vec<String> = SPACE_ALIASES
         .iter()
         .find(|(k, _)| *k == key)
         .map(|(_, a)| a.iter().map(|s| flatten_key(s)).collect())
         .unwrap_or_else(|| vec![key.clone()]);
-    let user_dir = format!(
-        "{}\\{}",
-        std::env::var("LOCALAPPDATA").unwrap_or_default(),
-        COLOR_DIR
-    );
-    for dir in [user_dir.clone(), SYSTEM_COLOR_DIR.to_string()] {
+    let local_app_data = std::env::var("LOCALAPPDATA")
+        .map_err(|_| "无法读取 LOCALAPPDATA，不能定位 Windows 色彩配置目录".to_string())?;
+    let user_dir = std::path::PathBuf::from(&local_app_data).join(COLOR_DIR);
+    for dir in [user_dir.clone(), std::path::PathBuf::from(SYSTEM_COLOR_DIR)] {
         let rd = match std::fs::read_dir(&dir) {
             Ok(r) => r,
             Err(_) => continue,
@@ -2281,10 +2277,28 @@ fn icc_path(space: &str) -> Result<String, String> {
             }
         }
     }
-    Err(format!(
-        "缺少「{}」色彩配置文件：把对应的 .icc/.icm 放到 {} 后重试（Windows 只自带 sRGB；P3/AdobeRGB/Rec.2020 等可从 macOS 的 /System/Library/ColorSync/Profiles/ 拷贝，或从显示器厂商官网下载）",
-        space, user_dir
-    ))
+    let reference = crate::icc_profile::reference_profile(&key)
+        .ok_or_else(|| format!("不支持的 Windows RGB 色彩空间：{}", space))?;
+    let reference_dir = std::path::PathBuf::from(local_app_data).join(REFERENCE_COLOR_DIR);
+    std::fs::create_dir_all(&reference_dir)
+        .map_err(|e| format!("无法创建 Screenguard 色彩配置目录：{}", e))?;
+    let path = reference_dir.join(reference.file_name);
+    if !path.exists() {
+        let temp_path = path.with_extension("icc.tmp");
+        std::fs::write(&temp_path, &reference.bytes)
+            .map_err(|e| format!("无法写入标准色彩参考配置：{}", e))?;
+        match std::fs::rename(&temp_path, &path) {
+            Ok(()) => {}
+            Err(_) if path.exists() => {
+                let _ = std::fs::remove_file(&temp_path);
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(format!("无法保存标准色彩参考配置：{}", e));
+            }
+        }
+    }
+    Ok(path.to_string_lossy().to_string())
 }
 
 /// C# 桥接源码的落盘路径（%TEMP%\screenguard_core.cs）
@@ -2302,6 +2316,12 @@ fn core_cs_file() -> std::path::PathBuf {
 /// C# 桥接的编译产物（程序集）缓存路径
 fn core_dll_file() -> std::path::PathBuf {
     std::env::temp_dir().join("screenguard_core.dll")
+}
+
+/// Quote a value as a PowerShell single-quoted string literal.
+/// Windows profile paths can contain apostrophes (for example, in the user name).
+fn ps_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 /// 确保 C# 桥接可用，返回可传给 PowerShell 的加载路径。
@@ -2337,9 +2357,9 @@ fn core_asm_ref() -> Result<String, String> {
     }
     // 3) 编译（失败就退回源码直载：慢，但至少能用，不会因为编译问题整个功能不可用）
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}' -OutputAssembly '{dll}'",
-        cs = cs_p,
-        dll = dll_p
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path {cs} -OutputAssembly {dll}",
+        cs = ps_literal(&cs_p),
+        dll = ps_literal(&dll_p)
     );
     if ps(&script).is_err() || !dll.exists() {
         return Ok(cs_p);
@@ -2351,8 +2371,8 @@ fn core_asm_ref() -> Result<String, String> {
 fn ps_core(call: &str) -> Result<String, String> {
     let cs = core_asm_ref()?;
     let script = format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path '{cs}';\n{call}",
-        cs = cs,
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8;\nAdd-Type -Path {cs};\n{call}",
+        cs = ps_literal(&cs),
         call = call
     );
     ps(&script)
@@ -2381,7 +2401,7 @@ fn display_devs() -> Result<Vec<String>, String> {
 
 /// 读某设备当前关联的 ICC 完整路径
 fn icc_get(dev: &str) -> Option<String> {
-    let out = ps_core(&format!("[SGCore]::IccGet('{d}')", d = dev)).ok()?;
+    let out = ps_core(&format!("[SGCore]::IccGet({})", ps_literal(dev))).ok()?;
     out.trim()
         .strip_prefix("OK:")
         .map(|s| s.trim().to_string())
@@ -2390,7 +2410,7 @@ fn icc_get(dev: &str) -> Option<String> {
 
 /// 安装 ICC 到系统色彩目录
 fn icc_install(profile: &str) -> Result<(), String> {
-    let out = ps_core(&format!("[SGCore]::IccInstall('{p}')", p = profile))?;
+    let out = ps_core(&format!("[SGCore]::IccInstall({})", ps_literal(profile)))?;
     let t = out.trim();
     if t == "OK" {
         Ok(())
@@ -2403,7 +2423,11 @@ fn icc_install(profile: &str) -> Result<(), String> {
 
 /// 关联 ICC（含回读校验，校验在 C# 侧完成）
 fn icc_set(dev: &str, profile: &str) -> Result<(), String> {
-    let out = ps_core(&format!("[SGCore]::IccSet('{d}','{p}')", d = dev, p = profile))?;
+    let out = ps_core(&format!(
+        "[SGCore]::IccSet({},{})",
+        ps_literal(dev),
+        ps_literal(profile)
+    ))?;
     let t = out.trim();
     if t == "OK" {
         Ok(())
@@ -3541,8 +3565,9 @@ pub fn restore_defaults() -> Result<String, String> {
             continue;
         }
         match ps_core(&format!(
-            "[SGCore]::IccSetPath('{}', '{}')",
-            p[0], p[1]
+            "[SGCore]::IccSetPath({}, {})",
+            ps_literal(p[0]),
+            ps_literal(p[1])
         )) {
             Ok(o) if o.trim().starts_with("OK") => {
                 done.push(format!("色彩配置 {} 已还原", p[0]));
@@ -5206,4 +5231,17 @@ pub fn align_report() -> Result<String, String> {
     }
     o.push_str("  提示：两块屏物理高度越接近，越容易对齐；竖向像素数相同是「不丢画面」的关键。\n");
     Ok(o)
+}
+
+#[cfg(test)]
+mod powershell_literal_tests {
+    use super::ps_literal;
+
+    #[test]
+    fn escapes_apostrophes_in_windows_user_and_profile_paths() {
+        assert_eq!(
+            ps_literal(r"C:\Users\O'Brien\AppData\Local\Screenguard\icc-reference\Display.icc"),
+            r"'C:\Users\O''Brien\AppData\Local\Screenguard\icc-reference\Display.icc'"
+        );
+    }
 }

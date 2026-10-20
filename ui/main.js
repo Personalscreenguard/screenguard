@@ -474,7 +474,12 @@ function applyPlatformCopy(p) {
     // Windows 没有内建 P3 屏，「对齐 Mac 内建屏」改为语义成立的「对齐主屏色彩」
     matchMac.textContent = '对齐主屏色彩';
     matchMac.title = '把主屏当前关联的 ICC 配置应用到其余屏幕';
-    if (note) note.textContent = 'P3 / Adobe RGB 需自备 .icc 放到 %LOCALAPPDATA%\\screenguard_icc｜变更显示器色彩配置需管理员权限';
+    if (note) note.textContent = 'Windows 可自动生成 sRGB / P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto 标准参考配置；显示器专属校准文件可放入 %LOCALAPPDATA%\\screenguard_icc 并优先使用。标准配置不等于硬件校色，变更关联需管理员权限。';
+    const grayOption = document.querySelector('#color-space option[value="gray"]');
+    if (grayOption) {
+      grayOption.disabled = true;
+      grayOption.title = 'Windows RGB 显示器不能安全使用灰度 ICC 配置';
+    }
     if (hdrNote) hdrNote.innerHTML = '⚠️ <b>HDR 状态可读取；本机切换请求被厂商服务接管且系统拒绝应用</b>（错误 87 / AsHDRControl）。请通过「设置 → 系统 → 显示 → HDR」或华硕工具切换。';
     if (restoreNote) restoreNote.innerHTML = '覆盖范围：总亮度（回到原始曲线）、HDR、色彩配置、被铺满的窗口、屏幕电源、音量 —— 全部回到<b>软件启动时</b>的状态（启动时会自动存一份「基线」，所以乱调之后总能一键回到好的状态）。<b>硬件层面的设置不受影响</b>（显示器自己的亮度/音量、KVM 都不动）。';
   } else if (p === 'linux') {
@@ -487,6 +492,11 @@ function applyPlatformCopy(p) {
     const hdrButton = document.getElementById('hdr-sync');
     if (hdrButton) { hdrButton.disabled = true; hdrButton.textContent = '🌈 HDR：Linux 暂不支持'; }
   } else {
+    const grayOption = document.querySelector('#color-space option[value="gray"]');
+    if (grayOption) {
+      grayOption.disabled = false;
+      grayOption.title = '';
+    }
     matchMac.title = '外接屏对齐 Mac 内建屏（Display P3）';
     const applyColor = document.getElementById('apply-color');
     if (applyColor) { applyColor.disabled = false; applyColor.title = '通过 macOS ColorSync 设置系统显示器配置'; }

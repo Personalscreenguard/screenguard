@@ -14,7 +14,7 @@
 | 高级显示控制 | macOS：主屏、镜像、排列和标准 DDC/CI 输入源；使用 CoreGraphics、DDC/CI 与随安装包分发的布局组件 | ✅（取决于 macOS 与显示器） | — |
 | 屏幕电源 | 全部待机/唤醒（macOS 使用 pmset / caffeinate；Windows 使用系统显示器电源控制） | ✅ | ✅ |
 | 亮度/音量 DDC | 滑块实时控制（需硬件支持 DDC/CI） | ✅ | ✅ |
-| 色彩同步 | 一键把全部屏对齐 sRGB / Display P3 / Adobe RGB | ✅ | ✅（P3/Adobe 需自备 .icc） |
+| 色彩同步 | 一键把全部屏对齐 sRGB / Display P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto | ✅ | ✅（应用生成标准参考 ICC；自备显示器校准配置优先） |
 | 对齐色彩 | macOS：外接屏对齐内建屏（Display P3）；Windows：其余屏对齐主屏当前 ICC | ✅ | ✅ |
 | 窗口跨屏等大 | 副屏对齐 2x 逻辑档，窗口拖动不变小（**不会**降 4K 物理分辨率） | ✅ | ✅（诊断+指引） |
 | 副屏横竖切换 | 一键旋转/恢复（按真实布局动态计算，无硬编码） | ✅ | ✅ |
@@ -27,6 +27,8 @@
 
 | 显示器状态 | macOS：Quartz 逐屏睡眠状态只读诊断；Windows：事件日志检测 / 重协商修复 / 自动修复 + 掉线提醒 | 🟡（系统睡眠状态不代表物理断电） | ✅（修复需谨慎使用） |
 ✅ = 完整实现；🟡 = 部分实现；⏳ = 暂未实现（点击会明确报错，不假成功）
+
+Windows 标准 RGB 色彩空间配置由 Screenguard 首次使用时生成并保存在 `%LOCALAPPDATA%\Screenguard\icc-reference`，无需另找 ICC 文件。用户放入 `%LOCALAPPDATA%\screenguard_icc` 的显示器专属 ICC/ICM 文件优先使用。自动生成的参考配置描述目标色域和传递曲线，不会测量或校准具体显示器；色彩准确度仍取决于显示器能力，硬件校准需校色仪及对应设备配置。Windows 灰度目标不提供，因为灰度配置不能安全地用于 RGB 显示器。
 
 ## 依赖
 
@@ -60,6 +62,7 @@ npm run build:win      # Windows 打包（需对应 target）
 产物：`src-tauri/target/release/bundle/`
 
 ## 版本历史
+- **v0.4.48**（2026-10-20）：Windows 色彩同步内置生成 sRGB、Display P3、DCI-P3、Adobe RGB、Rec.709、Rec.2020 和 ProPhoto 的标准参考 ICC 配置，不再要求用户另找文件。用户自备的显示器专属 ICC/ICM 配置仍优先；标准参考配置不等于显示器硬件校色。Windows RGB 显示器不提供灰度目标。
 - **v0.4.47**（2026-10-19）：Mac 版移除 BetterDisplay 运行依赖。DDC/CI 亮度、音量、电源状态和输入源改由应用内 Rust 组件直接访问；ColorSync 使用 macOS 系统 API；MIT 许可的 `displayplacer` v1.4.0 在构建时按架构下载、校验并随 DMG 分发。macOS HDR 控制标注为不支持；PIP、串流、虚拟屏及配置保护没有随应用分发的可靠替代实现，已停用并从控制界面移除。Windows 保留 Windows 原生 HDR 状态读取/同步入口；若显示驱动或厂商服务拒绝 Apply，界面明确报告未生效。窗口跨屏使用 Screenguard 自身能力，无需额外播放器。Windows 端依赖路径保持不变。
 - **v0.4.46**（2026-10-17）：修正主窗口电源联动开关提示，说明 macOS 同时监测 DDC、Quartz 睡眠和显示器连接变化，并明确物理关屏没有产生系统可见状态变化时无法检测。
 - **v0.4.45**（2026-10-17）：修复 macOS 窗口铺满还原时上层命令无条件二次还原显示布局的问题；macOS 只在本次铺满确实调整过屏幕模式时回滚布局，Windows 保持原来的窗口与模式还原流程。
