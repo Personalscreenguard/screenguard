@@ -6,17 +6,15 @@
 
 本工作流生成双平台安装包和 SHA-256 校验文件，放入 GitHub Draft Release；审核后由维护者发布，用户即可直接从 GitHub 下载，不需要另建或接入网站。
 
-## 当前状态快照（2026-10-20，产品版本 0.4.47）
+## 当前状态快照（2026-10-20，产品版本 0.4.48）
 
-当前分支 `codex/screenguard-single-app` 对应 OPEN/DRAFT PR #3，head 为 `a893bc914c0c5fb38efe8ed41f2ed9bc40d6e09c`。单应用依赖门禁检查按架构固定 SHA-256 并随包分发 `displayplacer`、Tauri bundle 资源引用正确，并扫描运行时代码防止重新引入 BetterDisplay。macOS 显示器控制使用系统 API 与应用内 DDC/CI；Windows ADB 下载失败时不要求用户手动安装 Platform-Tools。
+当前候选分支 `codex/windows-builtin-icc` 对应 [OPEN/DRAFT PR #8](https://github.com/Personalscreenguard/screenguard/pull/8)，head `d71709e0a6a385643db3376ec365b541323d97ea`。改动让 Screenguard 在 Windows 上生成 sRGB、Display P3、DCI-P3、Adobe RGB 1998、Rec.709、Rec.2020、ProPhoto 标准参考 ICC；用户自备和 Windows 系统配置优先。生成配置不是显示器实测校准。代码位于隔离工作树，原主工作区未修改。
 
-最新 PR head CI [39282943351](https://github.com/Personalscreenguard/screenguard/actions/runs/39282943351) 的 workflow conclusion 为 success：Windows/macOS Rust 检查与测试、C# 桥接检查、仓库检查、Windows NSIS 离线安装包与静默安装/卸载 smoke，以及 Apple Silicon/Intel DMG 均完成。Draft 发布配置 [39282943344](https://github.com/Personalscreenguard/screenguard/actions/runs/39282943344) 成功；PR 流程没有执行正式签名发布。
+当前 head CI [39435532157](https://github.com/Personalscreenguard/screenguard/actions/runs/39435532157) 全部成功，覆盖仓库检查、macOS/Windows Rust 检查和测试、Windows C# 桥接、NSIS 包装、离线 WebView2 体积门槛、静默安装/卸载 smoke，以及 Apple Silicon/Intel DMG。Draft 发布配置 [39435532308](https://github.com/Personalscreenguard/screenguard/actions/runs/39435532308) 成功；PR 事件下 tag 发布任务按预期跳过。
 
-当前 Mac 本机 Apple Silicon Release 构建 `src-tauri/target/release/bundle/dmg/Screenguard_0.4.47_aarch64.dmg` 的 `hdiutil verify` 为 VALID，SHA-256 `35013b9fb507b8e3f3dec68e67ce83d415529f951b18d385d8cdb6945563c25f`。App bundle `codesign --verify --deep --strict` 通过，内含 arm64 `displayplacer`，其 SHA-256 为 `0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0`；签名为 ad-hoc、没有 Team ID，`spctl` 拒绝 Gatekeeper 执行。候选 App 未安装或启动。
+三份 0.4.48 CI 产物均已下载核验：Windows NSIS EXE SHA-256 `bd8d0471534be6c88693dbdda370d7b146c37f4066b9c83763daa8fd19689c8a`；Apple Silicon DMG `hdiutil verify` 为 VALID，SHA-256 `72ace5ae947b62b2026d229c9ce38a45f1be210243c147edacfe71618c6bec50`；Intel DMG VALID，SHA-256 `9103ade7e7be2a950025c5d383e44ef53fe941cf5756a5ba230ac266ce3010ea`。Windows CI 安装卸载 smoke 不等于用户 Windows 实机验收；DMG 校验不等于 Gatekeeper 或 Mac 首次启动验收。
 
-最新 CI artifact 元数据与 Mac DMG 本地回读：Windows NSIS 219,310,044 bytes，GitHub artifact digest `sha256:0a05b4455b529c0f83bcc1cbb9e7b0b948a73a309515e266cb523dae4b2543f6`；Apple Silicon DMG artifact 4,003,531 bytes，digest `sha256:6c18de6e02c68c174a0b77a2d1b7682d73248eb82bdc6f65d4e7e74ba0112ef6`，下载后 `hdiutil verify` 为 VALID、DMG SHA-256 `ed3b7500ada0ffac5df87865d7bff90a812e6ee5ac8dd678094535d6ae4cab8d`；Intel DMG artifact 4,250,699 bytes，digest `sha256:a6c0ba9d6026ec8a6a32fe7ca0f14d4dbd1158dccd69ea1487b2b8535a1ff629`，下载后 `hdiutil verify` 为 VALID、DMG SHA-256 `68ccbd610c96bc15a0ba387f75e710b3ebbad78db99924caebb2e974dc9c3c9f`。Windows 包在 CI 安装/卸载 smoke 通过，未在本机下载或 Windows 用户设备上验收。
-
-当前候选包为无付费开发者证书/公证的构建，按用户选择的免费分发策略继续；macOS 首次启动需要接受系统安全提示，Windows 可能出现未知发布者/SmartScreen 提示。Windows 实机安装/启动/功能验收，以及 Mac 外接显示器 DDC/CI 与 ColorSync 验收仍未完成。
+GitHub 当前最新公开 Release 仍为 v0.2.9，只有 Windows x64 安装包；v0.4.47 虽含三平台附件但仍为 Draft。0.4.48 目前是 PR CI 产物，尚未生成 Release。PR 审阅合并、Windows/Mac 实机验收和后续是否公开 Release 均未完成。按用户决定不做付费签名或公证；首次安装可能出现 macOS 安全提示或 Windows 未知发布者提示。
 
 ### 单软件安装范围
 
@@ -31,8 +29,8 @@
 
 | 平台 | 当前目标 | 已有自动化证据 | 尚缺证据 |
 |---|---|---|---|
-| Windows x64 | Screenguard NSIS 单安装包 | 39282943351：离线 WebView2 体积门槛、静默安装/卸载 smoke；Windows Cargo check/tests 通过 | 用户 Windows 离线安装、启动与功能验收 |
-| macOS Apple Silicon / Intel | 未签名 Screenguard DMG | 39282943351：ARM/Intel DMG；本地回读后两份 DMG `hdiutil verify` 均 VALID；macOS Cargo check/tests 通过 | 用户 Mac 外接显示器 DDC/CI 与 ColorSync 验收；真实用户首次安装体验 |
+| Windows x64 | Screenguard 0.4.48 NSIS 单安装包 | 39435532157：Windows Cargo check/tests、C# 桥接、离线 WebView2 体积门槛、静默安装/卸载 smoke；NSIS 包已回读 | 用户 Windows 安装、启动及实际色彩/显示器功能验收 |
+| macOS Apple Silicon / Intel | Screenguard 0.4.48 未签名 DMG | 39435532157：ARM/Intel 构建；下载后两份 DMG `hdiutil verify` 均 VALID；macOS Cargo check/tests 通过 | 用户 Mac 首次启动及外接显示器 DDC/CI、ColorSync 实际验收 |
 
 历史发布记录：下方条目保留当时证据，不自动继承为当前版本结论。
 
@@ -87,11 +85,12 @@
 | 电池、ADB、自启 | 按平台接入；ADB 下载需用户接受 SDK 条款 | CI 编译 | 有设备时验证电量/网络 ADB；检查登录启动、升级后设置保留 |
 | 备份与一键还原 | 已有启动基线与恢复入口 | Rust/平台编译 | 对显示模式、窗口布局、色彩、电源逐项验证还原；测试中断与部分失败路径 |
 
-## 当前发布阻塞项
+## 当前待验收与发布条件
 
-1. Windows 和 macOS 的真实显示器行为仍需在目标设备验收，包括 DDC/CI 写入/回读、色彩配置、窗口跨屏和显示器电源控制。macOS 屏幕即使物理关闭仍留在系统在线列表、且 DDC 不可读时，系统无法判断该屏已关；未知状态必须保留为未知。
-2. 普通用户安装所需的正式签名凭据尚未完成配置：Windows 需 Authenticode；macOS 需 Developer ID Application、Apple 公证凭据和临时 keychain 密码。tag 工作流会在凭据缺失时停止，签名、公证和 Gatekeeper 检查全部成功前不会上传 macOS 包。
-3. 当前 PR #3 仍为 open/draft；GitHub 最新公开 Release 仍需确认并发布本版本。PR CI 包目前不能作为已签名、已公证的普通用户安装包。
+1. PR #8 仍为 OPEN/DRAFT，需维护者审阅并合并，之后才能生成 v0.4.48 Draft Release。不得把 Actions CI 产物说成已公开版本。
+2. Windows 与 macOS 的真实显示器行为仍需目标设备验收，包括 DDC/CI、色彩配置和窗口跨屏；用户未要求恢复的小米屏幕遥控器联动不属于支持目标。macOS 物理关屏若仍留在系统在线列表且 DDC 不可读，系统无法判断其真实电源状态。
+3. 验收后由维护者决定是否公开 Draft Release。网站读取最新公开 Release；公开前仍显示 v0.2.9 的 Windows-only 附件，因此 Mac 下载入口不会出现。
+4. 不配置签名凭据是用户明确选择，不是构建阻塞项；未签名的首次启动提示需在 Mac/Windows 实机确认，并在发布说明中保留提示。
 
 ## v0.4.38 当前交付核验（2026-10-16）
 
