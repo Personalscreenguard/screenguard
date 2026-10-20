@@ -137,7 +137,7 @@ jobs:
         run: npm ci
       - name: 构建 Windows x64 安装包
         run: npm run build:win
-      - name: 静默安装与卸载 NSIS 包烟雾检查
+      - name: 安装、启动与卸载 NSIS 包烟雾检查
         shell: pwsh
         run: |
           $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
