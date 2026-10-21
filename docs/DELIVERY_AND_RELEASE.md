@@ -4,17 +4,17 @@
 
 桌面版不提交 App Store 或 Microsoft Store，用户直接从公开的 GitHub Release 免费下载；iPhone 端维持 PWA。按用户决定，不购买或配置 Apple Developer ID / Windows Authenticode 证书，也不做 Apple 公证（macOS Tauri 构建可能保留无开发者身份的本地 ad-hoc 签名）。GitHub Actions 不再要求任何 Apple/Windows 签名 secrets，也不创建临时签名钥匙串；`KEYCHAIN_PASSWORD` 原本只是 CI 临时钥匙串的解锁口令，在此策略下不需要。macOS 首次运行可能需要用户手动允许打开，Windows 可能出现未知发布者或 SmartScreen 提示。
 
-本工作流生成双平台安装包和 SHA-256 校验文件，放入 GitHub Draft Release；审核后由维护者发布，用户即可直接从 GitHub 下载，不需要另建或接入网站。
+本工作流为 macOS Apple Silicon、macOS Intel 和 Windows x64 生成安装包及 SHA-256 校验文件，放入 GitHub Release；维护者审核后公开发布，用户即可从 GitHub 下载，不需要另建或接入网站。
 
-## 当前状态快照（2026-10-20，产品版本 0.4.48）
+## 当前状态快照（2026-10-21，产品版本 0.4.48）
 
-当前候选分支 `codex/windows-builtin-icc` 对应 [OPEN/DRAFT PR #8](https://github.com/Personalscreenguard/screenguard/pull/8)。应用代码提交为 `d71709e0a6a385643db3376ec365b541323d97ea`；PR 后续提交只更新交付状态文档，PR Checks 页面是这些文档提交的最新 CI 依据。改动让 Screenguard 在 Windows 上生成 sRGB、Display P3、DCI-P3、Adobe RGB 1998、Rec.709、Rec.2020、ProPhoto 标准参考 ICC；用户自备和 Windows 系统配置优先。生成配置不是显示器实测校准。代码位于隔离工作树，原主工作区未修改。
+PR #8 已合并到 `main`，发布提交为 `6836f7c81e6a45c135f50593d6b2183016293198`；该提交也包含 PR #2。Windows 色彩功能生成 sRGB、Display P3、DCI-P3、Adobe RGB 1998、Rec.709、Rec.2020、ProPhoto 标准参考 ICC；用户自备和 Windows 系统配置优先。生成配置不是显示器实测校准。
 
-应用代码 head CI [39435532157](https://github.com/Personalscreenguard/screenguard/actions/runs/39435532157) 全部成功，覆盖仓库检查、macOS/Windows Rust 检查和测试、Windows C# 桥接、NSIS 包装、离线 WebView2 体积门槛、静默安装/卸载 smoke，以及 Apple Silicon/Intel DMG。PR #8 后续仅文档提交的检查结果应以该 PR 的 Checks 页面为准；tag 发布任务在 PR 事件下按预期跳过。
+合并后主分支 CI [39458403659](https://github.com/Personalscreenguard/screenguard/actions/runs/39458403659) 成功；tag 发布工作流 [39460840314](https://github.com/Personalscreenguard/screenguard/actions/runs/39460840314) 成功。CI 覆盖仓库检查、macOS/Windows Rust 检查和测试、Windows C# 桥接、NSIS 包装、离线 WebView2 体积门槛、静默安装/卸载 smoke，以及 Apple Silicon/Intel DMG。
 
-三份 0.4.48 CI 产物均已下载核验：Windows NSIS EXE SHA-256 `bd8d0471534be6c88693dbdda370d7b146c37f4066b9c83763daa8fd19689c8a`；Apple Silicon DMG `hdiutil verify` 为 VALID，SHA-256 `72ace5ae947b62b2026d229c9ce38a45f1be210243c147edacfe71618c6bec50`；Intel DMG VALID，SHA-256 `9103ade7e7be2a950025c5d383e44ef53fe941cf5756a5ba230ac266ce3010ea`。Windows CI 安装卸载 smoke 不等于用户 Windows 实机验收；DMG 校验不等于 Gatekeeper 或 Mac 首次启动验收。
+公开 GitHub [Release v0.4.48](https://github.com/Personalscreenguard/screenguard/releases/tag/v0.4.48) 已包含三平台安装包、各自 SHA-256 sidecar 和 `SHA256SUMS.txt`。发布附件 SHA-256：Windows x64 `efbf407117e29ca04d1a1edf732b9a3c1ce4a9807ebc0bdcf72c1fae48e0b9b1`；Apple Silicon `84b8fdcf771ef8c0cb96da9bc30a16369f04d22b29ef05653fd902e4dd279ef8`；Intel `55a74a11749507075382035c6ff1fdf1fa70d9557acd613234db90b4a3ac0b06`。两份 DMG 均通过 `hdiutil verify`，Apple Silicon 包已在本机 M3/macOS 26.6.2 启动并确认 UI 版本为 0.4.48。未签名策略下，Gatekeeper 对新下载隔离包的首次启动体验尚未验收；Windows runner 的安装、启动和卸载 smoke 不等于用户 Windows 电脑实机验收。
 
-GitHub 当前最新公开 Release 仍为 v0.2.9，只有 Windows x64 安装包；v0.4.47 虽含三平台附件但仍为 Draft。0.4.48 目前是 PR CI 产物，尚未生成 Release。PR 审阅合并、Windows/Mac 实机验收和后续是否公开 Release 均未完成。按用户决定不做付费签名或公证；首次安装可能出现 macOS 安全提示或 Windows 未知发布者提示。
+GitHub 当前最新公开 Release 为 v0.4.48；官网从 GitHub Latest Release 获取下载入口。Windows 用户实机安装和主要功能验收、macOS 新下载包首次启动与实际外接显示器 DDC/CI、ColorSync 验收仍待用户设备验证。按用户决定不购买代码签名或公证；首次安装可能出现 macOS 安全提示或 Windows 未知发布者提示。实际显示器待机/唤醒和硬件控制不由自动化触发。
 
 ### 单软件安装范围
 
@@ -29,8 +29,8 @@ GitHub 当前最新公开 Release 仍为 v0.2.9，只有 Windows x64 安装包�
 
 | 平台 | 当前目标 | 已有自动化证据 | 尚缺证据 |
 |---|---|---|---|
-| Windows x64 | Screenguard 0.4.48 NSIS 单安装包 | 39435532157：Windows Cargo check/tests、C# 桥接、离线 WebView2 体积门槛、静默安装/卸载 smoke；NSIS 包已回读 | 用户 Windows 安装、启动及实际色彩/显示器功能验收 |
-| macOS Apple Silicon / Intel | Screenguard 0.4.48 未签名 DMG | 39435532157：ARM/Intel 构建；下载后两份 DMG `hdiutil verify` 均 VALID；macOS Cargo check/tests 通过 | 用户 Mac 首次启动及外接显示器 DDC/CI、ColorSync 实际验收 |
+| Windows x64 | Screenguard 0.4.48 NSIS 单安装包 | 39458403659 / 39460840314：Windows Cargo check/tests、C# 桥接、离线 WebView2 体积门槛、静默安装/卸载 smoke；公开附件 SHA-256 与校验清单匹配 | 用户 Windows 安装、启动及实际色彩/显示器功能验收 |
+| macOS Apple Silicon / Intel | Screenguard 0.4.48 未签名 DMG | 39458403659 / 39460840314：ARM/Intel 构建；两份 DMG `hdiutil verify` 均 VALID；Apple Silicon 包已在本机启动；公开附件 SHA-256 与校验清单匹配 | 新下载隔离包的 Gatekeeper 首次启动体验；用户 Mac 外接显示器 DDC/CI、ColorSync 实际验收 |
 
 历史发布记录：下方条目保留当时证据，不自动继承为当前版本结论。
 
