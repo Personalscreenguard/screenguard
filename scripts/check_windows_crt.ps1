@@ -24,4 +24,12 @@ $crtImports = @($output | Select-String -Pattern '(?i)\b(?:vcruntime|msvcp|concr
 if ($crtImports.Count -gt 0) {
   throw "Windows 应用仍依赖独立 Visual C++ Runtime，用户可能需要另装 VC++ Redistributable：$($crtImports -join '; ')"
 }
-Write-Host 'Windows 主程序未发现 VCRUNTIME、MSVCP 或 CONCRT 导入；无需因这些 DLL 单独安装 VC++ Redistributable。'
+$ucrtImports = @(
+  $output | ForEach-Object {
+    if ($_ -match '(?i)\bapi-ms-win-crt-[a-z0-9_-]+\.dll\b') { $Matches[0] }
+  } | Sort-Object -Unique
+)
+if ($ucrtImports.Count -gt 0) {
+  Write-Host "程序导入 Windows UCRT API-set：$($ucrtImports -join ', ')"
+}
+Write-Host '未发现 VCRUNTIME、MSVCP 或 CONCRT DLL 导入。Windows 10+ 自带 UCRT；受支持系统无需另装 VC++ Redistributable。'
