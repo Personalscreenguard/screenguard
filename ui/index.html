@@ -206,7 +206,7 @@
     </section>
 
     <!-- ===== 一键检测 ===== -->
-    <section class="card">
+    <section class="card" id="diag-card">
       <div class="card-head">
         <h2>🩺 一键检测</h2>
         <span class="hint" id="diag-when">尚未检测</span>
@@ -253,7 +253,7 @@
     <section class="card">
       <div class="card-head">
         <h2>🛟 一键恢复默认</h2>
-        <span class="hint">把「软件层面」的改动全部还原</span>
+        <span class="hint" id="restore-summary">把「软件层面」的改动全部还原</span>
       </div>
       <div class="btn-row">
         <button class="primary" id="restore-defaults">恢复到默认状态</button>
@@ -264,6 +264,26 @@
         </label>
       </div>
       <div class="hint" id="restore-note">覆盖范围：总亮度（回到原始曲线）、色彩配置、被铺满的窗口、屏幕电源、音量 —— 全部回到<b>软件启动时</b>的状态（启动时会自动存一份「基线」，所以乱调之后总能一键回到好的状态）。<b>硬件层面的设置不受影响</b>（显示器自己的亮度/音量、KVM 都不动）。</div>
+    </section>
+
+    <section class="card" id="updates-card">
+      <div class="card-head"><h2>⬆️ 软件更新</h2><span class="hint">检查 GitHub 上的公开版本</span></div>
+      <div class="btn-row"><button class="ghost" id="update-check">检查更新</button><button class="ghost" id="release-page">打开下载页</button></div>
+      <div class="hint" id="update-status">应用会定期检查公开版本；不会自动下载或安装。未签名分发下，更新由用户确认后从 GitHub 下载。</div>
+    </section>
+
+    <section class="card" id="settings-backup-card">
+      <div class="card-head"><h2>🗂️ 设置备份</h2><span class="hint">只导入导出应用偏好</span></div>
+      <div class="btn-row">
+        <button class="ghost" id="settings-export">导出设置</button><button class="ghost" id="settings-import">导入设置</button>
+        <input type="file" id="settings-file" accept="application/json,.json" style="display:none">
+      </div>
+      <div class="hint" id="settings-backup-status">备份包含应用偏好，可能含本地 IP 或设备标识；不包含恢复基线、日志、密码或令牌。只在你信任的位置保存备份文件。</div>
+    </section>
+
+    <section class="card" id="privacy-card">
+      <div class="card-head"><h2>🔒 隐私与数据</h2><span class="hint">本地优先</span></div>
+      <div class="hint">Screenguard 不要求账号，不上传显示器数据，也不内置遥测。设置与日志保存在本机。更新检查只读取 GitHub 公开版本信息；可选 ADB 工具仅在你主动下载时连接 Google。完整说明：<button class="ghost" id="privacy-page" style="padding:2px 6px">隐私与数据说明</button>。</div>
     </section>
 
   </main>

@@ -29,6 +29,11 @@ fn get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+#[tauri::command]
+fn open_external_page(page: String) -> Result<(), String> {
+    platform::open_external_page(&page)
+}
+
 /// 开机自启是否已启用
 #[tauri::command]
 async fn get_autostart() -> bool {
@@ -402,6 +407,20 @@ async fn restore_defaults() -> Result<String, String> {
 #[tauri::command]
 fn app_state_json() -> String {
     platform::app_state_json()
+}
+
+#[tauri::command]
+async fn export_user_settings_json() -> String {
+    tauri::async_runtime::spawn_blocking(platform::user_settings_json)
+        .await
+        .unwrap_or_else(|_| "{}".into())
+}
+
+#[tauri::command]
+async fn import_user_settings_json(settings_json: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || platform::import_user_settings_json(&settings_json))
+        .await
+        .map_err(|e| format!("后台任务失败：{}", e))?
 }
 
 /// 设置「退出软件时自动还原」
@@ -1639,8 +1658,8 @@ pub fn run() {
             std::thread::spawn(|| {
                 std::thread::sleep(std::time::Duration::from_secs(7));
                 let _ = platform::capture_baseline();
-                // 采集完基线再自动跑一次「一键检测」并落日志：这样每次开机都有一条基线记录，
-                // 偶发的掉线/颜色异常事后能翻日志对比（用户要的「记录日志」）。
+                // Windows 一键检测依赖 Windows 事件日志；macOS 上该卡片隐藏且不后台调用。
+                #[cfg(target_os = "windows")]
                 let _ = platform::diag_scan();
             });
 
@@ -1662,6 +1681,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_platform,
             get_version,
+            open_external_page,
             get_autostart,
             set_autostart,
             get_displays,
@@ -1710,6 +1730,8 @@ pub fn run() {
             set_audio_device,
             restore_defaults,
             app_state_json,
+            export_user_settings_json,
+            import_user_settings_json,
             set_revert_on_exit,
             mitv_volume_get,
             mitv_volume_set,
