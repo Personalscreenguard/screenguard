@@ -86,7 +86,10 @@ jobs:
           test "${#files[@]}" -eq 1
           name="Screenguard_${GITHUB_REF_NAME#v}_${{ matrix.arch }}.dmg"
           cp "${files[0]}" "release-assets/$name"
-          shasum -a 256 "release-assets/$name" > "release-assets/$name.sha256"
+          (
+            cd release-assets
+            shasum -a 256 "$name"
+          ) > "release-assets/$name.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: release-macos-${{ matrix.arch }}
@@ -156,7 +159,7 @@ jobs:
           $dest = Join-Path release-assets $name
           Copy-Item $files[0].FullName $dest
           $hash = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $name" | Set-Content -Encoding ascii "$dest.sha256"
+          [System.IO.File]::WriteAllText(($dest + '.sha256'), "$hash  $name`n", [System.Text.Encoding]::ASCII)
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows-x64
@@ -190,6 +193,7 @@ jobs:
         run: |
           cd release-assets
           cat *.sha256 > SHA256SUMS.txt
+          shasum -a 256 -c SHA256SUMS.txt
       - name: 创建或更新草稿 Release
         env:
           GH_TOKEN: ${{ github.token }}
