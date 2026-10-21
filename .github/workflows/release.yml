@@ -137,7 +137,7 @@ jobs:
         run: npm ci
       - name: 构建 Windows x64 安装包
         run: npm run build:win
-      - name: 确认主程序不依赖单独安装的 Visual C++ Runtime
+      - name: 审计 Visual C++ Redistributable 导入（Windows 10+）
         shell: pwsh
         run: ./scripts/check_windows_crt.ps1
       - name: 安装、启动与卸载 NSIS 包烟雾检查
