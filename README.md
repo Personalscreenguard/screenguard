@@ -63,6 +63,7 @@ npm run build:win      # Windows 打包（需对应 target）
 产物：`src-tauri/target/release/bundle/`
 
 ## 版本历史
+- **v0.4.49**（2026-10-21）：Windows x64 静态链接 MSVC C/C++ 运行库，并通过 PE 导入表审计确认 Windows 10+ 不需要另装 VC++ Redistributable；Windows 10+ 自带的 UCRT API-set 仍由操作系统提供。保留离线 WebView2 运行时安装包，Windows 安装与首次运行不依赖联网下载该运行时。
 - **v0.4.48**（2026-10-20）：Windows 色彩同步内置生成 sRGB、Display P3、DCI-P3、Adobe RGB、Rec.709、Rec.2020 和 ProPhoto 的标准参考 ICC 配置，不再要求用户另找文件。用户自备的显示器专属 ICC/ICM 配置仍优先；标准参考配置不等于显示器硬件校色。Windows RGB 显示器不提供灰度目标。
 - **v0.4.47**（2026-10-19）：Mac 版移除 BetterDisplay 运行依赖。DDC/CI 亮度、音量、电源状态和输入源改由应用内 Rust 组件直接访问；ColorSync 使用 macOS 系统 API；MIT 许可的 `displayplacer` v1.4.0 在构建时按架构下载、校验并随 DMG 分发。macOS HDR 控制标注为不支持；PIP、串流、虚拟屏及配置保护没有随应用分发的可靠替代实现，已停用并从控制界面移除。Windows 保留 Windows 原生 HDR 状态读取/同步入口；若显示驱动或厂商服务拒绝 Apply，界面明确报告未生效。窗口跨屏使用 Screenguard 自身能力，无需额外播放器。Windows 端依赖路径保持不变。
 - **v0.4.46**（2026-10-17）：修正主窗口电源联动开关提示，说明 macOS 同时监测 DDC、Quartz 睡眠和显示器连接变化，并明确物理关屏没有产生系统可见状态变化时无法检测。
