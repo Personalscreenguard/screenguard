@@ -6,7 +6,7 @@
 
 Screenguard 是本地桌面应用，不要求注册账号，不提供云端账户或设置同步，也不内置使用分析或遥测。显示器枚举、DDC/CI 控制、窗口布局和系统集成由本机应用调用操作系统接口或连接本地设备完成。
 
-应用偏好、恢复基线和诊断日志保存在当前操作系统用户的数据目录中。Windows 的恢复状态文件位于 `%APPDATA%\\Screenguard`；macOS 的恢复状态文件位于 `~/Library/Application Support/Screenguard`。其他应用数据由 Tauri 按应用标识放在本机用户数据目录。卸载应用不会保证删除这些本地数据。
+应用偏好、恢复基线和诊断日志保存在当前操作系统用户的数据目录中。Windows 的恢复状态文件位于 `%APPDATA%\Screenguard`；macOS 的恢复状态文件位于 `~/Library/Application Support/Screenguard`。其他应用数据由 Tauri 按应用标识放在本机用户数据目录。卸载应用不会保证删除这些本地数据。
 
 诊断日志可能包含显示器名称/标识、当前显示模式、设备能力、系统错误和你配置的本地设备地址。分享日志前请先检查内容并自行删去不想公开的信息。Screenguard 不会自动上传日志。
 
