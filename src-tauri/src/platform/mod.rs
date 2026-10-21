@@ -73,6 +73,34 @@ pub fn run_cmd(program: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Open one of the application's fixed public pages in the system browser.
+#[cfg(target_os = "macos")]
+pub fn open_external_page(page: &str) -> Result<(), String> {
+    let url = match page {
+        "releases" => "https://github.com/Personalscreenguard/screenguard/releases/latest",
+        "privacy" => "https://github.com/Personalscreenguard/screenguard/blob/main/PRIVACY.md",
+        _ => return Err("不支持打开此外部页面".into()),
+    };
+    Command::new("/usr/bin/open").arg(url).spawn()
+        .map(|_| ()).map_err(|e| format!("无法打开系统浏览器：{}", e))
+}
+
+#[cfg(target_os = "windows")]
+pub fn open_external_page(page: &str) -> Result<(), String> {
+    let url = match page {
+        "releases" => "https://github.com/Personalscreenguard/screenguard/releases/latest",
+        "privacy" => "https://github.com/Personalscreenguard/screenguard/blob/main/PRIVACY.md",
+        _ => return Err("不支持打开此外部页面".into()),
+    };
+    Command::new("rundll32.exe").args(["url.dll,FileProtocolHandler", url]).spawn()
+        .map(|_| ()).map_err(|e| format!("无法打开系统浏览器：{}", e))
+}
+
+#[cfg(target_os = "linux")]
+pub fn open_external_page(_page: &str) -> Result<(), String> {
+    Err("当前仅支持 Windows/macOS 桌面版本".into())
+}
+
 /// 判断某命令是否存在于 PATH（macOS/Linux 用；Windows 走 PowerShell/注册表，无需此函数）
 #[cfg(not(target_os = "windows"))]
 pub fn which(program: &str) -> bool {
@@ -245,24 +273,32 @@ pub fn hdr_set_dev(_dev: &str, _on: bool) -> Result<String, String> {
     Err("HDR 控制仅支持 Windows".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn capture_baseline() -> Result<String, String> {
-    Ok("非 Windows 平台不采集基线".to_string())
+    Err("基线快照仅支持 Windows/macOS".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn restore_defaults() -> Result<String, String> {
-    Err("一键恢复默认仅支持 Windows".to_string())
+    Err("恢复默认仅支持 Windows/macOS".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn set_revert_on_exit(_on: bool) -> Result<(), String> {
-    Err("退出还原仅支持 Windows".to_string())
+    Err("退出还原仅支持 Windows/macOS".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn app_state_json() -> String {
     String::from("{}")
+}
+
+#[cfg(target_os = "linux")]
+pub fn user_settings_json() -> String { String::from("{}") }
+
+#[cfg(target_os = "linux")]
+pub fn import_user_settings_json(_settings: &str) -> Result<String, String> {
+    Err("设置导入仅支持 Windows/macOS".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

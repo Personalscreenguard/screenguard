@@ -20,6 +20,129 @@ function invoke(cmd, args = {}) {
   return Promise.reject(new Error('TAURI_CORE_UNAVAILABLE'));
 }
 
+const RELEASES_PAGE = 'https://github.com/Personalscreenguard/screenguard/releases/latest';
+const UPDATE_API = 'https://api.github.com/repos/Personalscreenguard/screenguard/releases/latest';
+const UPDATE_CACHE_KEY = 'sg_update_check_v1';
+function versionParts(version) {
+  const match = String(version || '').trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/);
+  return match ? match.slice(1).map(Number) : null;
+}
+function isNewerVersion(candidate, current) {
+  const a = versionParts(candidate), b = versionParts(current);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] > b[i]; }
+  return false;
+}
+async function checkForUpdates(force = false, currentVersion = '') {
+  const status = document.getElementById('update-status');
+  const button = document.getElementById('update-check');
+  if (!status || !button) return;
+  button.disabled = true;
+  status.textContent = '正在检查 GitHub 最新公开版本…';
+  try {
+    const cached = JSON.parse(localStorage.getItem(UPDATE_CACHE_KEY) || 'null');
+    const fresh = cached && Date.now() - Number(cached.checkedAt) < 24 * 60 * 60 * 1000;
+    let release = !force && fresh ? cached.release : null;
+    if (!release) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 9000);
+      try {
+        const response = await fetch(UPDATE_API, {
+          headers: { Accept: 'application/vnd.github+json' },
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`GitHub 返回 HTTP ${response.status}`);
+        const data = await response.json();
+        release = { tag: String(data.tag_name || ''), url: String(data.html_url || RELEASES_PAGE) };
+        if (!versionParts(release.tag) || !/^https:\/\/github\.com\/Personalscreenguard\/screenguard\/releases\//.test(release.url)) {
+          throw new Error('Release 信息格式无效');
+        }
+        localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify({ checkedAt: Date.now(), release }));
+      } finally { clearTimeout(timeout); }
+    }
+    const version = currentVersion || await invoke('get_version');
+    status.textContent = isNewerVersion(release.tag, version)
+      ? `发现新版本 ${release.tag}（当前 v${version}）。打开 GitHub 下载页后，由你确认下载和安装。`
+      : `当前为 v${version}；GitHub 最新公开版本为 ${release.tag}。`;
+  } catch (error) {
+    status.textContent = `暂时无法检查更新：${errText(error)}。可直接打开 GitHub 下载页手动查看。`;
+  } finally { button.disabled = false; }
+}
+document.getElementById('update-check')?.addEventListener('click', () => checkForUpdates(true));
+document.getElementById('release-page')?.addEventListener('click', async () => {
+  try { await invoke('open_external_page', { page: 'releases' }); }
+  catch (error) { document.getElementById('update-status').textContent = `无法打开下载页：${errText(error)}`; }
+});
+document.getElementById('privacy-page')?.addEventListener('click', async () => {
+  try { await invoke('open_external_page', { page: 'privacy' }); }
+  catch (error) { setStatus(`无法打开隐私说明：${errText(error)}`, false); }
+});
+
+async function platformSettingsBackup() {
+  const platform = await invoke('get_platform');
+  const version = await invoke('get_version');
+  const native = JSON.parse(await invoke('export_user_settings_json') || '{}');
+  const uiPreferences = {};
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('sg_') && key !== UPDATE_CACHE_KEY) uiPreferences[key] = localStorage.getItem(key);
+  }
+  return {
+    format: 'screenguard-settings', schemaVersion: 1, platform,
+    appVersion: version, exportedAt: new Date().toISOString(),
+    preferences: {
+      local: uiPreferences,
+      native,
+      powerLinkEnabled: await invoke('get_power_link_preference').catch(() => false)
+    }
+  };
+}
+document.getElementById('settings-export')?.addEventListener('click', async () => {
+  const status = document.getElementById('settings-backup-status');
+  try {
+    const bundle = await platformSettingsBackup();
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Screenguard-settings-${bundle.platform}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    status.textContent = '设置备份已导出。文件可能含本地 IP 和设备标识，请妥善保管。';
+  } catch (error) { status.textContent = `导出失败：${errText(error)}`; }
+});
+const settingsFile = document.getElementById('settings-file');
+document.getElementById('settings-import')?.addEventListener('click', () => settingsFile?.click());
+settingsFile?.addEventListener('change', async () => {
+  const file = settingsFile.files && settingsFile.files[0];
+  if (!file) return;
+  const status = document.getElementById('settings-backup-status');
+  try {
+    if (file.size > 1024 * 1024) throw new Error('设置备份文件超过 1 MB');
+    const bundle = JSON.parse(await file.text());
+    const platform = await invoke('get_platform');
+    if (bundle.format !== 'screenguard-settings' || bundle.schemaVersion !== 1 || !bundle.preferences) {
+      throw new Error('这不是受支持的 Screenguard 设置备份');
+    }
+    if (bundle.platform !== platform) throw new Error('备份来自另一操作系统；为避免导入不兼容的设备设置，请在相同平台恢复');
+    const local = bundle.preferences.local;
+    if (!local || typeof local !== 'object' || Array.isArray(local)) throw new Error('本地偏好格式无效');
+    for (const [key, value] of Object.entries(local)) {
+      if (!/^sg_[a-z0-9_]{1,100}$/i.test(key) || typeof value !== 'string' || value.length > 20000) {
+        throw new Error('备份含无效的本地偏好');
+      }
+    }
+    if (!confirm('导入会覆盖 Screenguard 当前的应用偏好。硬件恢复基线和日志不会被覆盖。继续吗？')) return;
+    const nativeJson = JSON.stringify(bundle.preferences.native || {});
+    const imported = await invoke('import_user_settings_json', { settingsJson: nativeJson });
+    await invoke('set_power_link_preference', { enabled: bundle.preferences.powerLinkEnabled === true });
+    for (const key of Object.keys(localStorage)) if (key.startsWith('sg_')) localStorage.removeItem(key);
+    for (const [key, value] of Object.entries(local)) localStorage.setItem(key, value);
+    await window.refreshPowerLinkButton?.();
+    status.textContent = `${imported}。本地应用偏好已恢复；硬件基线仍保留本机数据。`;
+  } catch (error) { status.textContent = `导入失败：${errText(error)}`; }
+  finally { settingsFile.value = ''; }
+});
+
 // DDC 写入串行化 + 合并最新值：拖动滑块时最多只有 1 个后台进程在跑，
 // 中间值被覆盖、最终值保证送达（此前每格都新起 powershell 进程，拖动即卡死）
 const vpState = new Map();
@@ -1038,7 +1161,15 @@ document.getElementById('mute-btn').onclick = async () => {
     const names = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
     setBadge(names[p] || p);
     applyPlatformCopy(p);
-    if (p === 'macos') document.getElementById('native-display-card').style.display = '';
+    if (p === 'macos') {
+      document.getElementById('native-display-card').style.display = '';
+      document.getElementById('diag-card').style.display = 'none';
+      const summary = document.getElementById('restore-summary');
+      const note = document.getElementById('restore-note');
+      if (summary) summary.textContent = '恢复本机已记录且系统允许恢复的状态';
+      if (note) note.textContent = 'macOS 恢复范围：Screenguard 首次启动时记录的显示布局、可读取的显示器 DDC 电源状态、被铺满窗口，并请求唤醒显示器。未能读取或不支持 DDC 的屏幕会跳过。ColorSync 配置、显示器硬件亮度/音量不会由此功能恢复。';
+    }
+    if (p !== 'windows') document.getElementById('diag-card').style.display = 'none';
     if (p === 'windows' || p === 'macos') {
       // Windows 枚举 CoreAudio 端点；macOS 仅控制系统默认输出。
       document.getElementById('audio-card').style.display = '';
@@ -1056,6 +1187,7 @@ document.getElementById('mute-btn').onclick = async () => {
     const v = await invoke('get_version');
     const verEl = document.getElementById('version');
     if (verEl) verEl.textContent = 'v' + v;
+    checkForUpdates(false, v);
   } catch (e) { /* 预览模式：静默 */ }
   await refreshDisplays();
 })();
