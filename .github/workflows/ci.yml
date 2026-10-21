@@ -107,6 +107,9 @@ jobs:
         run: npm ci
       - name: 构建 Windows NSIS 安装包
         run: npm run build:win
+      - name: 审计 Visual C++ Redistributable 导入（Windows 10+）
+        shell: pwsh
+        run: ./scripts/check_windows_crt.ps1
       - name: 确认离线 WebView2 运行时已打入安装包
         shell: pwsh
         run: |

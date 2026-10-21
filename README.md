@@ -32,9 +32,10 @@ Windows 标准 RGB 色彩空间配置由 Screenguard 首次使用时生成并保
 
 ## 依赖
 
+- **Windows 运行环境**：当前 Windows x64 包要求 Windows 10 或更新版本；Rust 的 `x86_64-pc-windows-msvc` 目标最低要求 Windows 10。Windows 10 起自带 Universal C Runtime（UCRT）。PE 检查发现程序调用 UCRT API-set，但没有发现 `VCRUNTIME*.dll`、`MSVCP*.dll` 或 `CONCRT*.dll` 导入，因此受支持的 Windows 10+ 系统不需另外安装 VC++ Redistributable。
 - **用户安装项**：核心显示器控制无需另行安装 BetterDisplay、displayplacer 或其他显示器控制软件。桌面安装包按免费分发，不购买代码签名证书；macOS 不做 Developer ID 签名和公证，Windows 不做 Authenticode 签名。首次运行时 macOS 可能要求手动允许打开，Windows 可能提示未知发布者。
 - **macOS 随包组件**：MIT 许可的 `displayplacer` 布局工具在构建时按架构下载并校验，随 Screenguard 安装包分发。显示器枚举、DDC/CI 和色彩控制走应用内组件或 macOS 系统 API。DDC 能力取决于显示器和连接链路。任意窗口跨屏首次使用需在“系统设置 → 隐私与安全性 → 辅助功能”允许 Screenguard 控制窗口；如窗口标题无法读取，检查“屏幕与系统音频录制”权限。
-- **Windows 随包/系统组件**：DDC 走 Windows 自带的 `dxva2.dll`，不需要另装显示器控制软件。NSIS 安装包嵌入微软 WebView2 离线运行时安装器；首次安装不要求电脑预先安装 WebView2 或联网，但安装包会增加约 127 MB。
+- **Windows 随包/系统组件**：DDC 走 Windows 自带的 `dxva2.dll`，不需要另装显示器控制软件。NSIS 安装包嵌入微软 WebView2 离线运行时安装器；首次安装不要求电脑预先安装 WebView2 或联网。当前 CI 下载的安装包 artifact 约 209 MiB，具体大小会随 WebView2 版本变化。
 - **可选联网显示器功能**：连接支持网络调试的显示器时，Screenguard 可在用户主动选择后从 Google 获取 Android Platform-Tools（ADB），存放在应用数据目录中；无需用户自行寻找或安装 ADB。该功能需要网络，并按界面提示确认 Google SDK 条款，不影响普通显示器控制功能。
 - **操作系统自带命令**：应用还会调用 macOS 的 `pmset`、`caffeinate`、`osascript`、`launchctl` 等系统工具，以及 Windows 的 PowerShell、注册表和系统显示 API；这些属于系统组件，不是需要用户另装的软件。
 - Linux 当前不在支持或打包范围内。
@@ -62,6 +63,7 @@ npm run build:win      # Windows 打包（需对应 target）
 产物：`src-tauri/target/release/bundle/`
 
 ## 版本历史
+- **v0.4.49**（2026-10-21）：Windows x64 静态链接 MSVC C/C++ 运行库，并通过 PE 导入表审计确认 Windows 10+ 不需要另装 VC++ Redistributable；Windows 10+ 自带的 UCRT API-set 仍由操作系统提供。保留离线 WebView2 运行时安装包，Windows 安装与首次运行不依赖联网下载该运行时。
 - **v0.4.48**（2026-10-20）：Windows 色彩同步内置生成 sRGB、Display P3、DCI-P3、Adobe RGB、Rec.709、Rec.2020 和 ProPhoto 的标准参考 ICC 配置，不再要求用户另找文件。用户自备的显示器专属 ICC/ICM 配置仍优先；标准参考配置不等于显示器硬件校色。Windows RGB 显示器不提供灰度目标。
 - **v0.4.47**（2026-10-19）：Mac 版移除 BetterDisplay 运行依赖。DDC/CI 亮度、音量、电源状态和输入源改由应用内 Rust 组件直接访问；ColorSync 使用 macOS 系统 API；MIT 许可的 `displayplacer` v1.4.0 在构建时按架构下载、校验并随 DMG 分发。macOS HDR 控制标注为不支持；PIP、串流、虚拟屏及配置保护没有随应用分发的可靠替代实现，已停用并从控制界面移除。Windows 保留 Windows 原生 HDR 状态读取/同步入口；若显示驱动或厂商服务拒绝 Apply，界面明确报告未生效。窗口跨屏使用 Screenguard 自身能力，无需额外播放器。Windows 端依赖路径保持不变。
 - **v0.4.46**（2026-10-17）：修正主窗口电源联动开关提示，说明 macOS 同时监测 DDC、Quartz 睡眠和显示器连接变化，并明确物理关屏没有产生系统可见状态变化时无法检测。
