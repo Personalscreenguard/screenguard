@@ -325,9 +325,6 @@ async fn restore_foreground() -> Result<(), String> {
             (Ok(()), Err(display)) => Err(display),
         }
     }
-
-    #[cfg(target_os = "linux")]
-    window_restore
 }
 
 /// 注册全局快捷键（Ctrl+Alt+L：全部屏幕待机/唤醒 切换）

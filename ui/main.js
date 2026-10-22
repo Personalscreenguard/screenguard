@@ -30,7 +30,7 @@ function invoke(cmd, args = {}) {
 
 
 // 后端 platform_name() 在 macOS 返回 "macOS"（大写 O），
-// 统一归一成 'macos'/'windows'/'linux' 再做判断，避免大小写导致的平台分支失效。
+// 统一归一成 'macos'/'windows' 再做判断，避免大小写导致的平台分支失效。
 function normPlatform(p) {
   const v = String(p || '').toLowerCase();
   if (v.startsWith('mac') || v === 'darwin') return 'macos';
@@ -483,7 +483,7 @@ async function loadDisplayModes(displays, box) {
         }
       });
     } catch (_) {
-      // Windows/Linux 当前由系统设置或各自平台工具管理显示模式。
+      // Windows 当前由系统设置或各自平台工具管理显示模式。
     }
   }
 }
@@ -623,12 +623,6 @@ function applyPlatformCopy(p) {
       grayOption.disabled = true;
       grayOption.title = 'Windows RGB 显示器不能安全使用灰度 ICC 配置';
     }
-  } else if (p === 'linux') {
-    matchMac.disabled = true;
-    matchMac.title = 'Linux 版暂未实现';
-    const apply = document.getElementById('apply-color');
-    if (apply) { apply.disabled = true; apply.title = 'Linux 版暂未实现'; }
-    if (hdrButton) { hdrButton.disabled = true; setBtnLabel('hdr-sync', 'HDR 不支持'); }
   } else {
     if (grayOption) {
       grayOption.disabled = false;
@@ -1163,7 +1157,7 @@ document.getElementById('mute-btn').onclick = async () => {
 (async function startup() {
   try {
     const p = await getPlatform();
-    const names = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
+    const names = { macos: 'macOS', windows: 'Windows' };
     setBadge(names[p] || p);
     applyPlatformCopy(p);
     if (p === 'macos') {

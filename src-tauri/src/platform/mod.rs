@@ -15,9 +15,9 @@ pub struct DisplayInfo {
     pub volume: Option<u32>,
     /// 当前色彩配置文件名（ColorSync profile）
     pub color_profile: Option<String>,
-    /// 平台特定的显示器句柄（macOS=CGDirectDisplayID；Windows/Linux 用内部 id）
+    /// 平台特定的显示器句柄（macOS=CGDirectDisplayID；Windows 用内部 id）
     #[serde(skip_serializing)]
-    #[allow(dead_code)] // macOS 用于 DDC 句柄；Windows/Linux 恒为 None，非死代码
+    #[allow(dead_code)] // macOS 用于 DDC 句柄；Windows 恒为 None，非死代码
     pub ddc_id: Option<u32>,
 }
 
@@ -96,12 +96,7 @@ pub fn open_external_page(page: &str) -> Result<(), String> {
         .map(|_| ()).map_err(|e| format!("无法打开系统浏览器：{}", e))
 }
 
-#[cfg(target_os = "linux")]
-pub fn open_external_page(_page: &str) -> Result<(), String> {
-    Err("当前仅支持 Windows/macOS 桌面版本".into())
-}
-
-/// 判断某命令是否存在于 PATH（macOS/Linux 用；Windows 走 PowerShell/注册表，无需此函数）
+/// 判断某命令是否存在于 PATH（macOS 用；Windows 走 PowerShell/注册表，无需此函数）
 #[cfg(not(target_os = "windows"))]
 pub fn which(program: &str) -> bool {
     Command::new("which")
@@ -112,7 +107,7 @@ pub fn which(program: &str) -> bool {
 }
 
 /// 系统默认输出设备信息（Windows CoreAudio 端点 / macOS 系统默认输出）
-/// 结构体放共享层：命令签名三平台一致，Linux 由下方存根返回明确错误。
+/// 结构体放共享层：命令签名两平台一致。
 #[derive(Serialize, Clone, Debug)]
 pub struct SystemAudio {
     /// 端点友好名（如「扬声器 (2- Realtek(R) Audio)」「NE160QDM-NZ8 (NVIDIA High Definition Audio)」）
@@ -126,21 +121,6 @@ pub struct SystemAudio {
     pub adjustable: bool,
     /// 端点形态因子（9 = DigitalAudioDisplayDevice，即 HDMI/DP 显示器音频）
     pub form_factor: u32,
-}
-
-#[cfg(target_os = "linux")]
-pub fn get_system_audio() -> Result<SystemAudio, String> {
-    Err("Linux 系统音量控制尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn set_system_volume(_v: u32) -> Result<(), String> {
-    Err("Linux 系统音量控制尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn set_system_mute(_on: bool) -> Result<(), String> {
-    Err("Linux 系统静音控制尚未实现".to_string())
 }
 
 /// 带电池的连接设备（笔记本内电池 / USB·2.4G 无线键鼠 / 蓝牙耳机鼠标等）
@@ -165,11 +145,6 @@ pub struct BatteryInfo {
     pub full_mwh: u32,
 }
 
-#[cfg(target_os = "linux")]
-pub fn get_batteries() -> Result<Vec<BatteryInfo>, String> {
-    Err("Linux 电池设备监控尚未实现".to_string())
-}
-
 // ---------- 软件层总亮度 / HDR / 前台窗口铺满 / 全局快捷键（非 Windows 存根） ----------
 
 #[cfg(not(target_os = "windows"))]
@@ -190,27 +165,6 @@ pub fn hdr_states() -> String {
 #[cfg(not(target_os = "windows"))]
 pub fn hdr_set(_on: bool) -> Result<String, String> {
     Err("HDR 同步仅支持 Windows".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn span_foreground(_mode: u32) -> Result<String, String> {
-    Err("窗口铺满仅支持 macOS / Windows".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn restore_foreground() -> Result<(), String> {
-    Err("窗口铺满仅支持 Windows/macOS".to_string())
-}
-
-/// Linux 尚未实现全局快捷键；macOS / Windows 由各自平台模块提供。
-#[cfg(target_os = "linux")]
-pub fn hotkey_start() -> Result<String, String> {
-    Err("全局快捷键暂不支持 Linux".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn hotkey_label() -> String {
-    String::new()
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -238,67 +192,9 @@ pub struct AudioEndpoint {
     pub is_default: bool,
 }
 
-#[cfg(target_os = "linux")]
-pub fn list_windows() -> Result<String, String> {
-    Err("窗口列表仅支持 macOS / Windows".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn span_window(_hwnd: i64, _mode: u32) -> Result<String, String> {
-    Err("窗口铺满仅支持 macOS / Windows".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn audio_endpoints() -> Result<Vec<AudioEndpoint>, String> {
-    Err("Linux 音频端点枚举尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn set_audio_device(_id: &str) -> Result<(), String> {
-    Err("Linux 音频端点选择尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn set_system_volume_sel(_v: u32) -> Result<(), String> {
-    Err("Linux 系统音量控制尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn set_system_mute_sel(_on: bool) -> Result<(), String> {
-    Err("Linux 系统静音控制尚未实现".to_string())
-}
-
 #[cfg(not(target_os = "windows"))]
 pub fn hdr_set_dev(_dev: &str, _on: bool) -> Result<String, String> {
     Err("HDR 控制仅支持 Windows".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn capture_baseline() -> Result<String, String> {
-    Err("基线快照仅支持 Windows/macOS".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn restore_defaults() -> Result<String, String> {
-    Err("恢复默认仅支持 Windows/macOS".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn set_revert_on_exit(_on: bool) -> Result<(), String> {
-    Err("退出还原仅支持 Windows/macOS".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn app_state_json() -> String {
-    String::from("{}")
-}
-
-#[cfg(target_os = "linux")]
-pub fn user_settings_json() -> String { String::from("{}") }
-
-#[cfg(target_os = "linux")]
-pub fn import_user_settings_json(_settings: &str) -> Result<String, String> {
-    Err("设置导入仅支持 Windows/macOS".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -366,11 +262,6 @@ pub fn align_restore_modes() -> Result<String, String> {
     Err("当前平台暂不支持还原双屏模式".to_string())
 }
 
-#[cfg(target_os = "linux")]
-pub fn set_screen_inches(_manuf: &str, _inches: f64) -> Result<(), String> {
-    Err("手动显示器物理尺寸设置暂不支持 Linux".to_string())
-}
-
 #[cfg(not(target_os = "macos"))]
 pub fn get_display_modes(_display_id: &str) -> Result<Vec<DisplayMode>, String> {
     Err("当前平台暂不支持读取显示模式".to_string())
@@ -392,31 +283,6 @@ pub fn display_action(
 }
 
 // ---------- 屏幕电源控制 ----------
-#[cfg(target_os = "linux")]
-pub fn screen_off() -> Result<(), String> {
-    Err("Linux 屏幕待机控制尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn screen_wake() -> Result<(), String> {
-    Err("Linux 屏幕唤醒控制尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn set_display_power(_display_id: &str, _mode: u32) -> Result<(), String> {
-    Err("显示器电源模式控制暂仅支持 macOS / Windows".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn get_display_power(_display_id: &str) -> Result<u32, String> {
-    Err("显示器电源模式控制暂仅支持 macOS / Windows".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn display_snapshot() -> Vec<String> {
-    Vec::new()
-}
-
 #[cfg(not(target_os = "macos"))]
 pub fn display_sleep_states() -> Vec<DisplaySleepState> {
     Vec::new()
@@ -450,50 +316,11 @@ pub struct AdbStatus {
     pub tip: String,
 }
 
-#[cfg(target_os = "linux")]
-pub fn adb_status() -> AdbStatus {
-    AdbStatus {
-        available: false,
-        path: String::new(),
-        devices: Vec::new(),
-        tip: "Linux 版 ADB 联网控制尚未实现".to_string(),
-    }
-}
-
-#[cfg(target_os = "linux")]
-pub fn adb_connect(_addr: &str) -> Result<String, String> {
-    Err("Linux 版 ADB 联网控制尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn adb_power(_serial: &str) -> Result<String, String> {
-    Err("Linux 版 ADB 联网控制尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn adb_volume(_serial: &str, _up: bool) -> Result<String, String> {
-    Err("Linux 版 ADB 联网控制尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn adb_shell(_serial: &str, _cmd: &str) -> Result<String, String> {
-    Err("Linux 版 ADB 联网控制尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub fn adb_download() -> Result<String, String> {
-    Err("Linux 版 ADB 自动下载尚未实现".to_string())
-}
-
-#[cfg(target_os = "linux")]
-mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 
-#[cfg(target_os = "linux")]
-pub use linux::*;
 #[cfg(target_os = "macos")]
 pub use macos::*;
 #[cfg(target_os = "windows")]

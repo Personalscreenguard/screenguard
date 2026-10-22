@@ -611,7 +611,7 @@ async function loadPanelDisplayModes(displays, box){
           pwHint('显示模式切换失败：'+(error&&error.message?error.message:error), true);
         }finally{ select.disabled = false; }
       });
-    }catch(_){ /* Windows/Linux 显示模式由各自平台控制 */ }
+    }catch(_){ /* Windows 显示模式由系统设置管理 */ }
   }
 }
 
@@ -1292,8 +1292,7 @@ window.addEventListener('storage', ev => {
   if (ev.key === LINK_KEY) syncPowerLinkPreference();
 });
 // 按平台调整文案/可用性：
-// Windows 没有内建 P3 屏，「对齐Mac」的等价语义是「把主屏色彩配置对齐到其它屏」；
-// Linux 端这些能力尚未实现，置灰并标注，避免点了只弹错。
+// Windows 没有内建 P3 屏，「对齐Mac」的等价语义是「把主屏色彩配置对齐到其它屏」。
 getPlatform().then(p=>{
   panelPlatform = p;
   link.platform = p;
@@ -1335,12 +1334,6 @@ getPlatform().then(p=>{
     align.title='把主屏当前的色彩配置应用到其它屏';
   }else if(p==='macos'){
     align.title='外接屏对齐 Mac 内建屏（Display P3）';
-  }
-  if(p==='linux'){
-    ['cell-color','cell-brisync','cell-hdr','cell-align','cell-ppi','cell-rotate'].forEach(id=>{
-      const el=document.getElementById(id);
-      if(el){ el.style.opacity='.45'; el.title='Linux 版暂未实现'; }
-    });
   }
 }).catch(()=>{ /* 预览模式静默 */ });
 load();
