@@ -15,3 +15,5 @@ dist/
 # 本地环境
 .env
 .env.local
+
+.DS_Store
