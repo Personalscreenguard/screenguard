@@ -4,64 +4,108 @@
 <meta charset="UTF-8" />
 <title>屏幕守护 · 提醒</title>
 <style>
-  * { box-sizing:border-box; margin:0; padding:0; }
-  html,body { background:transparent; overflow:hidden; }
-  body { font-family:-apple-system,"PingFang SC","Segoe UI",Roboto,sans-serif; color:#eef1f6; font-size:12.5px; user-select:none; -webkit-font-smoothing:antialiased; }
-  .n { background:linear-gradient(180deg,#242a38 0%,#1a1e2b 100%); border:1px solid rgba(255,255,255,.12); border-radius:14px; padding:11px 13px; height:100vh; display:flex; gap:10px; align-items:flex-start; box-shadow:0 8px 24px rgba(0,0,0,.35); }
-  .ico { font-size:17px; line-height:1.1; }
-  .body { flex:1; min-width:0; }
-  .t { font-weight:700; font-size:13px; margin-bottom:3px; }
-  .m { color:#a8b0bf; line-height:1.5; word-break:break-word; }
-  .x { cursor:pointer; color:#a8b0bf; font-size:12px; padding:0 2px; }
-  .x:hover { color:#fff; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: transparent; overflow: hidden; height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Segoe UI", Roboto, sans-serif;
+    color: #e9edf5;
+    font-size: 12.5px;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  .n {
+    height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 12px;
+    background: linear-gradient(180deg, #1b202b 0%, #12151c 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 13px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  }
+  .ico {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    background: rgba(79, 140, 255, 0.14);
+    color: #7dabff;
+  }
+  .ico svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .body { flex: 1 1 auto; min-width: 0; }
+  .t { font-size: 12.5px; font-weight: 620; margin-bottom: 3px; }
+  .m { color: #8b95a8; line-height: 1.5; word-break: break-word; }
+  .x {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #6b7488;
+    cursor: pointer;
+  }
+  .x:hover { color: #e9edf5; background: rgba(255,255,255,0.08); }
+  .x svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 </style>
 </head>
 <body>
 <div class="n">
-  <div class="ico" id="ico">💡</div>
+  <div class="ico">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.5"/></svg>
+  </div>
   <div class="body">
     <div class="t" id="t">屏幕守护</div>
     <div class="m" id="m"></div>
   </div>
-  <div class="x" id="x" title="关闭">✕</div>
+  <button class="x" id="x" title="关闭">
+    <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+  </button>
 </div>
 <script>
-function invoke(cmd, args={}){ if(window.__TAURI__&&window.__TAURI__.core) return window.__TAURI__.core.invoke(cmd,args); return Promise.reject(new Error('NO_TAURI')); }
-function paint(p){
+function invoke(cmd, args = {}) {
+  if (window.__TAURI__ && window.__TAURI__.core) return window.__TAURI__.core.invoke(cmd, args);
+  return Promise.reject(new Error('NO_TAURI'));
+}
+function paint(p) {
   p = p || {};
-  document.getElementById('ico').textContent = p.icon || '💡';
   document.getElementById('t').textContent = p.title || '屏幕守护';
   document.getElementById('m').textContent = p.body || '';
 }
-function close(){ invoke('close_notify').catch(()=>{}); }
+function close() { invoke('close_notify').catch(() => {}); }
 document.getElementById('x').onclick = close;
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') close(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
 
 // 必须等 window.__TAURI__ 注入完成再调用（窗口刚创建时它还没就绪）
-function ready(cb){
+function ready(cb) {
   if (window.__TAURI__ && window.__TAURI__.core) return cb();
-  setTimeout(function(){ ready(cb); }, 60);
+  setTimeout(function () { ready(cb); }, 60);
 }
 
 // 内容同步：只在「窗口可见」时主动拉取。
 // （只靠 Rust emit 不可靠：窗口首次创建时页面还没加载完，事件收不到；
 //   而同一窗口被复用第二次显示时，也没有重新执行的入口。）
-function pull(){ invoke('get_notify_payload').then(paint).catch(function(){}); }
+function pull() { invoke('get_notify_payload').then(paint).catch(function () {}); }
 
 let timer = null;
-function armClose(){
+function armClose() {
   if (timer) clearTimeout(timer);
   timer = setTimeout(close, 12000);   // 每次显示都重新计时，保证会自动消失
 }
-function tick(){
+function tick() {
   if (document.visibilityState === 'visible') { pull(); armClose(); }
 }
-ready(function(){
+ready(function () {
   pull();
   armClose();
   setInterval(tick, 800);            // 兜底轮询：窗口被再次显示时刷新内容并重新计时
 });
-document.addEventListener('visibilitychange', function(){
+document.addEventListener('visibilitychange', function () {
   if (document.visibilityState === 'visible') { pull(); armClose(); }
 });
 </script>

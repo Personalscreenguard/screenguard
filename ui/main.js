@@ -6,10 +6,18 @@ const platformBadge = document.getElementById('platform-badge');
 
 function setStatus(msg, ok = true) {
   statusEl.textContent = msg;
-  statusEl.style.color = ok ? '' : '#ef6a6a';
+  statusEl.style.color = ok ? '' : '#f0706f';
 }
 
 function setBadge(txt) { platformBadge.textContent = txt; }
+
+// 按钮常带图标：只改文字节点，不覆盖图标
+function setBtnLabel(id, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const label = el.querySelector('.btn-label');
+  (label || el).textContent = text;
+}
 
 function invoke(cmd, args = {}) {
   // Tauri 2：核心 API 暴露在 window.__TAURI__.core
@@ -19,6 +27,17 @@ function invoke(cmd, args = {}) {
   // 调试/无 Tauri 环境：返回假数据，避免页面空白
   return Promise.reject(new Error('TAURI_CORE_UNAVAILABLE'));
 }
+
+
+// 后端 platform_name() 在 macOS 返回 "macOS"（大写 O），
+// 统一归一成 'macos'/'windows'/'linux' 再做判断，避免大小写导致的平台分支失效。
+function normPlatform(p) {
+  const v = String(p || '').toLowerCase();
+  if (v.startsWith('mac') || v === 'darwin') return 'macos';
+  if (v.startsWith('win')) return 'windows';
+  return v;
+}
+function getPlatform() { return invoke('get_platform').then(normPlatform); }
 
 const RELEASES_PAGE = 'https://github.com/Personalscreenguard/screenguard/releases/latest';
 const UPDATE_API = 'https://api.github.com/repos/Personalscreenguard/screenguard/releases/latest';
@@ -33,12 +52,13 @@ function isNewerVersion(candidate, current) {
   for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] > b[i]; }
   return false;
 }
-async function checkForUpdates(force = false, currentVersion = '') {
-  const status = document.getElementById('update-status');
+async function checkForUpdates(force = false, currentVersion = '', quiet = false) {
   const button = document.getElementById('update-check');
-  if (!status || !button) return;
+  if (!button) return;
+  // 提示统一写底部状态栏；静默检查只在发现新版本时占版面
+  const say = text => { if (!quiet) setStatus(text); };
   button.disabled = true;
-  status.textContent = '正在检查 GitHub 最新公开版本…';
+  say('正在检查更新…');
   try {
     const cached = JSON.parse(localStorage.getItem(UPDATE_CACHE_KEY) || 'null');
     const fresh = cached && Date.now() - Number(cached.checkedAt) < 24 * 60 * 60 * 1000;
@@ -62,17 +82,27 @@ async function checkForUpdates(force = false, currentVersion = '') {
       } finally { clearTimeout(timeout); }
     }
     const version = currentVersion || await invoke('get_version');
-    status.textContent = isNewerVersion(release.tag, version)
-      ? `发现新版本 ${release.tag}（当前 v${version}）。打开 GitHub 下载页后，由你确认下载和安装。`
-      : `当前为 v${version}；GitHub 最新公开版本为 ${release.tag}。`;
+    if (isNewerVersion(release.tag, version)) {
+      // 静默检查也要让「发现新版本」可见
+      setStatus(`发现新版本 ${release.tag}（当前 v${version}），点「打开下载页」前往`);
+      button.textContent = '打开下载页';
+      button.dataset.mode = 'download';
+      button.disabled = false;
+      return;
+    }
+    say(`已是最新版本 v${version}`);
   } catch (error) {
-    status.textContent = `暂时无法检查更新：${errText(error)}。可直接打开 GitHub 下载页手动查看。`;
+    say(`无法检查更新：${errText(error)}`);
   } finally { button.disabled = false; }
 }
-document.getElementById('update-check')?.addEventListener('click', () => checkForUpdates(true));
-document.getElementById('release-page')?.addEventListener('click', async () => {
-  try { await invoke('open_external_page', { page: 'releases' }); }
-  catch (error) { document.getElementById('update-status').textContent = `无法打开下载页：${errText(error)}`; }
+document.getElementById('update-check')?.addEventListener('click', async () => {
+  const btn = document.getElementById('update-check');
+  if (btn?.dataset.mode === 'download') {
+    try { await invoke('open_external_page', { page: 'releases' }); }
+    catch (error) { setStatus('无法打开下载页：' + errText(error), false); }
+    return;
+  }
+  checkForUpdates(true);
 });
 document.getElementById('privacy-page')?.addEventListener('click', async () => {
   try { await invoke('open_external_page', { page: 'privacy' }); }
@@ -80,7 +110,7 @@ document.getElementById('privacy-page')?.addEventListener('click', async () => {
 });
 
 async function platformSettingsBackup() {
-  const platform = await invoke('get_platform');
+  const platform = await getPlatform();
   const version = await invoke('get_version');
   const native = JSON.parse(await invoke('export_user_settings_json') || '{}');
   const uiPreferences = {};
@@ -119,7 +149,7 @@ settingsFile?.addEventListener('change', async () => {
   try {
     if (file.size > 1024 * 1024) throw new Error('设置备份文件超过 1 MB');
     const bundle = JSON.parse(await file.text());
-    const platform = await invoke('get_platform');
+    const platform = await getPlatform();
     if (bundle.format !== 'screenguard-settings' || bundle.schemaVersion !== 1 || !bundle.preferences) {
       throw new Error('这不是受支持的 Screenguard 设置备份');
     }
@@ -165,8 +195,8 @@ function sendVCP(kind, id, val) {
 
 // ===== 屏幕电源（纯本地，不依赖网络）=====
 // 全部待机走平台系统级指令：一次控制全部屏，含不走 DDC 的屏。
-const pwNote = document.getElementById('pw-note');
-function pwStat(t, ok = true) { pwNote.textContent = t; pwNote.style.color = ok ? '' : '#ef6a6a'; }
+// 操作结果统一进底部状态栏，卡片里不再堆一行行小字说明。
+function pwStat(t, ok = true) { setStatus(t, ok); }
 
 document.getElementById('pw-off').addEventListener('click', async () => {
   pwStat('正在让全部屏幕待机…');
@@ -192,10 +222,10 @@ async function readPowerLinkPreference() {
   }
 }
 function paintPowerLinkButton(enabled) {
-  powerLinkBtn.textContent = enabled ? '🔗 电源联动：开' : '🔗 电源联动：关';
+  const label = powerLinkBtn.querySelector('.switch-text');
+  if (label) label.textContent = enabled ? '已开启' : '关闭';
+  powerLinkBtn.classList.toggle('is-on', enabled);
   powerLinkBtn.setAttribute('aria-pressed', String(enabled));
-  powerLinkBtn.classList.toggle('primary', enabled);
-  powerLinkBtn.classList.toggle('ghost', !enabled);
   powerLinkBtn.title = enabled
     ? '已开启。后台监测显示器电源与连接变化；macOS 还监测 Quartz 单屏睡眠状态。'
     : '开启后监测显示器电源、Quartz 睡眠与连接变化；若物理关屏不改变任何系统可见状态，macOS 无法检测。';
@@ -250,14 +280,20 @@ powerLinkBtn.addEventListener('click', async () => {
   }
 });
 
+// 连点「刷新」或切换模式后自动刷新时，只认最后一次请求的结果，
+// 避免先发后到的旧数据覆盖新状态。
+let displaysRequestId = 0;
 async function refreshDisplays() {
+  const requestId = ++displaysRequestId;
   try {
     setStatus('读取显示器…');
     const displays = await invoke('get_displays');
+    if (requestId !== displaysRequestId) return;
     renderDisplays(displays);
     loadNativeDisplayTargets(displays);
     setStatus('就绪');
   } catch (e) {
+    if (requestId !== displaysRequestId) return;
     renderDisplays([]);
     setStatus(e.message === 'TAURI_CORE_UNAVAILABLE' ? '非 Tauri 环境（预览模式）' : '读取显示器失败：' + e.message, false);
   }
@@ -272,7 +308,7 @@ function loadNativeDisplayTargets(displays) {
   const previousTarget = target.value;
   const options = (displays || []).map(d => ({
     id: d.id,
-    label: `${d.name || d.id}${d.main ? '（主屏）' : ''} · ${d.resolution || ''}`
+    label: `${d.name || d.id}${d.main && !String(d.name || '').includes('主屏') ? '（主屏）' : ''} · ${d.resolution || ''}`
   }));
   for (const select of [source, target]) {
     select.replaceChildren();
@@ -304,11 +340,10 @@ document.querySelectorAll('#native-display-card [data-native-action]').forEach(b
   button.addEventListener('click', async () => {
     const source = document.getElementById('nd-source');
     const target = document.getElementById('nd-target');
-    const hint = document.getElementById('nd-hint');
     const action = button.dataset.nativeAction;
     const input = document.getElementById('nd-input-code');
     button.disabled = true;
-    hint.textContent = '正在执行…';
+    setStatus('正在执行…');
     try {
       const result = await invoke('display_action', {
         action,
@@ -316,11 +351,9 @@ document.querySelectorAll('#native-display-card [data-native-action]').forEach(b
         targetId: target.value || null,
         value: action === 'input-source' ? input.value.trim() : null
       });
-      hint.textContent = String(result || '操作已提交');
       setStatus(String(result || '显示设置已更新'));
       await refreshDisplays();
     } catch (error) {
-      hint.textContent = '操作失败：' + errText(error);
       setStatus('高级显示控制失败：' + errText(error), false);
     } finally {
       button.disabled = false;
@@ -366,24 +399,19 @@ function renderDisplays(displays) {
         <input type="range" min="0" max="100" value="${d.volume ?? 50}" data-display="${d.id}" data-kind="volume">
         <span class="val">${d.volume ?? 50}</span>
       </div>` : '';
-    let hint = '';
-    if (!hasBri && !d.ddc) {
-      hint = '<div class="hint">此屏不支持 DDC/CI 也无 WMI 亮度：请用硬件按键调节。</div>';
-    } else if (hasBri && !d.ddc) {
-      hint = '<div class="hint">此屏无 DDC/CI（典型为笔记本内屏）：亮度走系统 WMI；喇叭/耳机音量请用「系统音量」。</div>';
-    }
-    const degradeHint = degraded ? `
-      <div class="hint" style="color:#e8a75c">⚠️ 仅一块屏且运行在 1024x768@60 —— 显示驱动栈很可能异常（此前实测 NVIDIA 驱动崩溃循环后即此形态，亮度/音量会全部失效）。按 Win+Ctrl+Shift+B 重启图形驱动，画面恢复后点「刷新」。</div>` : '';
+    // 只有「驱动栈可能异常」这类需要用户立刻处理的情况才提示，其余说明一律不占版面。
+    const degradeAlert = degraded ? `
+      <div class="alert">仅一块屏且运行在 1024x768@60，显示驱动栈可能异常。按 Win+Ctrl+Shift+B 重启图形驱动，画面恢复后点「刷新」。</div>` : '';
 
     row.innerHTML = `
       <div class="display-head">
         <div>
           <div class="display-name">${d.name || d.id}</div>
-          <div class="display-meta">${d.resolution || ''} · ${d.hz ? d.hz + 'Hz' : ''}${d.main ? ' · 主屏' : ''}${d.color_profile ? ' · 色彩:' + d.color_profile : ''}</div>
+          <div class="display-meta">${d.resolution || ''} · ${d.hz ? d.hz + 'Hz' : ''}${d.color_profile ? ' · ' + d.color_profile : ''}</div>
         </div>
-        <div style="display:flex;gap:6px">${briBadge}${connectedBadge}</div>
+        <div class="badges">${briBadge}${connectedBadge}</div>
       </div>
-      ${briRow}${volRow}${hint}${degradeHint}
+      ${briRow}${volRow}${degradeAlert}
     `;
     box.appendChild(row);
   });
@@ -412,7 +440,7 @@ async function loadDisplayModes(displays, box) {
       const control = document.createElement('div');
       control.className = 'slider-row mode-row';
       const label = document.createElement('label');
-      label.textContent = '分辨率/刷新率';
+      label.textContent = '分辨率';
       const select = document.createElement('select');
       select.className = 'display-mode-select';
       select.title = '切换时画面可能短暂黑屏；系统未应用时会自动恢复原设置';
@@ -429,7 +457,6 @@ async function loadDisplayModes(displays, box) {
       }
       const state = document.createElement('span');
       state.className = 'val';
-      state.textContent = '当前';
       control.append(label, select, state);
       row.appendChild(control);
       select.addEventListener('change', async () => {
@@ -477,31 +504,34 @@ function sendSysVol(val) {
   })();
 }
 
+let audioRequestId = 0;
 async function loadAudio() {
+  const requestId = ++audioRequestId;
   const card = document.getElementById('audio-card');
   const devEl = document.getElementById('audio-dev');
-  const hint = document.getElementById('audio-hint');
   const sl = document.getElementById('sys-vol');
   const val = document.getElementById('sys-vol-val');
   const muteBtn = document.getElementById('mute-btn');
   const sel = document.getElementById('audio-dev-sel');
   try {
-    const platform = await invoke('get_platform');
+    const platform = await getPlatform();
     card.style.display = '';
     if (platform === 'macos') {
-      if (sel) sel.closest('.color-row').style.display = 'none';
+      if (sel) sel.closest('.field').style.display = 'none';
       document.getElementById('all-bri').closest('.slider-row').style.display = 'none';
       document.getElementById('mitv-row').style.display = 'none';
-      document.getElementById('bri-reset').style.display = 'none';
+      const resetBtn = document.getElementById('bri-reset');
+      resetBtn.style.display = 'none';
+      resetBtn.parentElement.classList.add('solo');
     }
-    // v0.3.3：音量作用于「用户选定的输出端点」。默认输出若正好是固定音量的
-    // HDMI/DP 显示器音频（Windows 自己的滑块也调不动），就自动落在一个可调的
-    // 端点上，并把设备列出来让用户自己换 —— 不再出现「滑块动不了」的死路。
+    // 音量作用于「用户选定的输出端点」。默认输出若正好是固定音量的
+    // HDMI/DP 显示器音频（Windows 自己的滑块也调不动），就自动落在一个可调的端点上。
     const eps = await invoke('audio_endpoints');
     let st = {};
     try { st = JSON.parse(await invoke('app_state_json') || '{}'); } catch (e) {}
     const wanted = eps.find(e => e.id === st.audio_dev);
     const cur = wanted || eps.find(e => e.is_default) || eps.find(e => e.adjustable) || eps[0];
+    if (requestId !== audioRequestId) return;
     if (sel) {
       sel.innerHTML = eps.map(e =>
         `<option value="${e.id}"${(cur && e.id === cur.id) ? ' selected' : ''}>${e.name}　${e.adjustable ? ('音量 ' + e.volume + '%') : '（固定音量·不可调）'}</option>`
@@ -512,29 +542,23 @@ async function loadAudio() {
     sl.value = cur.volume;
     val.textContent = cur.adjustable ? (cur.volume + '%') : '不可调';
     sysVol.muted = cur.mute;
-    muteBtn.textContent = cur.mute ? '🔕 取消静音' : '🔇 静音';
+    muteBtn.textContent = cur.mute ? '取消静音' : '静音';
     sl.disabled = !cur.adjustable;
     muteBtn.disabled = !cur.adjustable;
-    hint.textContent = cur.adjustable
-      ? (platform === 'macos'
-        ? '控制 macOS 系统默认输出音量；输出设备切换请在系统设置中完成。'
-        : '控制的是上面选中的输出设备（与系统托盘音量同源）。总亮度作用于所有屏幕，不依赖 DDC。')
-      : (platform === 'macos'
-        ? 'macOS 当前未提供可读的默认输出音量，音量和静音控制已停用。'
-        : '这个端点（显示器音频）是固定音量，Windows 自己的滑块也调不动 → 想调这块屏的喇叭，用下面的「小米音量」滑块（走显示器自己的系统）；或在上面的「输出设备」里换成扬声器/耳机。');
   } catch (e) {
     card.style.display = '';
     devEl.textContent = '不可用';
-    hint.textContent = '读取输出设备失败：' + errText(e);
+    setStatus('读取输出设备失败：' + errText(e), false);
   }
 }
 
 // ===== 电池设备（Windows：Battery 设备类枚举，内电池 / USB·无线键鼠 / 蓝牙） =====
 function battIcon(conn) {
-  if (conn === '内置') return '💻';
-  if (conn === '蓝牙') return '🎧';
-  if (conn === 'USB/无线' || conn === 'USB') return '🖱️';
-  return '🔋';
+  const name = conn === '内置' ? 'laptop'
+    : conn === '蓝牙' ? 'headphone'
+      : (conn === 'USB/无线' || conn === 'USB') ? 'mouse'
+        : 'battery';
+  return `<svg class="ic"><use href="#ic-${name}"/></svg>`;
 }
 function battState(charging, onAc, percent) {
   if (percent < 0) return { cls: 'unknown', txt: '读取不到' };
@@ -584,38 +608,28 @@ async function loadBatteries() {
   }
 }
 
-// ===== 按平台调整文案（各平台能力/依赖不同，避免误导） =====
+// ===== 按平台调整能力（各平台支持范围不同，只改行为不改说明文案） =====
 function applyPlatformCopy(p) {
   activePlatform = p;
   const matchMac = document.getElementById('match-mac');
-  const note = document.getElementById('color-note');
-  const hdrNote = document.getElementById('hdr-note');
-  const restoreNote = document.getElementById('restore-note');
+  const hdrButton = document.getElementById('hdr-sync');
+  const grayOption = document.querySelector('#color-space option[value="gray"]');
   if (p === 'windows') {
-    const hdrButton = document.getElementById('hdr-sync');
     if (hdrButton) hdrButton.disabled = false;
     // Windows 没有内建 P3 屏，「对齐 Mac 内建屏」改为语义成立的「对齐主屏色彩」
     matchMac.textContent = '对齐主屏色彩';
     matchMac.title = '把主屏当前关联的 ICC 配置应用到其余屏幕';
-    if (note) note.textContent = 'Windows 可自动生成 sRGB / P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto 标准参考配置；显示器专属校准文件可放入 %LOCALAPPDATA%\\screenguard_icc 并优先使用。标准配置不等于硬件校色，变更关联需管理员权限。';
-    const grayOption = document.querySelector('#color-space option[value="gray"]');
     if (grayOption) {
       grayOption.disabled = true;
       grayOption.title = 'Windows RGB 显示器不能安全使用灰度 ICC 配置';
     }
-    if (hdrNote) hdrNote.innerHTML = '⚠️ <b>HDR 状态可读取；本机切换请求被厂商服务接管且系统拒绝应用</b>（错误 87 / AsHDRControl）。请通过「设置 → 系统 → 显示 → HDR」或华硕工具切换。';
-    if (restoreNote) restoreNote.innerHTML = '覆盖范围：总亮度（回到原始曲线）、HDR、色彩配置、被铺满的窗口、屏幕电源、音量 —— 全部回到<b>软件启动时</b>的状态（启动时会自动存一份「基线」，所以乱调之后总能一键回到好的状态）。<b>硬件层面的设置不受影响</b>（显示器自己的亮度/音量、KVM 都不动）。';
   } else if (p === 'linux') {
     matchMac.disabled = true;
     matchMac.title = 'Linux 版暂未实现';
     const apply = document.getElementById('apply-color');
     if (apply) { apply.disabled = true; apply.title = 'Linux 版暂未实现'; }
-    if (note) note.textContent = 'Linux 版色彩同步暂未实现（可先用系统级 colord 配置）';
-    if (hdrNote) hdrNote.textContent = 'Linux 版 HDR 与显示器色彩控制暂未实现。';
-    const hdrButton = document.getElementById('hdr-sync');
-    if (hdrButton) { hdrButton.disabled = true; hdrButton.textContent = '🌈 HDR：Linux 暂不支持'; }
+    if (hdrButton) { hdrButton.disabled = true; setBtnLabel('hdr-sync', 'HDR 不支持'); }
   } else {
-    const grayOption = document.querySelector('#color-space option[value="gray"]');
     if (grayOption) {
       grayOption.disabled = false;
       grayOption.title = '';
@@ -624,14 +638,11 @@ function applyPlatformCopy(p) {
     const applyColor = document.getElementById('apply-color');
     if (applyColor) { applyColor.disabled = false; applyColor.title = '通过 macOS ColorSync 设置系统显示器配置'; }
     matchMac.disabled = false;
-    if (note) note.textContent = '通过 macOS ColorSync 设置系统显示器配置；可用配置取决于系统配置文件库。当前系统没有 ProPhoto RGB 配置文件；深度校准仍需硬件校色仪。';
-    if (hdrNote) hdrNote.textContent = 'HDR 状态和切换由 macOS 与显示器驱动管理；Screenguard 暂不提供该控制。';
-    const hdrButton = document.getElementById('hdr-sync');
-    if (hdrButton) { hdrButton.disabled = true; hdrButton.textContent = '🌈 HDR：macOS 暂不支持'; hdrButton.title = 'macOS HDR 由系统和显示器驱动管理，Screenguard 当前不提供切换'; }
-    const nativeHint = document.getElementById('nd-hint');
-    if (nativeHint) nativeHint.textContent = '此处由 Screenguard 使用 macOS 系统显示 API 与 DDC/CI 控制主屏、镜像、排列和输入源。实际能力取决于显示器及连接链路。';
-    const powerNote = document.getElementById('pw-note');
-    if (powerNote) powerNote.textContent = '一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。电源联动由 Screenguard 内置 DDC/CI 实现，显示器或连接链路不支持时，不能检测物理关屏状态。';
+    if (hdrButton) {
+      hdrButton.disabled = true;
+      setBtnLabel('hdr-sync', 'HDR 不支持');
+      hdrButton.title = 'macOS HDR 由系统和显示器驱动管理，Screenguard 当前不提供切换';
+    }
   }
 }
 
@@ -690,14 +701,14 @@ async function loadHdrStatus() {
   if (!btn) return;
   if (activePlatform === 'macos') {
     btn.disabled = true;
-    btn.textContent = '🌈 HDR：macOS 暂不支持';
+    setBtnLabel('hdr-sync', 'HDR 不支持');
     return;
   }
   try {
     const raw = String(await invoke('hdr_states') || '');
     if (activePlatform === 'macos') {
       btn.disabled = true;
-      btn.textContent = '🌈 HDR：macOS 暂不支持';
+      setBtnLabel('hdr-sync', 'HDR 不支持');
       return;
     }
     let sup = 0, on = 0, total = 0;
@@ -711,19 +722,19 @@ async function loadHdrStatus() {
     }
     hdrStat = { sup, on, total };
     let txt;
-    if (!sup) txt = 'HDR：本机不支持';
-    else if (on === sup) txt = 'HDR：开';
-    else if (on === 0) txt = 'HDR：关';
-    else txt = `HDR：混合（${on}/${sup} 开）`;
-    btn.textContent = '🌈 ' + txt;
+    if (!sup) txt = 'HDR 不支持';
+    else if (on === sup) txt = 'HDR 开';
+    else if (on === 0) txt = 'HDR 关';
+    else txt = `HDR 混合 ${on}/${sup}`;
+    setBtnLabel('hdr-sync', txt);
     btn.title = '点一下把所有屏的 HDR 设成一致';
   } catch (e) {
     if (activePlatform === 'macos') {
       btn.disabled = true;
-      btn.textContent = '🌈 HDR：macOS 暂不支持';
+      setBtnLabel('hdr-sync', 'HDR 不支持');
       return;
     }
-    btn.textContent = '🌈 HDR：读取失败';
+    setBtnLabel('hdr-sync', 'HDR 读取失败');
   }
 }
 document.getElementById('hdr-sync').onclick = async () => {
@@ -779,12 +790,12 @@ loadGamma();
 // 全局快捷键显示
 (async () => {
   const el = document.getElementById('hk-note');
+  if (!el) return;
   try {
-    const hk = await invoke('hotkey_start');
-    const platform = await invoke('get_platform');
+    const [hk, platform] = await Promise.all([invoke('hotkey_start'), getPlatform()]);
     const restoreKey = platform === 'macos' ? 'Control+Option+R' : 'Ctrl+Alt+R';
-    el.innerHTML = `全局快捷键：<span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">${hk}</span> 切换「全部屏幕待机 / 唤醒」 ｜ <span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">${restoreKey}</span> 还原被铺满的窗口（铺满后界面被盖住也能用）`;
-  } catch (e) { el.textContent = '全局快捷键：' + errText(e); }
+    el.innerHTML = `<kbd>${hk}</kbd> 待机 / 唤醒 <span class="sep">·</span> <kbd>${restoreKey}</kbd> 还原窗口`;
+  } catch (e) { el.textContent = errText(e); }
 })();
 
 // 铺满任意前台窗口
@@ -797,7 +808,7 @@ function spanMode() {
 
 document.getElementById('span-fg').onclick = async () => {
   try {
-    if (spanMode() === 2 && await invoke('get_platform').catch(() => '') === 'macos'
+    if (spanMode() === 2 && await getPlatform().catch(() => '') === 'macos'
       && !confirm('自动对齐会临时切换两块屏的分辨率，画面可能短暂变黑且清晰度会降低。\n\n原始分辨率已备份；点「还原」或退出软件可恢复。继续吗？')) return;
     setStatus('正在把当前窗口铺满两块屏…');
     const title = await invoke('span_foreground', { mode: spanMode() });
@@ -814,13 +825,13 @@ document.getElementById('match-ppi').onclick = async () => {
   try {
     setStatus('正在写入缩放档…（写入后需注销/重新登录才生效）');
     const msg = await invoke('match_dpi_apply');
-    setStatus('✅ ' + msg + ' —— 注意：窗口现在不会立刻变小，Windows 限制必须先注销或重新登录（原值已备份，「还原缩放」可回退）');
+    setStatus(msg + '（需注销或重新登录才生效，原值已备份）');
   } catch (e) { setStatus('对齐失败：' + errText(e), false); }
 };
 document.getElementById('dpi-restore').onclick = async () => {
   try {
     const msg = await invoke('match_dpi_restore');
-    setStatus('✅ ' + msg + ' —— 同样需要注销或重新登录才生效');
+    setStatus(msg + '（同样需要注销或重新登录才生效）');
   } catch (e) { setStatus('还原失败：' + errText(e), false); }
 };
 // 副屏横竖屏：按钮直接显示**当前方向**，点一下切换
@@ -831,7 +842,7 @@ async function loadRotateStatus() {
   try {
     const ds = await invoke('get_displays') || [];
     const sec = ds.find(d => !d.main) || ds[0];
-    if (!sec) { btn.textContent = '🔄 副屏方向：未检测到副屏'; return; }
+    if (!sec) { setBtnLabel('rotate-secondary', '未检测到副屏'); return; }
     // 后端返回的是 resolution 字符串（如 "2400x3840"），不是 w/h 字段
     let W = Number(sec.w != null ? sec.w : sec.width);
     let H = Number(sec.h != null ? sec.h : sec.height);
@@ -840,9 +851,10 @@ async function loadRotateStatus() {
       if (m) { W = Number(m[1]); H = Number(m[2]); }
     }
     const portrait = H > W;
-    btn.textContent = `🔄 副屏方向：${portrait ? '竖屏' : '横屏'}${W ? `（${W}x${H}）` : ''}（点击切换）`;
+    setBtnLabel('rotate-secondary', `副屏${portrait ? '竖屏' : '横屏'}${W ? ` ${W}×${H}` : ''}`);
+    btn.title = '点击切换副屏方向';
     btn.dataset.portrait = portrait ? '1' : '0';
-  } catch (e) { btn.textContent = '🔄 副屏方向：读取失败'; }
+  } catch (e) { setBtnLabel('rotate-secondary', '方向读取失败'); }
 }
 document.getElementById('rotate-secondary').onclick = async () => {
   const btn = document.getElementById('rotate-secondary');
@@ -892,11 +904,11 @@ document.getElementById('span-pick').onclick = async () => {
   const hwnd = sel && sel.value ? Number(sel.value) : 0;
   if (!hwnd) { setStatus('请先点「刷新窗口列表」并选一个窗口', false); return; }
   try {
-    if (spanMode() === 2 && await invoke('get_platform').catch(() => '') === 'macos'
+    if (spanMode() === 2 && await getPlatform().catch(() => '') === 'macos'
       && !confirm('自动对齐会临时切换两块屏的分辨率，画面可能短暂变黑且清晰度会降低。\n\n原始分辨率已备份；点「还原」或退出软件可恢复。继续吗？')) return;
     setStatus('正在铺满…');
     const title = await invoke('span_window', { hwnd, mode: spanMode() });
-    const p = await invoke('get_platform').catch(() => '');
+    const p = await getPlatform().catch(() => '');
     setStatus(p === 'macos'
       ? `已铺满：「${title}」。点「↩ 还原」回到原位置`
       : `已铺满：「${title}」。还原：点「↩ 还原」或按 Ctrl+Alt+R`);
@@ -942,19 +954,16 @@ document.getElementById('restore-defaults').onclick = async () => {
 // ===== 小米屏音量（走显示器自己的 MiTV 接口：DDC 不通、电脑侧音频端点又是固定音量）=====
 async function loadMitvVolume() {
   const row = document.getElementById('mitv-row');
-  const hint = document.getElementById('mitv-hint');
   if (!row) return;
   try {
     const ok = await invoke('mitv_available');
-    if (!ok) { row.style.display = 'none'; if (hint) hint.style.display = 'none'; return; }
+    if (!ok) { row.style.display = 'none'; return; }
     const v = await invoke('mitv_volume_get');
     row.style.display = '';
-    if (hint) hint.style.display = '';
     document.getElementById('mitv-vol').value = v;
     document.getElementById('mitv-vol-val').textContent = v + '%';
   } catch (e) {
     row.style.display = 'none';
-    if (hint) hint.style.display = 'none';
   }
 }
 (function () {
@@ -997,15 +1006,12 @@ async function loadMitvVolume() {
   const open = document.getElementById('diag-open');
   const pre = document.getElementById('diag-out');
   const when = document.getElementById('diag-when');
-  const dirEl = document.getElementById('diag-dir');
-  if (dirEl) {
-    (async () => {
-      try {
-        const p = await invoke('diag_log_path');
-        dirEl.textContent = '日志目录：' + p + '（每次检测一个 diag-…log，并追加一行到 diag-history.log）';
-      } catch (e) { dirEl.textContent = '日志目录：%APPDATA%\\Screenguard\\logs'; }
-    })();
-  }
+  // 日志路径放进按钮提示，不再占一行小字
+  (async () => {
+    if (!open) return;
+    try { open.title = '日志目录：' + await invoke('diag_log_path'); }
+    catch (e) { open.title = '打开日志文件夹'; }
+  })();
   if (open) open.onclick = async () => {
     try { await invoke('open_log_dir'); setStatus('已打开日志文件夹'); }
     catch (e) { setStatus('打开失败：' + errText(e), false); }
@@ -1013,7 +1019,6 @@ async function loadMitvVolume() {
   const fix = document.getElementById('diag-fix');
   if (fix) fix.onclick = async () => {
     fix.disabled = true;
-    pre.textContent = '正在修复…（重协商显示链路 / 亮度复位 / 切换到可调音频端点 / 补齐恢复基线 / 还原被铺满的窗口，然后自动复查）';
     try {
       const r = await invoke('diag_fix');
       pre.textContent = String(r);
@@ -1026,7 +1031,7 @@ async function loadMitvVolume() {
   };
   if (btn) btn.onclick = async () => {
     btn.disabled = true;
-    pre.textContent = '正在检测…（依次读取显示器 / 事件日志 / HDR / 音频 / 小米屏 / 电池 / 基线，约几秒）';
+    pre.textContent = '正在检测…';
     try {
       const r = await invoke('diag_scan');
       pre.textContent = String(r);
@@ -1046,7 +1051,7 @@ async function loadMitvVolume() {
   const rs = document.getElementById('align-restore');
   const out = document.getElementById('align-out');
   if (ap) ap.onclick = async () => {
-    const platform = await invoke('get_platform').catch(() => '');
+    const platform = await getPlatform().catch(() => '');
     const ok = confirm(platform === 'macos'
       ? '应用推荐的双屏分辨率组合？\n\n· 屏幕会短暂变黑，分辨率可能明显降低\n· 系统会先保存原始模式；失败时自动尝试回滚\n· 可用「还原」或退出软件恢复原分辨率\n\n继续吗？'
       : '把两块屏切到「竖向高度一致」的分辨率组合？\n\n· 切换时屏幕会黑一下（正常）\n· 已自动记录原始分辨率，可一键还原\n· 若切换失败会自动回滚\n\n继续吗？');
@@ -1087,13 +1092,14 @@ async function loadMitvVolume() {
       const raw = await invoke('app_state_json');
       const st = JSON.parse(String(raw));
       const arr = (st && st.screen_in) || [];
-      sizes.textContent = '已记录尺寸：' + (arr.length ? arr.map(s => s.replace('|', ' → ') + ' 英寸').join('　') : '（无）')
-        + '　｜　EDID 会上报尺寸的屏不用填；没上报的屏请填「厂商代码 + 对角线英寸」。厂商代码见体检结果里的括号。';
-    } catch (e) { sizes.textContent = '已记录尺寸：读取失败'; }
+      sizes.textContent = arr.length
+        ? '已记录尺寸：' + arr.map(s => s.replace('|', ' → ') + ' 英寸').join('　')
+        : '';
+    } catch (e) { sizes.textContent = ''; }
   }
   if (btn) btn.onclick = async () => {
     btn.disabled = true;
-    pre.textContent = '正在体检…（读取系统物理尺寸 + 每屏可用分辨率，约几秒）';
+    pre.textContent = '正在体检…';
     try {
       pre.textContent = String(await invoke('align_report'));
       setStatus('体检完成');
@@ -1118,14 +1124,13 @@ async function loadMitvVolume() {
       await paintSizes();
     } catch (e) { setStatus('保存失败：' + errText(e), false); }
   };
-  invoke('get_platform').then(platform => {
+  getPlatform().then(platform => {
     if (platform === 'macos') {
       const modeActions = document.getElementById('align-mode-actions');
       const manualSize = document.getElementById('align-manual-size');
       if (modeActions) modeActions.style.display = '';
       if (manualSize) manualSize.style.display = 'none';
-      if (sizes) sizes.textContent = 'macOS 直接读取系统物理尺寸；应用组合前会保存原始分辨率，失败自动尝试回滚。';
-      if (pre) pre.textContent = '点「开始体检」先只读比较双屏物理尺寸、像素密度和分辨率组合。应用组合会切换屏幕模式，并在切换前备份原设置。';
+      if (sizes) sizes.textContent = '';
       return;
     }
     paintSizes();
@@ -1147,7 +1152,7 @@ document.getElementById('mute-btn').onclick = async () => {
     const want = !sysVol.muted;
     await invoke('set_system_mute', { on: want });
     sysVol.muted = want;
-    btn.textContent = want ? '🔕 取消静音' : '🔇 静音';
+    btn.textContent = want ? '取消静音' : '静音';
     setStatus(want ? '已静音' : '已取消静音');
   } catch (e) {
     setStatus('静音切换失败：' + errText(e), false);
@@ -1157,7 +1162,7 @@ document.getElementById('mute-btn').onclick = async () => {
 // ===== 启动 =====
 (async function startup() {
   try {
-    const p = await invoke('get_platform');
+    const p = await getPlatform();
     const names = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
     setBadge(names[p] || p);
     applyPlatformCopy(p);
@@ -1165,9 +1170,7 @@ document.getElementById('mute-btn').onclick = async () => {
       document.getElementById('native-display-card').style.display = '';
       document.getElementById('diag-card').style.display = 'none';
       const summary = document.getElementById('restore-summary');
-      const note = document.getElementById('restore-note');
       if (summary) summary.textContent = '恢复本机已记录且系统允许恢复的状态';
-      if (note) note.textContent = 'macOS 恢复范围：Screenguard 首次启动时记录的显示布局、可读取的显示器 DDC 电源状态、被铺满窗口，并请求唤醒显示器。未能读取或不支持 DDC 的屏幕会跳过。ColorSync 配置、显示器硬件亮度/音量不会由此功能恢复。';
     }
     if (p !== 'windows') document.getElementById('diag-card').style.display = 'none';
     if (p === 'windows' || p === 'macos') {
@@ -1187,7 +1190,7 @@ document.getElementById('mute-btn').onclick = async () => {
     const v = await invoke('get_version');
     const verEl = document.getElementById('version');
     if (verEl) verEl.textContent = 'v' + v;
-    checkForUpdates(false, v);
+    checkForUpdates(false, v, true);
   } catch (e) { /* 预览模式：静默 */ }
   await refreshDisplays();
 })();

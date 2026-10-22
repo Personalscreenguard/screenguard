@@ -7,209 +7,402 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
-    --bg: rgba(28,32,42,0.93);
-    --bg2: rgba(255,255,255,0.05);
-    --bg3: rgba(255,255,255,0.10);
-    --border: rgba(255,255,255,0.10);
-    --text: #eef1f6; --dim: #a8b0bf; --accent: #4f8cff; --accent2: #7fb0ff;
+    --bg: #12151c;
+    --surface: rgba(255,255,255,0.045);
+    --surface-2: rgba(255,255,255,0.075);
+    --line: rgba(255,255,255,0.09);
+    --line-strong: rgba(255,255,255,0.14);
+    --text: #e9edf5;
+    --muted: #8b95a8;
+    --muted-2: #6b7488;
+    --accent: #4f8cff;
+    --accent-2: #7dabff;
+    --ok: #3ecf8e;
+    --err: #f0706f;
   }
-  html, body { background: transparent; }
-  body { font-family:-apple-system,"PingFang SC","Segoe UI",Roboto,sans-serif; color:var(--text); font-size:12.5px; -webkit-font-smoothing:antialiased; user-select:none; overflow:hidden; }
+  html, body { background: transparent; height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Segoe UI", Roboto, sans-serif;
+    font-size: 12.5px;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    overflow: hidden;
+  }
+  .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+  .ic { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
   .card {
-    background: linear-gradient(180deg, #242a38 0%, #1a1e2b 100%);
-    border:1px solid var(--border); border-radius:16px; height:100vh; display:flex; flex-direction:column; overflow-y:auto;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: linear-gradient(180deg, #1b202b 0%, #12151c 100%);
+    border: 1px solid var(--line);
+    border-radius: 14px;
   }
-  .card::-webkit-scrollbar{width:6px} .card::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:6px}
-  .head { display:flex; justify-content:space-between; align-items:center; padding:10px 13px; border-bottom:1px solid var(--border); background:rgba(0,0,0,0.14); position:sticky; top:0; z-index:10; }
-  .head .t { font-weight:700; font-size:13.5px; } .head .t span { color:var(--accent2); }
-  .btns { display:flex; gap:6px; }
-  .ibtn { background:var(--bg2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:4px 10px; cursor:pointer; font-size:11.5px; transition:.15s; }
-  .ibtn:hover { background:var(--bg3); }
-  .scroll { flex:0 0 auto; overflow:visible; padding:6px 8px 8px; }
 
-  .sec-label { padding:8px 10px 4px; font-size:10.5px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; }
-  .grp { border:1px solid var(--border); border-radius:12px; margin:4px 0; background:rgba(255,255,255,0.03); overflow:hidden; }
-  .grp.open .grp-body { display:block; }
-  .grp-body { display:none; padding:2px 12px 10px; }
-  .grp-h { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; }
-  .grp-title { font-weight:650; } .grp-meta { font-size:10.5px; color:var(--dim); margin-top:1px; }
-  .grp-right { display:flex; align-items:center; gap:8px; }
-  .badge { font-size:10px; background:rgba(79,140,255,.15); color:var(--accent2); border:1px solid rgba(79,140,255,.25); padding:2px 7px; border-radius:10px; }
+  /* 顶栏 */
+  .head {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 44px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(0,0,0,0.16);
+  }
+  .t { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 650; }
+  .t .mark { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: rgba(79,140,255,0.14); color: var(--accent-2); }
+  .ver { font-size: 10.5px; font-weight: 500; color: var(--muted-2); }
+  .btns { display: flex; gap: 4px; }
+  .ibtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 550;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: background .14s ease, border-color .14s ease;
+    white-space: nowrap;
+  }
+  .ibtn:hover { background: var(--surface-2); border-color: var(--line-strong); }
+  .ibtn.icon { width: 26px; height: 26px; padding: 0; color: var(--muted); }
+  .ibtn.icon:hover { color: var(--text); }
+  .ibtn:disabled { opacity: .45; cursor: default; }
 
-  .srow { display:grid; grid-template-columns:52px 1fr 40px; align-items:center; gap:10px; padding:5px 0; }
-  .srow label { color:var(--dim); font-size:11.5px; }
-  .srow.mode-row { grid-template-columns:78px minmax(0,1fr) 48px; }
-  .mode-select { width:100%; min-width:0; padding:5px 7px; border:1px solid var(--border); border-radius:7px; background:#202635; color:var(--text); font:inherit; }
-  .mode-select:disabled { opacity:.65; }
-  .hint { color:var(--dim); font-size:11px; padding:6px 0; line-height:1.5; }
-  .ver { font-size:10px; color:var(--dim); font-weight:400; margin-left:6px; letter-spacing:.3px; }
-  input[type=range]{ -webkit-appearance:none; width:100%; height:5px; border-radius:5px; background:rgba(255,255,255,.16); outline:none; }
-  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:15px; height:15px; border-radius:50%; background:var(--accent); cursor:pointer; border:none; box-shadow:0 0 0 3px rgba(79,140,255,.25); }
-  .srow .val { text-align:right; font-variant-numeric:tabular-nums; font-size:11.5px; }
+  /* 滚动主体 */
+  .body { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 6px 0 10px; }
+  .body::-webkit-scrollbar { width: 6px; }
+  .body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 6px; }
 
-  /* 快捷操作栅格 */
-  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; padding:2px 8px 6px; }
-  .cell { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:8px 6px; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; transition:.15s; text-align:center; }
-  .cell:hover { background:var(--bg3); }
-  .cell .ico { font-size:16px; line-height:1; }
-  .cell .lbl { font-size:10.5px; color:var(--text); }
-  .cell.active { background:linear-gradient(135deg,#3f7bf0,#2f6ae0); border-color:transparent; }
-  .cell.active .lbl { color:#fff; }
-  .span2 { grid-column: span 3; flex-direction:row; justify-content:center; gap:8px; }
+  .sec-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 14px 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    color: var(--muted-2);
+  }
 
-  .foot { display:flex; gap:8px; padding:8px; border-top:1px solid var(--border); }
-  .fbtn { flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:var(--bg2); border:1px solid var(--border); color:var(--text); border-radius:10px; padding:9px 0; cursor:pointer; font-size:12.5px; }
-  .fbtn:hover { background:var(--bg3); }
-  .empty { color:var(--dim); text-align:center; padding:14px 0; }
+  /* 折叠分组 */
+  .grp {
+    margin: 0 10px 6px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .grp-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; }
+  .grp-title { font-size: 12.5px; font-weight: 600; }
+  .grp-meta { font-size: 10.5px; color: var(--muted-2); margin-top: 2px; }
+  .grp-right { display: flex; align-items: center; gap: 6px; }
+  .grp-body { display: none; padding: 0 11px 10px; }
+  .grp.open .grp-body { display: block; }
+  .grp.open .grp-body:empty { display: none; }
 
-  /* ===== v0.3.2 新增：折叠块 / 迷你柱状图 / 防横向滚动 ===== */
-  html, body, .card { overflow-x:hidden; }
-  .hint, .grp-meta, .batt-name, .evt-line, .fold-h { overflow-wrap:anywhere; word-break:break-word; }
-  .fold { border:1px solid var(--border); border-radius:10px; margin:4px 10px 6px; background:rgba(255,255,255,0.03); overflow:hidden; }
-  .fold-h { display:flex; justify-content:space-between; align-items:center; padding:7px 10px; cursor:pointer; font-size:11.5px; color:var(--dim); user-select:none; }
-  .fold-h:hover { background:var(--bg2); }
-  .fold-h .caret { transition:transform .15s; display:inline-block; margin-left:6px; }
-  .fold.open .fold-h .caret { transform:rotate(90deg); }
-  .fold-b { display:none; padding:0 10px 8px; max-height:200px; overflow-y:auto; overflow-x:hidden; }
-  .fold.open .fold-b { display:block; }
-  .chart { display:flex; align-items:flex-end; gap:1px; height:26px; margin-top:5px; }
-  .chart i { flex:1 1 0; min-width:1px; background:var(--accent); opacity:.7; border-radius:1px 1px 0 0; }
-  .chart i.low { background:#ef6a6a; opacity:.85; }
-  .chart i.chg { background:#34c98e; opacity:.85; }
-  .mini { font-size:10.5px; color:var(--dim); margin-top:3px; }
-  .badge.warn2 { background:rgba(255,160,80,.12); color:#e8a75c; border-color:rgba(255,160,80,.3); }
-  .badge.ok2 { background:rgba(52,201,142,.15); color:#34c98e; border-color:rgba(52,201,142,.3); }
-  .btnrow { display:flex; gap:6px; padding:2px 10px 6px; }
-  .btnrow .ibtn { flex:1; }
-  .hk { display:inline-block; background:var(--bg3); border:1px solid var(--border); border-radius:5px; padding:1px 6px; font-family:Consolas,monospace; font-size:11px; }
+  .badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent-2);
+    background: rgba(79,140,255,0.14);
+    border: 1px solid rgba(79,140,255,0.24);
+    border-radius: 999px;
+    padding: 2px 7px;
+    white-space: nowrap;
+  }
+  .badge.ok2 { color: var(--ok); background: rgba(62,207,142,.14); border-color: rgba(62,207,142,.3); }
+  .badge.warn2 { color: #e8b163; background: rgba(232,177,99,.12); border-color: rgba(232,177,99,.3); }
+
+  .srow {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 40px;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+  }
+  .srow label { font-size: 11.5px; color: var(--muted); }
+  .srow.mode-row { grid-template-columns: 44px minmax(0, 1fr) 40px; }
+  .srow .val { font-size: 11px; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+  .mode-select {
+    width: 100%;
+    min-width: 0;
+    height: 28px;
+    padding: 0 7px;
+    font: inherit;
+    font-size: 11.5px;
+    color: var(--text);
+    background: rgba(255,255,255,.06);
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+  }
+  .mode-select:disabled { opacity: .6; }
+  input[type="text"], input:not([type]) {
+    width: 100%;
+    min-width: 0;
+    height: 28px;
+    padding: 0 8px;
+    font: inherit;
+    font-size: 11.5px;
+    color: var(--text);
+    background: rgba(255,255,255,.06);
+    border: 1px solid var(--line-strong);
+    border-radius: 7px;
+  }
+
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 4px; background: rgba(255,255,255,.16); outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--accent); border: 2px solid #12151c; cursor: pointer; }
+
+  /* 三列操作格 */
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; padding: 0 10px; }
+  .cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 56px;
+    padding: 8px 4px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: var(--text);
+    cursor: pointer;
+    transition: background .14s ease, border-color .14s ease, transform .1s ease;
+  }
+  .cell:hover { background: var(--surface-2); border-color: var(--line-strong); }
+  .cell:active { transform: translateY(1px); }
+  .cell .ico { display: grid; place-items: center; color: var(--accent-2); }
+  .cell .lbl { font-size: 10.5px; color: var(--muted); text-align: center; line-height: 1.3; }
+  .cell.active { background: var(--accent); border-color: var(--accent); }
+  .cell.active .ico, .cell.active .lbl { color: #fff; }
+
+  .btnrow { display: flex; gap: 7px; padding: 4px 10px 2px; }
+  .btnrow .ibtn { flex: 1 1 0; min-width: 0; }
+  /* 组内只剩一个可见按钮时不要拉满整行（会像个空输入框） */
+  .btnrow.solo .ibtn { flex: 0 0 auto; padding-left: 18px; padding-right: 18px; }
+  .ibtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .hint, .status-line { font-size: 11px; color: var(--muted); line-height: 1.5; padding: 4px 12px; overflow-wrap: anywhere; }
+  .status-line:empty { display: none; }
+  .empty { font-size: 11.5px; color: var(--muted-2); text-align: center; padding: 14px 0; }
+
+  /* 链路记录折叠 */
+  .fold { margin: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .fold-h { display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+  .fold-h:hover { background: var(--surface-2); }
+  .fold-h .caret { transition: transform .15s; color: var(--muted-2); }
+  .fold.open .fold-h .caret { transform: rotate(90deg); }
+  .fold-b { display: none; max-height: 190px; overflow-y: auto; padding: 0 11px 9px; }
+  .fold.open .fold-b { display: block; }
+  .fold-b .hint { padding: 3px 0; }
+
+  .chart { display: flex; align-items: flex-end; gap: 1px; height: 24px; margin-top: 4px; }
+  .chart i { flex: 1 1 0; min-width: 1px; background: var(--accent); opacity: .65; border-radius: 1px 1px 0 0; }
+  .chart i.low { background: var(--err); opacity: .85; }
+  .chart i.chg { background: var(--ok); opacity: .85; }
+  .mini { font-size: 10.5px; color: var(--muted-2); margin-top: 3px; }
+
+  .hk { display: inline-block; padding: 1px 5px; font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--text); background: rgba(255,255,255,.08); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; }
+  /* 快捷键两行对齐：按键一列、用途一列 */
+  #hotkey-line { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; padding: 8px 14px 4px; }
+  #hotkey-line .hkl { color: var(--muted); }
+
+  /* 底栏 */
+  .foot { flex: 0 0 auto; display: flex; gap: 7px; padding: 8px 10px; border-top: 1px solid var(--line); background: rgba(0,0,0,.14); }
+  .fbtn {
+    flex: 1 1 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 32px;
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 550;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    cursor: pointer;
+  }
+  .fbtn:hover { background: var(--surface-2); border-color: var(--line-strong); }
+  .fbtn .ic { color: var(--muted); }
 </style>
 </head>
 <body>
+<svg class="sprite" aria-hidden="true">
+  <symbol id="ic-monitor" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></symbol>
+  <symbol id="ic-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
+  <symbol id="ic-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+  <symbol id="ic-link" viewBox="0 0 24 24"><path d="M10 13.5a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.7 1.7"/><path d="M14 10.5a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.7-1.7"/></symbol>
+  <symbol id="ic-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-.9 2-1.8 0-1.4-1.4-1.8-1.4-3 0-.9.7-1.6 1.7-1.6H16a5 5 0 0 0 5-5C21 6.2 17 3 12 3Z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="14.5" cy="7.5" r="1"/></symbol>
+  <symbol id="ic-bright" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/></symbol>
+  <symbol id="ic-hdr" viewBox="0 0 24 24"><path d="M3 8v8M7 8v8M3 12h4M14 8h2.5a4 4 0 0 1 0 8H14Z"/><path d="M20 8v8M20 12h2"/></symbol>
+  <symbol id="ic-window" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9h19"/></symbol>
+  <symbol id="ic-rotate" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3.5V8h-4.5"/></symbol>
+  <symbol id="ic-span" viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="8.5" height="13" rx="1.5"/><rect x="13" y="5.5" width="8.5" height="13" rx="1.5"/></symbol>
+  <symbol id="ic-restore" viewBox="0 0 24 24"><path d="M4 9h11a5 5 0 0 1 0 10H8"/><path d="M7.5 5.5 4 9l3.5 3.5"/></symbol>
+  <symbol id="ic-shield" viewBox="0 0 24 24"><path d="M12 2.8 20 6v6c0 4.6-3.3 8-8 9.2C7.3 20 4 16.6 4 12V6Z"/><path d="m8.5 12 2.3 2.3 4.7-4.7"/></symbol>
+  <symbol id="ic-wrench" viewBox="0 0 24 24"><path d="M15.5 3a5.5 5.5 0 0 0-4.9 8L3.5 18.1a1.8 1.8 0 0 0 2.5 2.5l7.1-7.1A5.5 5.5 0 1 0 15.5 3Z"/></symbol>
+  <symbol id="ic-clipboard" viewBox="0 0 24 24"><rect x="5" y="4.5" width="14" height="16" rx="2"/><path d="M9 4.5V3.5h6v1M8.5 9.5h7M8.5 13h7M8.5 16.5h4"/></symbol>
+  <symbol id="ic-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></symbol>
+  <symbol id="ic-download" viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7.5 10 4.5 4.5L16.5 10"/><path d="M4 19h16"/></symbol>
+  <symbol id="ic-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0Z"/><path d="M12 17v4"/></symbol>
+  <symbol id="ic-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3.5V8h-4.5"/></symbol>
+  <symbol id="ic-power" viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.5 6.5a8 8 0 1 0 11 0"/></symbol>
+  <symbol id="ic-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="ic-gauge" viewBox="0 0 24 24"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 13 4-4"/><circle cx="12" cy="14" r="1.4"/></symbol>
+  <symbol id="ic-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.5M9.5 10h.5M13 10h.5M16.5 10h.5M6 13.5h.5M9.5 13.5h.5M13 13.5h.5M16.5 13.5h.5M8 16h8"/></symbol>
+  <symbol id="ic-layout" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="M12 4.5v15"/></symbol>
+  <symbol id="ic-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/></symbol>
+  <symbol id="ic-battery" viewBox="0 0 24 24"><rect x="2.5" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/><path d="M5.5 10.5v3"/></symbol>
+  <symbol id="ic-laptop" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="10.5" rx="1.8"/><path d="M2.5 19h19"/></symbol>
+  <symbol id="ic-headphone" viewBox="0 0 24 24"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="2.5" y="13.5" width="4" height="6" rx="1.6"/><rect x="17.5" y="13.5" width="4" height="6" rx="1.6"/></symbol>
+  <symbol id="ic-mouse" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="5.5"/><path d="M12 6v3"/></symbol>
+</svg>
+
 <div class="card">
   <div class="head">
-    <div class="t">🖥️ <span>屏幕守护</span><span class="ver" id="pver"></span></div>
-    <div class="btns"><button class="ibtn" id="hide-btn" title="隐藏面板（Esc）">✕</button><button class="ibtn" id="main-btn">主窗口</button><button class="ibtn" id="quit-btn">退出</button></div>
-  </div>
-
-  <div class="sec-label" id="audio-sec" style="display:none">系统控制</div>
-  <div style="padding:0 8px">
-    <div class="grp open" id="audio-grp" style="display:none">
-      <div class="grp-body">
-        <div class="srow"><label>音量</label><input type="range" min="0" max="100" value="0" id="sys-vol" disabled><span class="val" id="sys-vol-val">-</span></div>
-        <div class="srow" style="grid-template-columns:46px 1fr"><label>设备</label><select id="audio-dev-sel" style="width:100%;min-width:0"><option value="">读取中…</option></select></div>
-        <div class="srow"><label>总亮度</label><input type="range" min="40" max="160" value="100" id="all-bri"><span class="val" id="all-bri-val">100%</span></div>
-        <div class="hint" id="audio-dev">读取中…</div>
-        <div class="hint">总亮度作用于<b>所有屏幕</b>（含不走 DDC/CI 的屏）：三通道同一条曲线，只改明暗、不动色相；范围 40~160，重启后自动恢复原始。</div>
-        <div class="btnrow"><button class="ibtn" id="bri-reset">亮度复位</button><button class="ibtn" id="mute-btn2">🔇 静音</button></div>
-      </div>
+    <div class="t"><span class="mark"><svg class="ic"><use href="#ic-monitor"/></svg></span><span>屏幕守护</span><span class="ver" id="pver"></span></div>
+    <div class="btns">
+      <button class="ibtn icon" id="main-btn" title="主窗口"><svg class="ic"><use href="#ic-monitor"/></svg></button>
+      <button class="ibtn icon" id="quit-btn" title="退出 Screenguard"><svg class="ic"><use href="#ic-power"/></svg></button>
+      <button class="ibtn icon" id="hide-btn" title="隐藏面板（Esc）"><svg class="ic"><use href="#ic-close"/></svg></button>
     </div>
   </div>
 
-  <div class="sec-label" id="batt-sec" style="display:none">电池设备</div>
-  <div style="padding:0 8px" id="batt-box"></div>
-  <div class="hint" id="batt-note" style="display:none;padding:2px 10px 6px">健康度 = 满充容量 ÷ 设计容量。<b>若开着电池保养模式（限充 80%），会显示约 80%，属正常、不是损耗</b>；部分外设（如 ROG OMNI 接收器）走厂商私有协议，Windows 标准接口读不到电量。</div>
+  <div class="body">
 
-  <div class="sec-label">显示器</div>
-  <div class="scroll" id="scroll" style="flex:0 0 auto"><div class="empty">读取显示器…</div></div>
+    <div class="sec-label" id="audio-sec" style="display:none">系统控制</div>
+    <div class="grp open" id="audio-grp" style="display:none">
+      <div class="grp-body">
+        <div class="srow"><label>音量</label><input type="range" min="0" max="100" value="0" id="sys-vol" disabled><span class="val" id="sys-vol-val">-</span></div>
+        <div class="srow" style="grid-template-columns:44px minmax(0,1fr)"><label>设备</label><select id="audio-dev-sel"><option value="">读取中…</option></select></div>
+        <div class="srow"><label>总亮度</label><input type="range" min="40" max="160" value="100" id="all-bri"><span class="val" id="all-bri-val">100%</span></div>
+        <p class="status-line" id="audio-dev" style="padding:2px 0"></p>
+        <div class="btnrow" style="padding:4px 0 0">
+          <button class="ibtn" id="bri-reset">亮度复位</button>
+          <button class="ibtn" id="mute-btn2">静音</button>
+        </div>
+      </div>
+    </div>
 
-  <div class="sec-label">显示器管理</div>
-  <div style="padding:0 8px">
+    <div class="sec-label" id="batt-sec" style="display:none">电池设备</div>
+    <div id="batt-box"></div>
+    <p class="status-line" id="batt-note" style="display:none"></p>
+
+    <div class="sec-label">显示器</div>
+    <div id="scroll"><div class="empty">读取显示器…</div></div>
+
+    <div class="sec-label">显示器管理</div>
     <div class="grp" id="native-display-grp" style="display:none">
       <div class="grp-h" id="native-display-head" role="button" tabindex="0" aria-expanded="false">
-        <div><div class="grp-title">🧰 高级显示控制</div><div class="grp-meta">主屏 · 镜像 · 排列 · 输入源</div></div>
+        <div><div class="grp-title">高级显示控制</div><div class="grp-meta">主屏 · 镜像 · 排列 · 输入源</div></div>
         <div class="grp-right"><span class="badge">macOS</span><span id="native-display-caret">▸</span></div>
       </div>
       <div class="grp-body">
-        <div class="srow" style="grid-template-columns:52px minmax(0,1fr);gap:6px">
+        <div class="srow" style="grid-template-columns:44px minmax(0,1fr)">
           <label for="ndp-source">操作屏</label><select id="ndp-source" class="mode-select"><option value="">读取中…</option></select>
         </div>
-        <div class="srow" style="grid-template-columns:52px minmax(0,1fr);gap:6px">
+        <div class="srow" style="grid-template-columns:44px minmax(0,1fr)">
           <label for="ndp-target">目标屏</label><select id="ndp-target" class="mode-select"><option value="">读取中…</option></select>
         </div>
-        <div class="btnrow">
+        <div class="btnrow" style="padding:4px 0 0">
           <button class="ibtn" data-native-action="set-main">设为主屏</button>
           <button class="ibtn" data-native-action="mirror-on">镜像到目标</button>
           <button class="ibtn" data-native-action="mirror-off">停止镜像</button>
         </div>
-        <div class="btnrow">
+        <div class="btnrow" style="padding:6px 0 0">
           <button class="ibtn" data-native-action="place-left">移到左侧</button>
           <button class="ibtn" data-native-action="place-right">移到右侧</button>
+        </div>
+        <div class="btnrow" style="padding:6px 0 0">
           <button class="ibtn" data-native-action="place-above">移到上方</button>
           <button class="ibtn" data-native-action="place-below">移到下方</button>
         </div>
-        <div class="srow" style="grid-template-columns:72px minmax(0,1fr) auto;gap:6px">
-          <label for="ndp-input-code">输入源码</label>
-          <input id="ndp-input-code" inputmode="numeric" placeholder="VCP 代码 1–255">
-          <button class="ibtn" data-native-action="input-source">切换</button>
+        <div class="btnrow" style="padding:6px 0 0">
+          <input id="ndp-input-code" inputmode="numeric" placeholder="输入源 VCP 代码">
+          <button class="ibtn" data-native-action="input-source" style="flex:0 0 auto">切换</button>
         </div>
-        <div class="hint" id="ndp-hint">使用 macOS 系统显示 API 与 DDC/CI；实际能力取决于显示器及连接链路。</div>
+        <p class="status-line" id="ndp-hint" style="padding:6px 0 0"></p>
       </div>
     </div>
-  </div>
 
-  <div class="sec-label">屏幕电源 <span class="ver" id="pw-badge"></span></div>
-  <div class="grid" id="power">
-    <div class="cell" id="cell-offall"><span class="ico">🌙</span><span class="lbl">全部待机</span></div>
-    <div class="cell" id="cell-wake"><span class="ico">☀️</span><span class="lbl">唤醒屏幕</span></div>
-    <div class="cell" id="cell-link"><span class="ico">🔗</span><span class="lbl">电源联动：关</span></div>
-  </div>
-  <div class="hint" id="power-hint" style="padding:0 10px 2px"></div>
-  <div class="btnrow" id="mac-sleep-diagnostic" style="display:none;align-items:center">
-    <button class="ibtn" id="read-mac-sleep-state">读取 macOS 屏幕状态</button>
-    <span class="hint" id="mac-sleep-state-hint" style="flex:2;padding:0 4px">只读检查联动开关、Quartz 睡眠状态与 DDC VCP 0xD6；不代表显示器物理断电状态。</span>
-  </div>
-  <div class="hint" id="hotkey-line" style="padding:0 10px 6px">快捷键：读取中…</div>
+    <div class="sec-label">屏幕电源</div>
+    <div class="grid" id="power">
+      <div class="cell" id="cell-offall"><span class="ico"><svg class="ic"><use href="#ic-moon"/></svg></span><span class="lbl">全部待机</span></div>
+      <div class="cell" id="cell-wake"><span class="ico"><svg class="ic"><use href="#ic-sun"/></svg></span><span class="lbl">唤醒屏幕</span></div>
+      <div class="cell" id="cell-link"><span class="ico"><svg class="ic"><use href="#ic-link"/></svg></span><span class="lbl">电源联动</span></div>
+    </div>
+    <p class="status-line" id="power-hint"></p>
+    <p class="status-line" id="hotkey-line"><svg class="ic" style="vertical-align:-3px;margin-right:6px"><use href="#ic-keyboard"/></svg></p>
 
-  <div class="sec-label"><span id="health-title">显示器健康</span> <span class="ver" id="health-badge"></span></div>
-  <div class="grid" id="healthgrid">
-    <div class="cell" id="cell-hrepair"><span class="ico">🩺</span><span class="lbl">一键修复</span></div>
-    <div class="cell" id="cell-hdeep"><span class="ico">🛠️</span><span class="lbl">深度修复</span></div>
-    <div class="cell" id="cell-hscan"><span class="ico">📋</span><span class="lbl">检查记录</span></div>
-  </div>
-  <div class="hint" id="health-hint" style="padding:0 10px 2px">正在读取链路记录…</div>
-  <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 10px 0">
-    <span style="color:#a8b0bf;font-size:11.5px">自动修复 <span style="opacity:.7">（掉线自动重新协商）</span></span>
-    <input type="checkbox" id="h-auto" style="width:15px;height:15px;cursor:pointer">
-  </div>
-  <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 10px 6px">
-    <span style="color:#a8b0bf;font-size:11.5px">掉线时弹提醒 <span style="opacity:.7">（右下角气泡）</span></span>
-    <input type="checkbox" id="h-notify" style="width:15px;height:15px;cursor:pointer">
-  </div>
-  <div class="fold" id="evt-fold">
-    <div class="fold-h" id="evt-fold-h"><span>📋 近 24 小时链路记录 <span id="evt-fold-n"></span></span><span class="caret">▸</span></div>
-    <div class="fold-b" id="health-events"></div>
-  </div>
+    <div class="sec-label"><span id="health-title">显示器健康</span> <span class="ver" id="health-badge"></span></div>
+    <div class="grid" id="healthgrid">
+      <div class="cell" id="cell-hrepair"><span class="ico"><svg class="ic"><use href="#ic-wrench"/></svg></span><span class="lbl">一键修复</span></div>
+      <div class="cell" id="cell-hdeep"><span class="ico"><svg class="ic"><use href="#ic-gauge"/></svg></span><span class="lbl">深度修复</span></div>
+      <div class="cell" id="cell-hscan"><span class="ico"><svg class="ic"><use href="#ic-clipboard"/></svg></span><span class="lbl">检查记录</span></div>
+    </div>
+    <p class="status-line" id="health-hint"></p>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 14px 0">
+      <span style="color:var(--muted);font-size:11.5px">自动修复</span>
+      <input type="checkbox" id="h-auto" style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)">
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 14px 2px">
+      <span style="color:var(--muted);font-size:11.5px">掉线时提醒</span>
+      <input type="checkbox" id="h-notify" style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)">
+    </div>
+    <div class="fold" id="evt-fold">
+      <div class="fold-h" id="evt-fold-h"><span>近 24 小时链路记录 <span id="evt-fold-n"></span></span><span class="caret">▸</span></div>
+      <div class="fold-b" id="health-events"></div>
+    </div>
 
-  <div class="sec-label">联网增强 <span class="ver" id="adb-badge">可选</span></div>
-  <div class="grid" id="adbgrid">
-    <div class="cell" id="cell-adbscan"><span class="ico">🔍</span><span class="lbl">检测 ADB</span></div>
-    <div class="cell" id="cell-adbdl"><span class="ico">⬇</span><span class="lbl">获取 ADB</span></div>
-    <div class="cell" id="cell-adbconn"><span class="ico">🖥</span><span class="lbl">连接显示器</span></div>
-  </div>
-  <div class="hint" id="adb-hint">联网增强（方案B）：让电脑直接控制显示器本体（电源 / 音量 / 输入源 / 听懂遥控器）。需要显示器开启「ADB 调试」，完全可选——不开启也照样用上面全部本地功能。</div>
+    <div class="sec-label">联网增强 <span class="ver" id="adb-badge">可选</span></div>
+    <div class="grid" id="adbgrid">
+      <div class="cell" id="cell-adbscan"><span class="ico"><svg class="ic"><use href="#ic-search"/></svg></span><span class="lbl">检测 ADB</span></div>
+      <div class="cell" id="cell-adbdl"><span class="ico"><svg class="ic"><use href="#ic-download"/></svg></span><span class="lbl">获取 ADB</span></div>
+      <div class="cell" id="cell-adbconn"><span class="ico"><svg class="ic"><use href="#ic-plug"/></svg></span><span class="lbl">连接显示器</span></div>
+    </div>
+    <p class="status-line" id="adb-hint"></p>
 
-  <div class="sec-label">快捷控制</div>
-  <div class="grid" id="quick">
-    <div class="cell" id="cell-color"><span class="ico">🎨</span><span class="lbl">色彩：sRGB</span></div>
-    <div class="cell" id="cell-brisync"><span class="ico">☀️</span><span class="lbl">亮度同步</span></div>
-    <div class="cell" id="cell-hdr"><span class="ico">🌈</span><span class="lbl">HDR 同步</span></div>
-    <div class="cell" id="cell-align" data-act="align-mac"><span class="ico">🖥️</span><span class="lbl">对齐主屏</span></div>
-    <div class="cell" id="cell-ppi" data-act="ppi"><span class="ico">🪟</span><span class="lbl">窗口不变小</span></div>
-    <div class="cell" id="cell-rotate" data-act="rotate"><span class="ico">🔄</span><span class="lbl">横竖屏</span></div>
-    <div class="cell" id="cell-span"><span class="ico">🎬</span><span class="lbl">铺满窗口</span></div>
-    <div class="cell" id="cell-unspan"><span class="ico">↩️</span><span class="lbl">还原窗口</span></div>
-    <div class="cell" id="cell-defaults"><span class="ico">🛟</span><span class="lbl">恢复默认</span></div>
+    <div class="sec-label">快捷控制</div>
+    <div class="grid" id="quick">
+      <div class="cell" id="cell-color"><span class="ico"><svg class="ic"><use href="#ic-palette"/></svg></span><span class="lbl">色彩 sRGB</span></div>
+      <div class="cell" id="cell-brisync"><span class="ico"><svg class="ic"><use href="#ic-bright"/></svg></span><span class="lbl">亮度同步</span></div>
+      <div class="cell" id="cell-hdr"><span class="ico"><svg class="ic"><use href="#ic-hdr"/></svg></span><span class="lbl">HDR 同步</span></div>
+      <div class="cell" id="cell-align" data-act="align-mac"><span class="ico"><svg class="ic"><use href="#ic-layout"/></svg></span><span class="lbl">对齐主屏</span></div>
+      <div class="cell" id="cell-ppi" data-act="ppi"><span class="ico"><svg class="ic"><use href="#ic-window"/></svg></span><span class="lbl">窗口不变小</span></div>
+      <div class="cell" id="cell-rotate" data-act="rotate"><span class="ico"><svg class="ic"><use href="#ic-rotate"/></svg></span><span class="lbl">横竖屏</span></div>
+      <div class="cell" id="cell-span"><span class="ico"><svg class="ic"><use href="#ic-span"/></svg></span><span class="lbl">铺满窗口</span></div>
+      <div class="cell" id="cell-unspan"><span class="ico"><svg class="ic"><use href="#ic-restore"/></svg></span><span class="lbl">还原窗口</span></div>
+      <div class="cell" id="cell-defaults"><span class="ico"><svg class="ic"><use href="#ic-shield"/></svg></span><span class="lbl">恢复默认</span></div>
+    </div>
+
   </div>
 
   <div class="foot">
-    <button class="fbtn" id="refresh-btn">⟳ 刷新</button>
-    <button class="fbtn" id="main-btn2">🖥️ 主窗口</button>
-    <button class="fbtn" id="autostart-btn">⚡ 自启：检测中</button>
+    <button class="fbtn" id="refresh-btn"><svg class="ic"><use href="#ic-refresh"/></svg>刷新</button>
+    <button class="fbtn" id="main-btn2"><svg class="ic"><use href="#ic-monitor"/></svg>主窗口</button>
+    <button class="fbtn" id="autostart-btn"><svg class="ic"><use href="#ic-power"/></svg><span id="autostart-label">自启</span></button>
   </div>
 </div>
 
 <script>
 function invoke(cmd, args={}){ if(window.__TAURI__&&window.__TAURI__.core) return window.__TAURI__.core.invoke(cmd,args); return Promise.reject(new Error('NO_TAURI')); }
+
+function normPlatform(p){ const v=String(p||'').toLowerCase(); if(v.startsWith('mac')||v==='darwin') return 'macos'; if(v.startsWith('win')) return 'windows'; return v; }
+function getPlatform(){ return invoke('get_platform').then(normPlatform); }
 function flash(el){ el.classList.add('active'); setTimeout(()=>el.classList.remove('active'),300); }
 
 // DDC 写入串行化 + 合并最新值：拖动滑块时最多只有 1 个后台进程在跑，
@@ -271,7 +464,7 @@ function loadNativeDisplayPanel(displays){
     for (const display of nativeDisplayPanel.displays) {
       const option = document.createElement('option');
       option.value = display.id;
-      option.textContent = `${display.name || display.id}${display.main ? '（主屏）' : ''} · ${display.resolution || '未知分辨率'}${display.hz ? ` · ${display.hz}Hz` : ''}`;
+      option.textContent = `${display.name || display.id}${(display.main && !String(display.name || '').includes('主')) ? '（主屏）' : ''} · ${display.resolution || '未知分辨率'}${display.hz ? ` · ${display.hz}Hz` : ''}`;
       select.appendChild(option);
     }
   }
@@ -341,20 +534,17 @@ async function load(){
     if(!ds||!ds.length){ box.innerHTML='<div class="empty">未检测到显示器</div>'; return; }
     box.innerHTML = ds.map(d=>{
       const hasBri = d.ddc || d.brightness != null; // DDC 或 WMI（内屏）亮度
-      const badge = d.ddc ? '<span class="badge">DDC</span>' : (hasBri ? '<span class="badge">WMI</span>' : '<span class="badge" style="background:rgba(255,160,80,.12);color:#e8a75c;border-color:rgba(255,160,80,.3)">无DDC</span>');
+      const badge = d.ddc ? '<span class="badge">DDC</span>' : (hasBri ? '<span class="badge">WMI</span>' : '<span class="badge">不可调</span>');
       const briRow = hasBri ? '<div class="srow"><label>亮度</label><input type="range" min="0" max="100" value="'+(d.brightness??50)+'" data-id="'+d.id+'" data-k="brightness"><span class="val">'+(d.brightness??50)+'%</span></div>' : '';
       const volRow = d.ddc ? '<div class="srow"><label>音量</label><input type="range" min="0" max="100" value="'+(d.volume??50)+'" data-id="'+d.id+'" data-k="volume"><span class="val">'+(d.volume??50)+'%</span></div>' : '';
       // 单屏电源（仅 DDC 可用的屏）：走 DDC VCP 0xD6 单独待机/点亮
       const powerRow = d.ddc ? '<div class="srow"><label>电源</label><div style="display:flex;gap:6px"><button class="ibtn" data-pw="4" data-id="'+d.id+'">待机</button><button class="ibtn" data-pw="1" data-id="'+d.id+'">点亮</button></div><span class="val" data-pwval="'+d.id+'">—</span></div>' : '';
-      let hint = '';
-      if (hasBri && !d.ddc) hint = '<div class="hint">内屏：亮度走系统 WMI；喇叭/耳机音量用上方「系统音量」。</div>';
-      else if (!hasBri && !d.ddc) hint = '<div class="hint">此屏不走 DDC/CI，无法单独控制；用上方「全部待机」可让它与其它屏一起待机</div>';
       return '<div class="grp open" data-display-id="'+d.id+'">'+
         '<div class="grp-h">'+
-          '<div><div class="grp-title">'+(d.name||d.id)+'</div><div class="grp-meta">'+(d.resolution||'')+(d.hz?' · '+d.hz+'Hz':'')+(d.main?' · 主屏':'')+(d.color_profile?' · '+d.color_profile:'')+'</div></div>'+
+          '<div><div class="grp-title">'+(d.name||d.id)+'</div><div class="grp-meta">'+(d.resolution||'')+(d.hz?' · '+d.hz+'Hz':'')+((d.main && !String(d.name||'').includes('主'))?' · 主屏':'')+(d.color_profile?' · '+d.color_profile:'')+'</div></div>'+
           '<div class="grp-right">'+badge+'</div>'+
         '</div>'+
-        '<div class="grp-body">'+briRow+volRow+powerRow+hint+'</div>'+
+        '<div class="grp-body">'+briRow+volRow+powerRow+'</div>'+
       '</div>';
     }).join('');
     void loadPanelDisplayModes(ds, box);
@@ -581,7 +771,7 @@ document.getElementById('mute-btn2').onclick = async ()=>{
     const state = await invoke('get_system_audio');
     const want = !state.mute;
     await invoke('set_system_mute', { on: want });
-    document.getElementById('mute-btn2').textContent = want ? '🔕 取消静音' : '🔇 静音';
+    document.getElementById('mute-btn2').textContent = want ? '取消静音' : '静音';
     pwHint(want ? '已静音系统输出' : '已取消静音');
   }
   catch(e){ pwHint('静音失败：' + (e && e.message ? e.message : e), true); }
@@ -605,10 +795,11 @@ document.getElementById('mute-btn2').onclick = async ()=>{
 (async ()=>{
   const el = document.getElementById('hotkey-line');
   try {
-    const platform = await invoke('get_platform');
+    const platform = await getPlatform();
     const hk = await invoke('hotkey_start');
     const restoreKey = platform === 'macos' ? 'Control+Option+R' : 'Ctrl+Alt+R';
-    el.innerHTML = '快捷键：<span class="hk">' + hk + '</span> 屏幕待机/唤醒　<span class="hk">' + restoreKey + '</span> 还原被铺满的窗口（铺满后界面被盖住也能按）';
+    el.innerHTML = '<span class="hk">' + hk + '</span><span class="hkl">待机 / 唤醒</span>'
+      + '<span class="hk">' + restoreKey + '</span><span class="hkl">还原窗口</span>';
   } catch(e){
     el.textContent = '全局快捷键：' + (e && e.message ? e.message : '注册失败');
     el.style.color = '#e8a75c';
@@ -618,7 +809,7 @@ document.getElementById('mute-btn2').onclick = async ()=>{
 // ============ 链路记录折叠 ============
 const evtFold = document.getElementById('evt-fold');
 document.getElementById('evt-fold-h').onclick = ()=>{ evtFold.classList.toggle('open'); };
-document.getElementById('refresh-btn').onclick=()=>{ load(); loadBatteries(); };
+document.getElementById('refresh-btn').onclick=()=>{ load(); loadBatteries(); if (typeof hLoadEvents === 'function') hLoadEvents(); };
 document.getElementById('main-btn').onclick=()=>invoke('open_main');
 document.getElementById('main-btn2').onclick=()=>invoke('open_main');
 document.getElementById('quit-btn').onclick=()=>invoke('quit_app');
@@ -627,23 +818,24 @@ document.getElementById('hide-btn').onclick=()=>invoke('hide_panel');
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') invoke('hide_panel'); });
 
 // 版本号 + 开机自启开关
+function setAutoLabel(text){ const el = document.getElementById('autostart-label'); if (el) el.textContent = text; }
 const autostartBtn = document.getElementById('autostart-btn');
 function paintAutostart(on){
-  autostartBtn.textContent = on ? '⚡ 自启：开' : '⚡ 自启：关';
+  setAutoLabel(on ? '自启 · 开' : '自启 · 关');
   autostartBtn.style.color = on ? '#7fb0ff' : '';
 }
 async function refreshAutostart(){
   try { paintAutostart(await invoke('get_autostart')); }
-  catch(e){ autostartBtn.textContent='⚡ 自启：?'; }
+  catch(e){ setAutoLabel('自启 · ?'); }
 }
 autostartBtn.onclick = async ()=>{
   const want = !(autostartBtn.textContent.includes('开'));
-  autostartBtn.textContent = '⚡ 设置中…';
+  setAutoLabel('设置中…');
   try {
     await invoke('set_autostart', { enabled: want });
     paintAutostart(want);
   } catch(e){
-    autostartBtn.textContent = '⚡ 失败';
+    setAutoLabel('设置失败');
     autostartBtn.style.color = '#ef6a6a';
     setTimeout(()=>{ refreshAutostart(); autostartBtn.style.color=''; }, 900);
   }
@@ -666,7 +858,7 @@ function sendSysVol(val){
 }
 async function loadAudio(){
   try {
-    const p = await invoke('get_platform');
+    const p = await getPlatform();
     if (p !== 'windows' && p !== 'macos') return;
     document.getElementById('audio-sec').style.display = '';
     document.getElementById('audio-grp').style.display = '';
@@ -678,6 +870,7 @@ async function loadAudio(){
       devRow.style.display = 'none';
       brightnessRow.style.display = 'none';
       brightnessReset.style.display = 'none';
+      brightnessReset.parentElement.classList.add('solo');
     }
     // v0.3.3：音量作用于「用户选定的输出端点」。默认输出若是固定音量的 HDMI/DP
     // 显示器音频（Windows 滑块也调不动），自动落到一个可调端点上并列出设备供切换。
@@ -709,7 +902,7 @@ async function loadAudio(){
     document.getElementById('audio-dev').textContent = txt;
     const muteButton = document.getElementById('mute-btn2');
     muteButton.disabled = !cur.adjustable;
-    muteButton.textContent = cur.mute ? '🔕 取消静音' : '🔇 静音';
+    muteButton.textContent = cur.mute ? '取消静音' : '静音';
     if (!sl.dataset.bound) {
       sl.dataset.bound = '1';
       sl.addEventListener('input', ev=>{
@@ -723,10 +916,11 @@ async function loadAudio(){
 // 电池设备（Windows 枚举连接设备；macOS 展示内置电池）
 let batteryLoadBusy = false;
 function battIcon(conn){
-  if (conn === '内置') return '💻';
-  if (conn === '蓝牙') return '🎧';
-  if (conn === 'USB/无线' || conn === 'USB') return '🖱️';
-  return '🔋';
+  const name = conn === '内置' ? 'laptop'
+    : conn === '蓝牙' ? 'headphone'
+      : (conn === 'USB/无线' || conn === 'USB') ? 'mouse'
+        : 'battery';
+  return '<svg class="ic"><use href="#ic-' + name + '"/></svg>';
 }
 // 电池采样历史（本地留存，用于画耗电柱状图）：{设备名: [[时间戳, 电量], ...]}
 const BATT_HIST_KEY = 'sg_batt_hist';
@@ -767,26 +961,19 @@ async function loadBatteries(){
   if (batteryLoadBusy) return;
   batteryLoadBusy = true;
   try {
-    const p = await invoke('get_platform');
+    const p = await getPlatform();
     if (p !== 'windows' && p !== 'macos') return;
     const list = await invoke('get_batteries');
     const section = document.getElementById('batt-sec');
-    section.style.display = '';
-    if (p === 'macos') section.textContent = 'Mac 电池状态';
-    const bnote = document.getElementById('batt-note');
-    if (bnote) {
-      if (p === 'macos') {
-        bnote.textContent = 'macOS 提供内置电池电量和电源状态；外接蓝牙/USB 设备电量及电池健康度暂不在此面板采集。';
-        bnote.style.display = '';
-      } else {
-        bnote.style.display = (list && list.some(x => x.health >= 0)) ? '' : 'none';
-      }
-    }
     const box = document.getElementById('batt-box');
+    // 没有带电池的设备就不占版面
     if (!list || !list.length) {
-      box.innerHTML = '<div style="padding:0 8px"><div class="empty">未检测到带电池的设备</div></div>';
+      section.style.display = 'none';
+      box.innerHTML = '';
       return;
     }
+    section.style.display = '';
+    if (p === 'macos') section.textContent = '电池';
     const histAll = battPush(list);   // 先采样入库，再按历史画图
     box.innerHTML = list.map(b=>{
       const pct = b.percent >= 0 ? b.percent : null;
@@ -834,42 +1021,7 @@ function pwHint(t, err){ pwHintEl.textContent = t || ''; pwHintEl.style.color = 
 if (window.__TAURI__?.event?.listen) {
   window.__TAURI__.event.listen('power-link-status', event => pwHint(String(event.payload || '')));
 }
-pwHint('本地模式可用：系统级待机（含不走 DDC 的屏）；macOS 使用系统显示器电源接口');
 
-const sleepDiagnostic = document.getElementById('mac-sleep-diagnostic');
-const sleepDiagnosticHint = document.getElementById('mac-sleep-state-hint');
-document.getElementById('read-mac-sleep-state').onclick = async ev => {
-  flash(ev.currentTarget);
-  sleepDiagnosticHint.textContent = '正在只读检查 Quartz 睡眠状态与 DDC 电源状态…';
-  sleepDiagnosticHint.style.color = '';
-  try {
-    const [states, displays, linkEnabled] = await Promise.all([
-      invoke('get_display_sleep_states'),
-      invoke('get_displays'),
-      invoke('get_power_link_preference').catch(() => null)
-    ]);
-    const names = new Map((displays || []).map(display => [display.id, display.name || display.id]));
-    const powerModes = new Map([[1, '开'], [2, '待机'], [3, '挂起'], [4, '软关'], [5, '硬关']]);
-    const powerReadings = await Promise.all((displays || []).map(async display => {
-      try {
-        const mode = await invoke('get_display_power', { displayId: display.id });
-        return `${display.name || display.id}：VCP 0xD6 ${powerModes.get(Number(mode)) || `未知值 ${mode}`}`;
-      } catch (error) {
-        const message = error && error.message ? error.message : String(error);
-        return `${display.name || display.id}：VCP 0xD6 不可读（${message.slice(0, 96)}）`;
-      }
-    }));
-    const sleepSummary = (Array.isArray(states) ? states : []).map(state => `${names.get(state.id) || state.id}：Quartz 报告${state.asleep ? '睡眠' : '唤醒'}`);
-    const sleepText = sleepSummary.length ? sleepSummary.join('；') : 'macOS 未返回可用的逐屏 Quartz 状态';
-    const linkText = linkEnabled === null ? '读取失败' : linkEnabled ? '开' : '关';
-    const linkSummary = `电源联动开关：${linkText}`;
-    const ddcSummary = powerReadings.length ? powerReadings.join('；') : '当前没有可查询的 DDC 显示器';
-    sleepDiagnosticHint.textContent = `${linkSummary}；${sleepText}；${ddcSummary}。本次仅读取状态，不会发送关屏/唤醒命令；Quartz 睡眠状态不等同于物理电源状态。`;
-  } catch (error) {
-    sleepDiagnosticHint.textContent = `读取失败：${error && error.message ? error.message : error}`;
-    sleepDiagnosticHint.style.color = '#ef6a6a';
-  }
-};
 
 document.getElementById('cell-offall').onclick = async (ev)=>{
   flash(ev.currentTarget);
@@ -1120,7 +1272,7 @@ async function syncPowerLinkPreference(){
   if (revision !== link.preferenceRevision) return;
   if (!link.platform) {
     try {
-      link.platform = await invoke('get_platform');
+      link.platform = await getPlatform();
       link.supported = link.platform === 'windows' || link.platform === 'macos';
     } catch(e) {}
   }
@@ -1142,11 +1294,10 @@ window.addEventListener('storage', ev => {
 // 按平台调整文案/可用性：
 // Windows 没有内建 P3 屏，「对齐Mac」的等价语义是「把主屏色彩配置对齐到其它屏」；
 // Linux 端这些能力尚未实现，置灰并标注，避免点了只弹错。
-invoke('get_platform').then(p=>{
+getPlatform().then(p=>{
   panelPlatform = p;
   link.platform = p;
   link.supported = p === 'windows' || p === 'macos';
-  if (sleepDiagnostic) sleepDiagnostic.style.display = p === 'macos' ? 'flex' : 'none';
   const nativeDisplayGroup = document.getElementById('native-display-grp');
   if (nativeDisplayGroup) nativeDisplayGroup.style.display = p === 'macos' ? '' : 'none';
   setupNativeDisplayPanel();
@@ -1179,7 +1330,7 @@ invoke('get_platform').then(p=>{
   }
   const align=document.getElementById('cell-align');
   if(p==='windows'){
-    align.querySelector('.ico').textContent='🖥️';
+    align.querySelector('.ico').innerHTML='<svg class="ic"><use href="#ic-layout"/></svg>';
     align.querySelector('.lbl').textContent='对齐主屏';
     align.title='把主屏当前的色彩配置应用到其它屏';
   }else if(p==='macos'){
@@ -1204,9 +1355,6 @@ refreshAutostart();
 // 没有 ADB → 上面方案A 的本地能力照常，互不影响。
 const adbHintEl = document.getElementById('adb-hint');
 function adbSay(t, err){ adbHintEl.textContent = t || ''; adbHintEl.style.color = err ? '#ef6a6a' : ''; }
-invoke('get_platform').then(p=>{
-  if (p === 'macos') adbHintEl.textContent = 'macOS 可使用 Android SDK，或点击「获取 ADB」安装 Google 官方 Platform-Tools；安装前会确认 SDK 条款。显示器需开启网络 ADB 调试。';
-}).catch(()=>{});
 
 // 检测：adb 是否存在 + 已连接哪些设备
 document.getElementById('cell-adbscan').onclick = async (ev)=>{
@@ -1219,7 +1367,7 @@ document.getElementById('cell-adbscan').onclick = async (ev)=>{
     if (st.available) {
       adbSay('adb 已就绪：' + st.path + (devs.length ? ('｜已连接：' + devs.join('、')) : '｜尚未连接显示器（点「连接显示器」）'));
     } else {
-      adbSay(st.tip || '未找到 adb。点击「获取 ADB」安装 Platform-Tools；本地显示器控制不受影响。');
+      adbSay('未找到 adb');
     }
   } catch(e){ adbSay('检测失败：' + (e && e.message ? e.message : e), true); }
 };
@@ -1229,7 +1377,7 @@ document.getElementById('cell-adbdl').onclick = async (ev)=>{
   flash(ev.currentTarget);
   let platform = 'windows';
   try {
-    platform = await invoke('get_platform');
+    platform = await getPlatform();
     if (platform === 'macos') {
       const accepted = window.confirm('将从 Google 官方下载 Android SDK Platform-Tools 到 Screenguard 应用数据目录。继续即表示你同意 Android SDK Platform-Tools 条款。条款：https://developer.android.com/tools/releases/platform-tools');
       if (!accepted) { adbSay('已取消下载；其他本地显示器功能不受影响。'); return; }
@@ -1274,9 +1422,13 @@ let healthPlatform = '';
 
 function hShowMacActions(){
   for (const id of ['cell-hrepair', 'cell-hdeep']) document.getElementById(id).style.display = 'none';
-  document.getElementById('cell-hscan').querySelector('.lbl').textContent = '读取状态';
-  document.getElementById('health-title').textContent = '显示器状态（macOS）';
-  document.getElementById('evt-fold-h').querySelector('span').firstChild.textContent = '🖥 当前系统状态 ';
+  // macOS 没有「修复/记录」可做，整块按钮行不占版面：状态下方的折叠区已实时展示，
+  // 手动刷新统一走底栏「刷新」。
+  document.getElementById('healthgrid').style.display = 'none';
+  document.getElementById('health-title').textContent = '显示器状态';
+  document.getElementById('evt-fold-h').querySelector('span').firstChild.textContent = '当前系统状态 ';
+  // macOS 这里就是全部「健康信息」，没有别的入口：默认展开，别让用户对着空壳点一次
+  document.getElementById('evt-fold').classList.add('open');
   document.getElementById('h-auto').parentElement.style.display = 'none';
   document.getElementById('h-notify').parentElement.style.display = 'none';
 }
@@ -1293,16 +1445,16 @@ async function hLoadMacStates(){
       line.className = 'hint'; line.style.padding = '0';
       line.textContent = 'macOS 当前没有返回逐屏睡眠状态。';
       hEvtBox.append(line);
-      hSay('系统逐屏睡眠状态不可用；这不表示显示器已关机。', true);
+      hSay('系统未提供逐屏睡眠状态');
       return;
     }
     for (const state of rows) {
       const line = document.createElement('div');
-      line.className = 'hint'; line.style.padding = '2px 0';
-      line.textContent = (state.asleep ? '系统报告睡眠' : '系统报告唤醒') + ' · 显示器 ' + String(state.id);
+      line.className = 'hint'; line.style.padding = '3px 0';
+      line.textContent = '显示器 ' + String(state.id) + ' · ' + (state.asleep ? '睡眠' : '唤醒');
       hEvtBox.append(line);
     }
-    hSay('这是 macOS Quartz 报告的系统睡眠状态，不代表面板物理断电。若系统仍报告唤醒，联动无法据此判断物理关屏。');
+    hSay('');
   } catch(e){ hSay('读取 macOS 屏幕状态失败：' + (e && e.message ? e.message : e), true); }
 }
 
@@ -1315,7 +1467,7 @@ function hPaintEvents(){
   const foldN = document.getElementById('evt-fold-n');
   if (foldN) foldN.textContent = n ? ('· ' + n + ' 条') : '';
   if (!n) {
-    hEvtBox.innerHTML = '<div class="hint" style="padding:0">近 24 小时未检测到显示器链路异常 👍</div>';
+    hEvtBox.innerHTML = '<div class="hint" style="padding:0">近 24 小时无异常</div>';
   } else {
     hEvtBox.innerHTML = hEvts.slice(0, 8).map(e=>{
       const color = (e.lvl === '错误' || e.lvl === '严重') ? '#ef6a6a' : (e.lvl === '警告' ? '#e8a75c' : '#a8b0bf');
@@ -1327,7 +1479,7 @@ function hPaintEvents(){
   if (disc) s += '，其中 ' + disc + ' 次显示器突然离线';
   if (tdr) s += '，' + tdr + ' 次显示驱动重置';
   if (disc || tdr) s += '　→ 建议试「一键修复」';
-  hSay(n ? s : '近 24 小时链路正常，没有异常记录 👍');
+  hSay(n ? s : '近 24 小时链路正常');
 }
 
 async function hLoadEvents(){
@@ -1393,11 +1545,11 @@ document.getElementById('h-notify').onchange = (ev)=>{
 };
 
 async function hInit(){
-  try { healthPlatform = await invoke('get_platform'); } catch(e) { healthPlatform = ''; }
+  try { healthPlatform = await getPlatform(); } catch(e) { healthPlatform = ''; }
   if (healthPlatform === 'macos') {
     healthSupported = false;
     hShowMacActions();
-    document.getElementById('evt-fold-h').querySelector('span').firstChild.textContent = '🖥 当前系统状态 ';
+    document.getElementById('evt-fold-h').querySelector('span').firstChild.textContent = '当前系统状态 ';
     await hLoadMacStates();
     setInterval(hLoadMacStates, 60000);
     return;

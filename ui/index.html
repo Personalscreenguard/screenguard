@@ -7,32 +7,69 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+<svg class="sprite" aria-hidden="true">
+  <symbol id="ic-monitor" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></symbol>
+  <symbol id="ic-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
+  <symbol id="ic-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+  <symbol id="ic-link" viewBox="0 0 24 24"><path d="M10 13.5a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.7 1.7"/><path d="M14 10.5a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.7-1.7"/></symbol>
+  <symbol id="ic-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-.9 2-1.8 0-1.4-1.4-1.8-1.4-3 0-.9.7-1.6 1.7-1.6H16a5 5 0 0 0 5-5C21 6.2 17 3 12 3Z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="14.5" cy="7.5" r="1"/></symbol>
+  <symbol id="ic-bright" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/></symbol>
+  <symbol id="ic-hdr" viewBox="0 0 24 24"><path d="M3 8v8M7 8v8M3 12h4M14 8h2.5a4 4 0 0 1 0 8H14Z"/><path d="M20 8v8M20 12h2"/></symbol>
+  <symbol id="ic-layout" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="M12 4.5v15"/><path d="M5.5 8h3M5.5 11h3"/></symbol>
+  <symbol id="ic-window" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9h19"/></symbol>
+  <symbol id="ic-rotate" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3.5V8h-4.5"/></symbol>
+  <symbol id="ic-span" viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="8.5" height="13" rx="1.5"/><rect x="13" y="5.5" width="8.5" height="13" rx="1.5"/></symbol>
+  <symbol id="ic-restore" viewBox="0 0 24 24"><path d="M4 9h11a5 5 0 0 1 0 10H8"/><path d="M7.5 5.5 4 9l3.5 3.5"/></symbol>
+  <symbol id="ic-shield" viewBox="0 0 24 24"><path d="M12 2.8 20 6v6c0 4.6-3.3 8-8 9.2C7.3 20 4 16.6 4 12V6Z"/><path d="m8.5 12 2.3 2.3 4.7-4.7"/></symbol>
+  <symbol id="ic-wrench" viewBox="0 0 24 24"><path d="M15.5 3a5.5 5.5 0 0 0-4.9 8L3.5 18.1a1.8 1.8 0 0 0 2.5 2.5l7.1-7.1A5.5 5.5 0 1 0 15.5 3Z"/></symbol>
+  <symbol id="ic-clipboard" viewBox="0 0 24 24"><rect x="5" y="4.5" width="14" height="16" rx="2"/><path d="M9 4.5V3.5h6v1M8.5 9.5h7M8.5 13h7M8.5 16.5h4"/></symbol>
+  <symbol id="ic-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></symbol>
+  <symbol id="ic-download" viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7.5 10 4.5 4.5L16.5 10"/><path d="M4 19h16"/></symbol>
+  <symbol id="ic-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0Z"/><path d="M12 17v4"/></symbol>
+  <symbol id="ic-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3.5V8h-4.5"/></symbol>
+  <symbol id="ic-power" viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.5 6.5a8 8 0 1 0 11 0"/></symbol>
+  <symbol id="ic-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="ic-external" viewBox="0 0 24 24"><path d="M13 4h7v7"/><path d="M20 4 11 13"/><path d="M18 14v4.5A1.5 1.5 0 0 1 16.5 20h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></symbol>
+  <symbol id="ic-update" viewBox="0 0 24 24"><path d="M12 20V8"/><path d="m7.5 12.5 4.5-4.5 4.5 4.5"/><path d="M4 4h16"/></symbol>
+  <symbol id="ic-backup" viewBox="0 0 24 24"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></symbol>
+  <symbol id="ic-lock" viewBox="0 0 24 24"><rect x="4.5" y="10" width="15" height="10.5" rx="2"/><path d="M8 10V7.5a4 4 0 0 1 8 0V10"/></symbol>
+  <symbol id="ic-gauge" viewBox="0 0 24 24"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 13 4-4"/><circle cx="12" cy="14" r="1.4"/></symbol>
+  <symbol id="ic-battery" viewBox="0 0 24 24"><rect x="2.5" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/><path d="M5.5 10.5v3"/></symbol>
+  <symbol id="ic-headphone" viewBox="0 0 24 24"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="2.5" y="13.5" width="4" height="6" rx="1.6"/><rect x="17.5" y="13.5" width="4" height="6" rx="1.6"/></symbol>
+  <symbol id="ic-mouse" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="5.5"/><path d="M12 6v3"/></symbol>
+  <symbol id="ic-laptop" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="10.5" rx="1.8"/><path d="M2.5 19h19"/></symbol>
+  <symbol id="ic-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.5"/></symbol>
+  <symbol id="ic-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.5M9.5 10h.5M13 10h.5M16.5 10h.5M6 13.5h.5M9.5 13.5h.5M13 13.5h.5M16.5 13.5h.5M8 16h8"/></symbol>
+  <symbol id="ic-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".8" fill="currentColor" stroke="none"/></symbol>
+</svg>
+
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <svg class="logo" viewBox="0 0 24 24" width="28" height="28">
-        <rect x="2" y="4" width="16" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/>
-        <rect x="6" y="9" width="9" height="3" rx="1" fill="currentColor" opacity="0.9"/>
-        <line x1="10" y1="15" x2="10" y2="19" stroke="currentColor" stroke-width="1.6"/>
-        <line x1="6" y1="19" x2="14" y2="19" stroke="currentColor" stroke-width="1.6"/>
-      </svg>
-      <div>
+      <span class="mark"><svg class="ic"><use href="#ic-monitor"/></svg></span>
+      <div class="brand-text">
         <h1>屏幕守护</h1>
-        <p class="subtitle">跨平台 · 显示器控制助力</p>
       </div>
     </div>
-    <div class="platform-badge" id="platform-badge">检测中…</div>
+    <span class="platform-badge" id="platform-badge">检测中</span>
   </header>
 
   <main class="content">
 
-    <!-- ===== 显示器 ===== -->
-    <section class="card">
+    <!-- 常用动作：横向等宽铺满 -->
+    <div class="quickbar">
+      <button class="btn" id="pw-off"><svg class="ic"><use href="#ic-moon"/></svg>全部待机</button>
+      <button class="btn" id="pw-wake"><svg class="ic"><use href="#ic-sun"/></svg>唤醒屏幕</button>
+      <button class="btn" id="span-fg"><svg class="ic"><use href="#ic-span"/></svg>铺满前台窗口</button>
+      <button class="btn" id="restore-fg"><svg class="ic"><use href="#ic-restore"/></svg>还原窗口</button>
+    </div>
+
+    <section class="card" style="margin-top:4px">
       <div class="card-head">
-        <h2>🖥️ 显示器控制</h2>
-        <div class="btn-row" style="margin:0;padding:0;justify-content:flex-end">
-          <button class="ghost" id="open-panel-btn" title="打开菜单栏快捷控制面板">快捷面板</button>
-          <button class="ghost" id="refresh-btn" title="刷新显示器列表">⟳ 刷新</button>
+        <h2><svg class="ic"><use href="#ic-monitor"/></svg>显示器</h2>
+        <div class="head-actions">
+          <button class="btn btn-sm" id="open-panel-btn" title="打开菜单栏快捷控制面板">快捷面板</button>
+          <button class="btn btn-sm" id="refresh-btn" title="刷新显示器列表"><svg class="ic"><use href="#ic-refresh"/></svg>刷新</button>
         </div>
       </div>
       <div class="displays" id="displays">
@@ -40,66 +77,61 @@
       </div>
     </section>
 
-    <!-- macOS 原生显示控制：仅展示有可靠实现的操作。 -->
     <section class="card" id="native-display-card" style="display:none">
       <div class="card-head">
-        <h2>🧰 高级显示器控制</h2>
-        <span class="hint">Screenguard 内置控制</span>
+        <h2><svg class="ic"><use href="#ic-wrench"/></svg>高级显示控制</h2>
       </div>
-      <div class="color-row">
-        <label for="nd-source">操作屏幕</label>
-        <select id="nd-source"><option value="">读取中…</option></select>
+      <div class="field-grid">
+        <label class="field">
+          <span>操作屏幕</span>
+          <select id="nd-source"><option value="">读取中…</option></select>
+        </label>
+        <label class="field">
+          <span>目标屏幕</span>
+          <select id="nd-target"><option value="">读取中…</option></select>
+        </label>
       </div>
-      <div class="color-row">
-        <label for="nd-target">目标屏幕</label>
-        <select id="nd-target"><option value="">读取中…</option></select>
+      <div class="btn-grid cols-3">
+        <button class="btn" data-native-action="set-main">设为主屏</button>
+        <button class="btn" data-native-action="mirror-on">镜像到目标</button>
+        <button class="btn" data-native-action="mirror-off">停止镜像</button>
       </div>
-      <div class="btn-row">
-        <button class="ghost" data-native-action="set-main">设为主屏</button>
-        <button class="ghost" data-native-action="mirror-on">镜像到目标</button>
-        <button class="ghost" data-native-action="mirror-off">停止镜像</button>
+      <div class="btn-grid cols-4">
+        <button class="btn" data-native-action="place-left">移到左侧</button>
+        <button class="btn" data-native-action="place-right">移到右侧</button>
+        <button class="btn" data-native-action="place-above">移到上方</button>
+        <button class="btn" data-native-action="place-below">移到下方</button>
       </div>
-      <div class="btn-row">
-        <button class="ghost" data-native-action="place-left">排列到左侧</button>
-        <button class="ghost" data-native-action="place-right">排列到右侧</button>
-        <button class="ghost" data-native-action="place-above">排列到上方</button>
-        <button class="ghost" data-native-action="place-below">排列到下方</button>
+      <div class="inline-field">
+        <input id="nd-input-code" inputmode="numeric" placeholder="输入源 VCP 代码">
+        <button class="btn" data-native-action="input-source">切换输入源</button>
       </div>
-      <div class="color-row">
-        <label for="nd-input-code">输入源代码</label>
-        <input id="nd-input-code" inputmode="numeric" placeholder="显示器 VCP 代码" style="max-width:180px">
-        <button class="ghost" data-native-action="input-source">切换输入源</button>
-      </div>
-      <div class="hint" id="nd-hint">使用 macOS 系统显示 API 与 DDC/CI；镜像和输入源取决于系统、显示器及连接链路。</div>
     </section>
 
-    <!-- ===== 屏幕电源 ===== -->
+    <p class="group-label">电源</p>
+
     <section class="card">
       <div class="card-head">
-        <h2>🌙 屏幕电源</h2>
-        <span class="hint">纯本地 · 不联网也能用</span>
+        <h2><svg class="ic"><use href="#ic-power"/></svg>电源联动</h2>
+        <button class="switch" id="power-link-btn" aria-pressed="false"><span class="switch-dot"></span><span class="switch-text">关闭</span></button>
       </div>
-      <div class="btn-row">
-        <button class="primary" id="pw-off">全部待机</button>
-        <button class="ghost" id="pw-wake">唤醒屏幕</button>
+      <div class="keycap-row">
+        <svg class="ic"><use href="#ic-keyboard"/></svg>
+        <span id="hk-note">读取快捷键…</span>
       </div>
-      <div class="btn-row">
-        <button class="ghost" id="power-link-btn" aria-pressed="false">🔗 电源联动：关</button>
-      </div>
-      <div class="hint" id="pw-note">一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。开启电源联动后需保持 Screenguard 运行。Windows 与 macOS 都由应用直接读写 DDC/CI VCP 0xD6；具体效果取决于显示器和连接链路是否支持 DDC，不支持时不能检测物理关屏状态。</div>
-      <div class="hint" id="hk-note" style="margin-top:6px">全局快捷键：读取中…</div>
     </section>
 
-    <!-- ===== 系统控制（音量 + 总亮度）===== -->
+    <p class="group-label">设备</p>
+
     <section class="card" id="audio-card" style="display:none">
       <div class="card-head">
-        <h2>🎚️ 系统控制</h2>
-        <span class="hint" id="audio-dev">读取中…</span>
+        <h2><svg class="ic"><use href="#ic-sun"/></svg>系统控制</h2>
+        <span class="tag" id="audio-dev">读取中…</span>
       </div>
-      <div class="color-row">
-        <label>输出设备</label>
+      <label class="field">
+        <span>输出设备</span>
         <select id="audio-dev-sel"><option value="">读取中…</option></select>
-      </div>
+      </label>
       <div class="slider-row">
         <label>音量</label>
         <input type="range" min="0" max="100" value="0" id="sys-vol" disabled>
@@ -115,182 +147,155 @@
         <input type="range" min="0" max="100" value="0" id="mitv-vol">
         <span class="val" id="mitv-vol-val">-</span>
       </div>
-      <div class="btn-row">
-        <button class="ghost" id="mute-btn">🔇 静音</button>
-        <button class="ghost" id="bri-reset">☀️ 亮度复位</button>
+      <div class="btn-grid">
+        <button class="btn" id="mute-btn">静音</button>
+        <button class="btn" id="bri-reset">亮度复位</button>
       </div>
-      <div class="hint" id="audio-hint">音量控制当前默认输出设备（与托盘音量同源）。总亮度作用于<b>所有屏幕</b>（含不走 DDC/CI 的显示器）：三通道同曲线，只改明暗、不动色相，范围 40~160，重启后自动恢复。</div>
-      <div class="hint" id="mitv-hint" style="display:none">「小米音量」走显示器自己的系统（MiTV 接口，每次步进 1%），因为小米屏不支持 DDC/CI、电脑侧音频端点又是固定音量。</div>
     </section>
 
-    <!-- ===== 电池设备 ===== -->
     <section class="card" id="battery-card" style="display:none">
       <div class="card-head">
-        <h2>🔋 电池设备</h2>
-        <button class="ghost" id="battery-refresh-btn" title="刷新电池列表">⟳ 刷新</button>
+        <h2><svg class="ic"><use href="#ic-battery"/></svg>电池设备</h2>
+        <button class="btn btn-sm" id="battery-refresh-btn" title="刷新电池列表"><svg class="ic"><use href="#ic-refresh"/></svg>刷新</button>
       </div>
       <div class="displays" id="batteries">
         <div class="empty">正在读取带电池的设备…</div>
       </div>
-      <div class="hint">覆盖笔记本内电池、USB / 2.4G 无线键鼠、蓝牙耳机等所有带电池的设备，显示电量、充电状态、<b>健康度</b>（满充容量 ÷ 设计容量）与<b>耗电曲线</b>。注意：若开着电池保养模式（限充 80%），健康度会显示约 80%，属正常，不是损耗；部分外设（如 ROG OMNI 接收器）走厂商私有协议，Windows 标准接口读不到电量，只有厂商软件（Armoury Crate）能看到。</div>
     </section>
 
-    <!-- ===== 色彩 & 校准 ===== -->
+    <p class="group-label">画质</p>
+
     <section class="card">
       <div class="card-head">
-        <h2>🎨 色彩同步</h2>
-        <span class="hint">让多块屏幕色彩一致 / 对齐标准</span>
+        <h2><svg class="ic"><use href="#ic-palette"/></svg>色彩与亮度</h2>
       </div>
-      <div class="color-row">
-        <label>目标色彩空间</label>
+      <label class="field">
+        <span>目标色彩空间</span>
         <select id="color-space">
-          <option value="sRGB">sRGB（网络/通用）</option>
+          <option value="sRGB">sRGB（网络 / 通用）</option>
           <option value="p3">Display P3（苹果设备）</option>
-          <option value="adobergb">Adobe RGB（印刷/摄影）</option>
-          <option value="dcip3">DCI-P3（影院/视频）</option>
-          <option value="rec709">Rec.709 / BT.709（高清视频）</option>
-          <option value="rec2020">Rec.2020 / BT.2020（HDR/超高清）</option>
+          <option value="adobergb">Adobe RGB（印刷 / 摄影）</option>
+          <option value="dcip3">DCI-P3（影院 / 视频）</option>
+          <option value="rec709">Rec.709（高清视频）</option>
+          <option value="rec2020">Rec.2020（HDR / 超高清）</option>
           <option value="prophoto">ProPhoto RGB（后期广色域）</option>
-          <option value="gray">灰度 / 单色（gray）</option>
+          <option value="gray">灰度 / 单色</option>
         </select>
+      </label>
+      <div class="btn-grid">
+        <button class="btn btn-primary" id="apply-color">应用到所有屏幕</button>
+        <button class="btn" id="match-mac">对齐 Mac 内建屏</button>
+        <button class="btn" id="bri-sync"><svg class="ic"><use href="#ic-bright"/></svg>亮度同步</button>
+        <button class="btn" id="hdr-sync" disabled><svg class="ic"><use href="#ic-hdr"/></svg><span class="btn-label">HDR 读取中</span></button>
       </div>
-      <div class="btn-row">
-        <button class="primary" id="apply-color">应用到所有屏幕</button>
-        <button class="ghost" id="match-mac">对齐 Mac 内建屏</button>
-      </div>
-      <div class="btn-row">
-        <button class="ghost" id="bri-sync">☀️ 亮度同步（各屏取齐）</button>
-        <button class="ghost" id="hdr-sync" disabled>🌈 HDR：读取中…</button>
-      </div>
-      <div class="calib-note" id="color-note">标准目标色彩空间不等于显示器硬件校色；深度校准仍需校色仪及显示器专属配置。</div>
-      <div class="hint" id="hdr-note">⚠️ <b>HDR 按钮是「读取并显示当前状态」</b>（开 / 关 / 混合）。本机实测：切换指令能发出，但系统拒绝 Apply（错误 87），HDR 被厂商服务 <b>AsHDRControl</b> 接管 —— 所以点它<b>不会真的改变</b> HDR，要改请用「设置 → 系统 → 显示 → HDR」或华硕工具。「色彩空间」若和目标本来就一致（例如两块屏都是 sRGB），也不会有视觉变化，这是正常的。</div>
     </section>
 
-    <!-- ===== 窗口 ===== -->
+    <p class="group-label">布局</p>
+
     <section class="card">
       <div class="card-head">
-        <h2>🪟 窗口 / 多屏布局</h2>
+        <h2><svg class="ic"><use href="#ic-window"/></svg>窗口与缩放</h2>
       </div>
-      <div class="btn-row">
-        <button class="primary" id="match-ppi">窗口拖到另一屏不变小</button>
-        <button class="ghost" id="dpi-restore">↩ 还原缩放</button>
+      <div class="btn-grid">
+        <button class="btn btn-primary" id="match-ppi">窗口跨屏不变小</button>
+        <button class="btn" id="dpi-restore"><svg class="ic"><use href="#ic-restore"/></svg>还原缩放</button>
+        <button class="btn" id="rotate-secondary"><svg class="ic"><use href="#ic-rotate"/></svg><span class="btn-label">副屏方向</span></button>
       </div>
-      <div class="btn-row">
-        <button class="ghost" id="rotate-secondary">🔄 副屏方向：读取中…</button>
-      </div>
-      <div class="hint">把副屏的缩放档改成与主屏一致（<b>原值自动备份</b>，可一键还原）。为什么以前"看着没实现"：Windows 改每屏缩放只有注册表一条路、且<b>必须注销或重新登录才生效</b>，没有运行时 API 能立刻变 —— 这是系统限制。点完按钮重启登录即可看到效果。</div>
     </section>
 
-    <!-- ===== 双屏对齐体检 ===== -->
     <section class="card">
       <div class="card-head">
-        <h2>📐 双屏对齐体检</h2>
-        <span class="hint">先体检，再由你确认是否应用分辨率组合</span>
+        <h2><svg class="ic"><use href="#ic-span"/></svg>双屏铺满</h2>
       </div>
-      <div class="btn-row" id="align-mode-actions">
-        <button class="primary" id="align-apply">⚡ 应用推荐对齐组合</button>
-        <button class="ghost" id="align-restore">↩ 还原两块屏原始分辨率</button>
-      </div>
-      <div class="btn-row">
-        <button class="ghost" id="align-run">🩺 开始体检</button>
-        <button class="ghost" id="align-copy">📋 复制结论</button>
-      </div>
-      <pre id="align-out" style="max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:Consolas,ui-monospace,monospace;font-size:12px;line-height:1.55;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:10px;padding:10px;margin:10px 0 6px;color:var(--foreground);">两块屏跨屏拼画面要对得齐，唯一的条件是「竖向像素高度 ≈ 与各自物理高度成正比」（即竖向像素密度一致）。点「开始体检」会读取每块屏的物理尺寸、当前分辨率、全部可用分辨率，算出：谁会被切掉多少画面、PPI 差多少、哪些分辨率组合能对上、以及推荐方案。</pre>
-      <div class="color-row" id="align-manual-size">
-        <label>屏幕尺寸</label>
-        <input id="align-manuf" placeholder="厂商代码" style="width:110px;margin-right:6px">
-        <input id="align-inches" placeholder="对角线英寸" style="width:96px;margin-right:6px">
-        <button class="ghost" id="align-save">保存尺寸</button>
-      </div>
-      <div class="hint" id="align-sizes">已记录尺寸：读取中…</div>
-    </section>
-
-    <!-- ===== 一键检测 ===== -->
-    <section class="card" id="diag-card">
-      <div class="card-head">
-        <h2>🩺 一键检测</h2>
-        <span class="hint" id="diag-when">尚未检测</span>
-      </div>
-      <div class="btn-row">
-        <button class="primary" id="diag-run">开始检测</button>
-        <button class="ghost" id="diag-fix">🔧 一键修复检测出的问题</button>
-        <button class="ghost" id="diag-open">📂 打开日志文件夹</button>
-      </div>
-      <pre id="diag-out" style="max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:Consolas,ui-monospace,monospace;font-size:12px;line-height:1.55;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:10px;padding:10px;margin:10px 0 6px;color:var(--foreground);">点「开始检测」，会把所有与屏幕有关的状态扫一遍并逐项判定：显示器（分辨率/刷新率/主副屏/DDC/亮度/音量/色彩/方向）、显示链路掉线、HDR、总亮度、音频端点、小米屏接口、电池健康度、恢复基线。结果会同时写入日志。</pre>
-      <div class="hint" id="diag-dir">日志目录：读取中…</div>
-    </section>
-
-    <!-- ===== 任意窗口跨屏 ===== -->
-    <section class="card">
-      <div class="card-head">
-        <h2>🎬 双屏铺满</h2>
-        <span class="hint">任意窗口横跨两块屏</span>
-      </div>
-      <div class="color-row">
-        <label>目标窗口</label>
-        <select id="span-target"><option value="">（先点下面的「刷新窗口列表」）</option></select>
-      </div>
-      <div class="color-row">
-        <label>铺满方式</label>
-        <select id="span-mode">
-          <option value="2">自动对齐两屏清晰度后铺满（两块屏都铺满 · 推荐）</option>
-          <option value="1">以主屏为基准（不改清晰度 · 副屏可能留边）</option>
-          <option value="0">铺满整块桌面（按包围盒 · 短的那块屏底部会被裁）</option>
-        </select>
-      </div>
-      <div class="btn-row">
-        <button class="ghost" id="span-refresh">↻ 刷新窗口列表</button>
-        <button class="primary" id="span-pick">铺满选中窗口</button>
-      </div>
-      <div class="btn-row">
-        <button class="ghost" id="span-fg">铺满当前前台窗口</button>
-        <button class="ghost" id="restore-fg">↩ 还原</button>
-      </div>
-      <div class="hint">推荐：点「刷新窗口列表」→ 在「目标窗口」里选中 → 点「铺满选中窗口」。<b>任意已打开的应用窗口都能铺满</b>，无需安装播放器。铺满后点「还原」即可回到原位置；Windows 也可按 <b>Ctrl+Alt+R</b>。macOS 需要允许 Screenguard 使用「辅助功能」调整窗口；如窗口标题显示为未命名，可在「屏幕与系统音频录制」中授权以读取完整窗口信息。不同屏幕的边框仍是物理间隔，跨屏画面只能按两屏布局延展。</div>
-    </section>
-
-    <!-- ===== 一键恢复默认（安全阀） ===== -->
-    <section class="card">
-      <div class="card-head">
-        <h2>🛟 一键恢复默认</h2>
-        <span class="hint" id="restore-summary">把「软件层面」的改动全部还原</span>
-      </div>
-      <div class="btn-row">
-        <button class="primary" id="restore-defaults">恢复到默认状态</button>
-      </div>
-      <div class="btn-row" style="align-items:center">
-        <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--dim);cursor:pointer">
-          <input type="checkbox" id="revert-exit">退出软件时自动还原（推荐）
+      <div class="field-grid">
+        <label class="field">
+          <span>目标窗口</span>
+          <select id="span-target"><option value="">先刷新窗口列表</option></select>
+        </label>
+        <label class="field">
+          <span>铺满方式</span>
+          <select id="span-mode">
+            <option value="2">自动对齐两屏清晰度（推荐）</option>
+            <option value="1">以主屏为基准</option>
+            <option value="0">铺满整块桌面</option>
+          </select>
         </label>
       </div>
-      <div class="hint" id="restore-note">覆盖范围：总亮度（回到原始曲线）、色彩配置、被铺满的窗口、屏幕电源、音量 —— 全部回到<b>软件启动时</b>的状态（启动时会自动存一份「基线」，所以乱调之后总能一键回到好的状态）。<b>硬件层面的设置不受影响</b>（显示器自己的亮度/音量、KVM 都不动）。</div>
+      <div class="btn-grid">
+        <button class="btn" id="span-refresh"><svg class="ic"><use href="#ic-refresh"/></svg>刷新窗口列表</button>
+        <button class="btn btn-primary" id="span-pick"><svg class="ic"><use href="#ic-span"/></svg>铺满选中窗口</button>
+      </div>
     </section>
 
-    <section class="card" id="updates-card">
-      <div class="card-head"><h2>⬆️ 软件更新</h2><span class="hint">检查 GitHub 上的公开版本</span></div>
-      <div class="btn-row"><button class="ghost" id="update-check">检查更新</button><button class="ghost" id="release-page">打开下载页</button></div>
-      <div class="hint" id="update-status">应用会定期检查公开版本；不会自动下载或安装。未签名分发下，更新由用户确认后从 GitHub 下载。</div>
+    <section class="card">
+      <div class="card-head">
+        <h2><svg class="ic"><use href="#ic-layout"/></svg>双屏对齐</h2>
+        <button class="btn btn-sm" id="align-copy">复制结论</button>
+      </div>
+      <div class="btn-grid" id="align-mode-actions">
+        <button class="btn" id="align-run"><svg class="ic"><use href="#ic-gauge"/></svg>开始体检</button>
+        <button class="btn btn-primary" id="align-apply"><svg class="ic"><use href="#ic-target"/></svg>应用推荐组合</button>
+        <button class="btn" id="align-restore"><svg class="ic"><use href="#ic-restore"/></svg>还原原始分辨率</button>
+      </div>
+      <pre class="output" id="align-out"></pre>
+      <div class="inline-field" id="align-manual-size">
+        <input id="align-manuf" placeholder="厂商代码">
+        <input id="align-inches" placeholder="对角线英寸">
+        <button class="btn" id="align-save">保存尺寸</button>
+      </div>
+      <p class="status-line" id="align-sizes"></p>
+    </section>
+
+    <p class="group-label">工具</p>
+
+    <section class="card" id="diag-card">
+      <div class="card-head">
+        <h2><svg class="ic"><use href="#ic-gauge"/></svg>一键检测</h2>
+        <span class="tag" id="diag-when">尚未检测</span>
+      </div>
+      <div class="btn-grid">
+        <button class="btn btn-primary" id="diag-run">开始检测</button>
+        <button class="btn" id="diag-fix"><svg class="ic"><use href="#ic-wrench"/></svg>修复问题</button>
+        <button class="btn" id="diag-open"><svg class="ic"><use href="#ic-clipboard"/></svg>日志</button>
+      </div>
+      <pre class="output" id="diag-out"></pre>
     </section>
 
     <section class="card" id="settings-backup-card">
-      <div class="card-head"><h2>🗂️ 设置备份</h2><span class="hint">只导入导出应用偏好</span></div>
-      <div class="btn-row">
-        <button class="ghost" id="settings-export">导出设置</button><button class="ghost" id="settings-import">导入设置</button>
-        <input type="file" id="settings-file" accept="application/json,.json" style="display:none">
+      <div class="card-head">
+        <h2><svg class="ic"><use href="#ic-backup"/></svg>设置备份</h2>
       </div>
-      <div class="hint" id="settings-backup-status">备份包含应用偏好，可能含本地 IP 或设备标识；不包含恢复基线、日志、密码或令牌。只在你信任的位置保存备份文件。</div>
+      <div class="btn-grid">
+        <button class="btn" id="settings-export">导出设置</button>
+        <button class="btn" id="settings-import">导入设置</button>
+        <input type="file" id="settings-file" accept="application/json,.json" hidden>
+      </div>
+      <p class="status-line" id="settings-backup-status"></p>
     </section>
 
-    <section class="card" id="privacy-card">
-      <div class="card-head"><h2>🔒 隐私与数据</h2><span class="hint">本地优先</span></div>
-      <div class="hint">Screenguard 不要求账号，不上传显示器数据，也不内置遥测。设置与日志保存在本机。更新检查只读取 GitHub 公开版本信息；可选 ADB 工具仅在你主动下载时连接 Google。完整说明：<button class="ghost" id="privacy-page" style="padding:2px 6px">隐私与数据说明</button>。</div>
+    <section class="card">
+      <div class="card-head">
+        <h2><svg class="ic"><use href="#ic-shield"/></svg>恢复与隐私</h2>
+      </div>
+      <div class="btn-grid">
+        <button class="btn btn-primary" id="restore-defaults"><svg class="ic"><use href="#ic-shield"/></svg>恢复默认状态</button>
+        <button class="btn" id="privacy-page"><svg class="ic"><use href="#ic-lock"/></svg>隐私说明</button>
+      </div>
+      <label class="check-row">
+        <input type="checkbox" id="revert-exit">
+        <span>退出软件时自动还原</span>
+      </label>
+      <span class="sr-only" id="restore-summary"></span>
     </section>
 
   </main>
 
   <footer class="statusbar">
     <span id="status">就绪</span>
-    <span id="version"></span>
+    <span class="statusbar-right">
+      <button class="btn btn-sm" id="update-check" title="检查软件更新">检查更新</button>
+      <span id="version"></span>
+    </span>
   </footer>
 </div>
 
