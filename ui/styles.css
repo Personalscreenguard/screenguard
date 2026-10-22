@@ -176,6 +176,8 @@ button.primary { background: var(--accent); color: #fff; }
 button.primary:hover { background: var(--accent2); }
 button.ghost { background: transparent; color: var(--text-dim); border-color: var(--border); }
 button.ghost:hover { color: var(--text); border-color: #3a465e; background: #222a38; }
+a.ghost { display:inline-flex; align-items:center; justify-content:center; padding:8px 12px; border:1px solid var(--border); border-radius:8px; color:var(--text-dim); text-decoration:none; }
+a.ghost:hover { color:var(--text); border-color:#3a465e; background:#222a38; }
 button:active { transform: translateY(1px); }
 
 /* color */

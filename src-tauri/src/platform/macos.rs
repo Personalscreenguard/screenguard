@@ -1483,6 +1483,25 @@ struct SavedLayout {
     screens: Vec<SavedScreenLayout>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct MacAppState {
+    #[serde(default = "default_enabled")]
+    revert_on_exit: bool,
+    #[serde(default)]
+    baseline_taken: bool,
+    #[serde(default)]
+    baseline_layout: Option<SavedLayout>,
+    /// Readable DDC power states only; unsupported displays are left untouched on restore.
+    #[serde(default)]
+    baseline_power: Vec<String>,
+}
+
+impl Default for MacAppState {
+    fn default() -> Self {
+        Self { revert_on_exit: true, baseline_taken: false, baseline_layout: None, baseline_power: Vec::new() }
+    }
+}
+
 fn default_enabled() -> bool {
     true
 }
@@ -1499,6 +1518,97 @@ fn app_support_dir() -> Result<std::path::PathBuf, String> {
 
 fn layout_backup_path() -> Result<std::path::PathBuf, String> {
     Ok(app_support_dir()?.join("display-layout-backup.json"))
+}
+
+fn mac_app_state_path() -> Result<std::path::PathBuf, String> {
+    Ok(app_support_dir()?.join("state.json"))
+}
+
+fn mac_app_state() -> MacAppState {
+    mac_app_state_path().ok()
+        .and_then(|path| std::fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn save_mac_app_state(state: &MacAppState) -> Result<(), String> {
+    save_json_atomic(&mac_app_state_path()?, state)
+}
+
+pub fn app_state_json() -> String {
+    serde_json::json!({ "revert_on_exit": mac_app_state().revert_on_exit }).to_string()
+}
+
+pub fn user_settings_json() -> String {
+    serde_json::json!({ "revert_on_exit": mac_app_state().revert_on_exit }).to_string()
+}
+
+pub fn import_user_settings_json(raw: &str) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|e| format!("设置文件中的 macOS 偏好无效：{}", e))?;
+    let mut state = mac_app_state();
+    if let Some(value) = value.get("revert_on_exit") {
+        state.revert_on_exit = value.as_bool().ok_or("退出还原设置必须是布尔值")?;
+    }
+    save_mac_app_state(&state)?;
+    Ok("macOS 偏好已导入；本机恢复基线保持不变".into())
+}
+
+pub fn set_revert_on_exit(enabled: bool) -> Result<(), String> {
+    let mut state = mac_app_state();
+    state.revert_on_exit = enabled;
+    save_mac_app_state(&state)
+}
+
+/// Capture the display layout and DDC power states that macOS can read safely.
+/// This baseline is local to this Mac and is never included in user settings exports.
+pub fn capture_baseline() -> Result<String, String> {
+    let mut state = mac_app_state();
+    if state.baseline_taken { return Ok("macOS 恢复基线已存在".into()); }
+    let screens = parse_screens().into_iter().filter(|screen| screen.enabled).collect::<Vec<_>>();
+    if screens.is_empty() { return Err("当前没有可记录的显示器；稍后重新启动 Screenguard 再采集基线".into()); }
+    state.baseline_layout = Some(saved_layout(&screens));
+    state.baseline_power = screens.iter().filter_map(|screen| {
+        get_display_power(&screen.id).ok().filter(|mode| matches!(mode, 1 | 2 | 4))
+            .map(|mode| format!("{}|{}", screen.id, mode))
+    }).collect();
+    state.baseline_taken = true;
+    save_mac_app_state(&state)?;
+    Ok(format!("macOS 恢复基线已采集：{} 台显示器布局、{} 台可读电源状态", screens.len(), state.baseline_power.len()))
+}
+
+/// Restore only states with a local baseline and a supported read/write path.
+/// ColorSync profiles and hardware brightness/volume are deliberately not claimed here.
+pub fn restore_defaults() -> Result<String, String> {
+    let state = mac_app_state();
+    let mut done = Vec::new();
+    let mut warnings = Vec::new();
+    match restore_foreground() {
+        Ok(()) => done.push("已检查铺满窗口还原状态".into()),
+        Err(error) => warnings.push(format!("铺满窗口：{}", error)),
+    }
+    if screen_wake().is_ok() { done.push("已请求唤醒显示器".into()); }
+    if let Some(layout) = state.baseline_layout.as_ref() {
+        match restore_saved_layout(layout) {
+            Ok(()) => done.push(format!("显示布局已还原（{} 台）", layout.screens.len())),
+            Err(error) => warnings.push(format!("显示布局：{}", error)),
+        }
+    } else {
+        warnings.push("尚无显示布局基线".into());
+    }
+    for entry in &state.baseline_power {
+        let mut parts = entry.splitn(2, '|');
+        let (Some(id), Some(mode)) = (parts.next(), parts.next()) else { continue; };
+        if let Ok(mode) = mode.parse::<u32>() {
+            match set_display_power(id, mode) {
+                Ok(()) => done.push(format!("显示器 {} 电源状态已恢复", id)),
+                Err(error) => warnings.push(format!("显示器 {} 电源状态：{}", id, error)),
+            }
+        }
+    }
+    let mut message = format!("已恢复 macOS 可恢复状态：{}。本功能不恢复 ColorSync 配置及显示器硬件亮度/音量。", done.join("；"));
+    if !warnings.is_empty() { message.push_str(&format!("未完成：{}。", warnings.join("；"))); }
+    Ok(message)
 }
 
 fn save_json_atomic(path: &std::path::Path, value: &impl Serialize) -> Result<(), String> {

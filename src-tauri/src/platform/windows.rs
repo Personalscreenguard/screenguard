@@ -3412,6 +3412,55 @@ pub fn app_state_json() -> String {
     .to_string()
 }
 
+/// Export only portable user preferences. Device baselines are intentionally omitted because
+/// they describe the current machine's display/audio hardware and must never be transplanted.
+pub fn user_settings_json() -> String {
+    let st = app_state();
+    serde_json::json!({
+        "revert_on_exit": st.revert_on_exit,
+        "audio_dev": st.audio_dev,
+        "screen_in": st.screen_in,
+        "mitv_ip": st.mitv_ip,
+    }).to_string()
+}
+
+/// Import an allowlisted preference object while preserving the local hardware baseline.
+pub fn import_user_settings_json(raw: &str) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|e| format!("设置文件中的 Windows 偏好无效：{}", e))?;
+    let mut st = app_state();
+    if let Some(value) = value.get("revert_on_exit") {
+        st.revert_on_exit = value.as_bool().ok_or("退出还原设置必须是布尔值")?;
+    }
+    if let Some(value) = value.get("audio_dev") {
+        let value = value.as_str().ok_or("音频设备标识必须是文本")?;
+        if value.len() > 2048 { return Err("音频设备标识过长".into()); }
+        let exists = audio_endpoints().map(|items| items.iter().any(|endpoint| endpoint.id == value)).unwrap_or(false);
+        // An endpoint ID is machine-specific. Ignore stale/foreign values instead of
+        // carrying untrusted IDs into later PowerShell calls.
+        st.audio_dev = if exists { value.to_string() } else { String::new() };
+    }
+    if let Some(value) = value.get("mitv_ip") {
+        let value = value.as_str().ok_or("显示器地址必须是文本")?;
+        if value.len() > 256 { return Err("显示器地址过长".into()); }
+        if !value.trim().is_empty() && value.trim().parse::<std::net::Ipv4Addr>().is_err() {
+            return Err("显示器地址必须是 IPv4 地址，例如 192.168.31.50".into());
+        }
+        st.mitv_ip = value.to_string();
+    }
+    if let Some(value) = value.get("screen_in") {
+        let entries = value.as_array().ok_or("屏幕尺寸列表格式无效")?;
+        if entries.len() > 32 { return Err("屏幕尺寸条目过多".into()); }
+        st.screen_in = entries.iter().map(|entry| {
+            let text = entry.as_str().ok_or("屏幕尺寸条目必须是文本")?;
+            if text.len() > 128 { return Err("屏幕尺寸条目过长".into()); }
+            Ok(text.to_string())
+        }).collect::<Result<Vec<_>, String>>()?;
+    }
+    save_app_state(&st)?;
+    Ok("Windows 偏好已导入；本机恢复基线保持不变".into())
+}
+
 /// 采集基线（启动时调用一次）。已有基线不覆盖 —— 否则第二次启动会把
 /// 「上次改过的状态」当成本次原始值，越还原越偏。
 pub fn capture_baseline() -> Result<String, String> {
