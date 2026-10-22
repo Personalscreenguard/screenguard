@@ -336,8 +336,15 @@
         .then((release) => {
           const assets = release.assets || [];
           setLink(rows.find((row) => row.dataset.platform === "arm64"), assets.find((item) => /_aarch64\.dmg$/i.test(item.name)), "下载 DMG");
-          setLink(rows.find((row) => row.dataset.platform === "x86_64"), assets.find((item) => /_x86_64\.dmg$/i.test(item.name)), "下载 DMG");
-          setLink(rows.find((row) => row.dataset.platform === "windows"), assets.find((item) => /_x64-setup\.exe$/i.test(item.name)), "下载安装包");
+          const prevTag = "v0.4.49";
+          const intelAsset = assets.find((item) => /_x86_64\.dmg$/i.test(item.name));
+          const intelRow = rows.find((row) => row.dataset.platform === "x86_64");
+          if (intelAsset) setLink(intelRow, intelAsset, "下载 DMG");
+          else { intelRow.querySelector("p").textContent += " · 最新版构建中，先提供上一版"; setLink(intelRow, { name: "Screenguard_0.4.49_x86_64.dmg", browser_download_url: `https://github.com/${repo}/releases/download/${prevTag}/Screenguard_0.4.49_x86_64.dmg` }, "下载 DMG"); }
+          const winAsset = assets.find((item) => /_x64-setup\.exe$/i.test(item.name));
+          const winRow = rows.find((row) => row.dataset.platform === "windows");
+          if (winAsset) setLink(winRow, winAsset, "下载安装包");
+          else { winRow.querySelector("p").textContent += " · 最新版构建中，先提供上一版"; setLink(winRow, { name: "Screenguard_0.4.49_x64-setup.exe", browser_download_url: `https://github.com/${repo}/releases/download/${prevTag}/Screenguard_0.4.49_x64-setup.exe` }, "下载安装包"); }
           const date = release.published_at ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium" }).format(new Date(release.published_at)) : "";
           meta.textContent = `${release.name || release.tag_name} · ${date} · 校验文件与其他附件请在版本页查看。`;
           status.dataset.state = "ok";
