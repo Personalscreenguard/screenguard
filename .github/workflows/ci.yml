@@ -42,7 +42,59 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: cargo check
         run: cargo check --locked
+      - name: cargo test
+        run: cargo test --locked
       - name: 内嵌 C# 桥接编译检查（仅 Windows）
         if: runner.os == 'Windows'
         working-directory: .
         run: python scripts/check_cs.py
+
+  package-macos:
+    name: macOS DMG 构建
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 安装前端依赖
+        run: npm ci
+      - name: 构建 macOS App 与 DMG
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenguard-macos-${{ matrix.arch }}-${{ github.sha }}
+          path: src-tauri/target/**/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  package-windows:
+    name: Windows NSIS 安装包构建
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 安装前端依赖
+        run: npm ci
+      - name: 构建 Windows NSIS 安装包
+        run: npm run build:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenguard-windows-${{ github.sha }}
+          path: src-tauri/target/**/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14

@@ -30,11 +30,73 @@
     <section class="card">
       <div class="card-head">
         <h2>🖥️ 显示器控制</h2>
-        <button class="ghost" id="refresh-btn" title="刷新显示器列表">⟳ 刷新</button>
+        <div class="btn-row" style="margin:0;padding:0;justify-content:flex-end">
+          <button class="ghost" id="open-panel-btn" title="打开菜单栏快捷控制面板">快捷面板</button>
+          <button class="ghost" id="refresh-btn" title="刷新显示器列表">⟳ 刷新</button>
+        </div>
       </div>
       <div class="displays" id="displays">
         <div class="empty">正在读取显示器…</div>
       </div>
+    </section>
+
+    <!-- 使用 macOS CoreGraphics 与 Screenguard 内置 DDC/CI 实现。 -->
+    <section class="card" id="betterdisplay-card" style="display:none">
+      <div class="card-head">
+        <h2>🧰 高级显示器控制</h2>
+        <span class="hint">Screenguard 内置控制</span>
+      </div>
+      <div class="color-row">
+        <label for="bd-source">操作屏幕</label>
+        <select id="bd-source"><option value="">读取中…</option></select>
+      </div>
+      <div class="color-row">
+        <label for="bd-target">目标屏幕</label>
+        <select id="bd-target"><option value="">读取中…</option></select>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="set-main">设为主屏</button>
+        <button class="ghost" data-bd-action="protect-main-on">保护主屏身份</button>
+        <button class="ghost" data-bd-action="protect-main-off">取消主屏保护</button>
+        <button class="ghost" data-bd-action="mirror-on">镜像到目标</button>
+        <button class="ghost" data-bd-action="mirror-off">停止镜像</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="place-left">排列到左侧</button>
+        <button class="ghost" data-bd-action="place-right">排列到右侧</button>
+        <button class="ghost" data-bd-action="place-above">排列到上方</button>
+        <button class="ghost" data-bd-action="place-below">排列到下方</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="pip-on">画中画到目标</button>
+        <button class="ghost" data-bd-action="pip-off">关闭画中画</button>
+        <button class="ghost" data-bd-action="stream-on">屏幕串流</button>
+        <button class="ghost" data-bd-action="stream-off">停止串流</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="hdr-on">开启 HDR</button>
+        <button class="ghost" data-bd-action="hdr-off">关闭 HDR</button>
+        <button class="ghost" data-bd-action="protect-resolution-on">保护分辨率</button>
+        <button class="ghost" data-bd-action="protect-resolution-off">取消保护</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="protect-refresh-on">保护刷新率</button>
+        <button class="ghost" data-bd-action="protect-refresh-off">取消刷新率保护</button>
+        <button class="ghost" data-bd-action="protect-rotation-on">保护旋转</button>
+        <button class="ghost" data-bd-action="protect-rotation-off">取消旋转保护</button>
+      </div>
+      <div class="color-row">
+        <label for="bd-input-code">输入源代码</label>
+        <input id="bd-input-code" inputmode="numeric" placeholder="显示器 VCP 代码" style="max-width:180px">
+        <button class="ghost" data-bd-action="input-source">切换输入源</button>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" data-bd-action="virtual-16-9">创建并连接 16:9 虚拟屏</button>
+        <button class="ghost" data-bd-action="virtual-21-9">创建并连接 21:9 虚拟屏</button>
+        <button class="ghost" data-bd-action="connect-on">重新连接所选屏</button>
+        <button class="ghost" data-bd-action="connect-off">断开所选屏</button>
+      </div>
+      <div class="hint" id="bd-hint">主屏、镜像、排列与标准 DDC/CI 输入源由 Screenguard 控制。可用功能取决于 macOS、显示器和连接链路。</div>
     </section>
 
     <!-- ===== 屏幕电源 ===== -->
@@ -43,12 +105,13 @@
         <h2>🌙 屏幕电源</h2>
         <span class="hint">纯本地 · 不联网也能用</span>
       </div>
-      <div class="btn-row">
+      <div class="btn-row power-actions">
         <button class="primary" id="pw-off">全部待机</button>
         <button class="ghost" id="pw-wake">唤醒屏幕</button>
+        <button class="ghost" id="power-link-btn" aria-pressed="false">🔗 电源联动：关</button>
       </div>
-      <div class="hint" id="pw-note">一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。单独控制某台屏、或启用「按遥控器联动」，请打开控制面板。</div>
-      <div class="hint" id="hk-note" style="margin-top:6px">全局快捷键：读取中…</div>
+      <div class="hint" id="pw-note"></div>
+      <div class="hint" id="power-hotkey-note" style="margin-top:6px">全局快捷键：读取中…</div>
     </section>
 
     <!-- ===== 系统控制（音量 + 总亮度）===== -->
@@ -93,7 +156,7 @@
       <div class="displays" id="batteries">
         <div class="empty">正在读取带电池的设备…</div>
       </div>
-      <div class="hint">覆盖笔记本内电池、USB / 2.4G 无线键鼠、蓝牙耳机等所有带电池的设备，显示电量、充电状态、<b>健康度</b>（满充容量 ÷ 设计容量）与<b>耗电曲线</b>。注意：若开着电池保养模式（限充 80%），健康度会显示约 80%，属正常，不是损耗；部分外设（如 ROG OMNI 接收器）走厂商私有协议，Windows 标准接口读不到电量，只有厂商软件（Armoury Crate）能看到。</div>
+      <div class="hint" id="battery-hint">Windows 显示标准接口可读取的内置和外设电池；macOS 显示内置电池。电量曲线按本机可读取的数据绘制，未提供的电池健康度和外设信息不作推测。</div>
     </section>
 
     <!-- ===== 色彩 & 校准 ===== -->
@@ -115,16 +178,12 @@
           <option value="gray">灰度 / 单色（gray）</option>
         </select>
       </div>
-      <div class="btn-row">
+      <div class="btn-row color-actions">
         <button class="primary" id="apply-color">应用到所有屏幕</button>
         <button class="ghost" id="match-mac">对齐 Mac 内建屏</button>
-      </div>
-      <div class="btn-row">
         <button class="ghost" id="bri-sync">☀️ 亮度同步（各屏取齐）</button>
         <button class="ghost" id="hdr-sync">🌈 HDR：读取中…</button>
       </div>
-      <div class="calib-note" id="color-note">支持 8 种目标色彩空间（sRGB / P3 / Adobe RGB / DCI-P3 / Rec.709 / Rec.2020 / ProPhoto / 灰度）｜Windows 只自带 sRGB，其它需把 .icc 放进 %LOCALAPPDATA%\screenguard_icc\（按文件名自动识别）｜深度校准仍需硬件校色仪（DisplayCAL）</div>
-      <div class="hint" id="hdr-note">⚠️ <b>HDR 按钮是「读取并显示当前状态」</b>（开 / 关 / 混合）。本机实测：切换指令能发出，但系统拒绝 Apply（错误 87），HDR 被厂商服务 <b>AsHDRControl</b> 接管 —— 所以点它<b>不会真的改变</b> HDR，要改请用「设置 → 系统 → 显示 → HDR」或华硕工具。「色彩空间」若和目标本来就一致（例如两块屏都是 sRGB），也不会有视觉变化，这是正常的。</div>
     </section>
 
     <!-- ===== 窗口 ===== -->
@@ -132,53 +191,35 @@
       <div class="card-head">
         <h2>🪟 窗口 / 多屏布局</h2>
       </div>
-      <div class="btn-row">
+      <div class="btn-row window-actions">
         <button class="primary" id="match-ppi">窗口拖到另一屏不变小</button>
         <button class="ghost" id="dpi-restore">↩ 还原缩放</button>
-      </div>
-      <div class="btn-row">
         <button class="ghost" id="rotate-secondary">🔄 副屏方向：读取中…</button>
       </div>
-      <div class="hint">把副屏的缩放档改成与主屏一致（<b>原值自动备份</b>，可一键还原）。为什么以前"看着没实现"：Windows 改每屏缩放只有注册表一条路、且<b>必须注销或重新登录才生效</b>，没有运行时 API 能立刻变 —— 这是系统限制。点完按钮重启登录即可看到效果。</div>
     </section>
 
     <!-- ===== 双屏对齐体检 ===== -->
     <section class="card">
       <div class="card-head">
         <h2>📐 双屏对齐体检</h2>
-        <span class="hint">只读分析 · 不改任何显示设置</span>
+        <span class="hint">先体检，再由你确认是否应用分辨率组合</span>
       </div>
-      <div class="btn-row">
-        <button class="primary" id="align-apply">⚡ 应用对齐组合</button>
-        <button class="ghost" id="align-restore">↩ 还原两块屏原始清晰度（4K）</button>
+      <div class="btn-row" id="align-mode-actions">
+        <button class="primary" id="align-apply">⚡ 应用推荐对齐组合</button>
+        <button class="ghost" id="align-restore">↩ 还原两块屏原始分辨率</button>
       </div>
       <div class="btn-row">
         <button class="ghost" id="align-run">🩺 开始体检</button>
         <button class="ghost" id="align-copy">📋 复制结论</button>
       </div>
       <pre id="align-out" style="max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:Consolas,ui-monospace,monospace;font-size:12px;line-height:1.55;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:10px;padding:10px;margin:10px 0 6px;color:var(--foreground);">两块屏跨屏拼画面要对得齐，唯一的条件是「竖向像素高度 ≈ 与各自物理高度成正比」（即竖向像素密度一致）。点「开始体检」会读取每块屏的物理尺寸、当前分辨率、全部可用分辨率，算出：谁会被切掉多少画面、PPI 差多少、哪些分辨率组合能对上、以及推荐方案。</pre>
-      <div class="color-row">
+      <div class="color-row" id="align-manual-size">
         <label>屏幕尺寸</label>
         <input id="align-manuf" placeholder="厂商代码" style="width:110px;margin-right:6px">
         <input id="align-inches" placeholder="对角线英寸" style="width:96px;margin-right:6px">
         <button class="ghost" id="align-save">保存尺寸</button>
       </div>
       <div class="hint" id="align-sizes">已记录尺寸：读取中…</div>
-    </section>
-
-    <!-- ===== 一键检测 ===== -->
-    <section class="card">
-      <div class="card-head">
-        <h2>🩺 一键检测</h2>
-        <span class="hint" id="diag-when">尚未检测</span>
-      </div>
-      <div class="btn-row">
-        <button class="primary" id="diag-run">开始检测</button>
-        <button class="ghost" id="diag-fix">🔧 一键修复检测出的问题</button>
-        <button class="ghost" id="diag-open">📂 打开日志文件夹</button>
-      </div>
-      <pre id="diag-out" style="max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:Consolas,ui-monospace,monospace;font-size:12px;line-height:1.55;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:10px;padding:10px;margin:10px 0 6px;color:var(--foreground);">点「开始检测」，会把所有与屏幕有关的状态扫一遍并逐项判定：显示器（分辨率/刷新率/主副屏/DDC/亮度/音量/色彩/方向）、显示链路掉线、HDR、总亮度、音频端点、小米屏接口、电池健康度、恢复基线。结果会同时写入日志。</pre>
-      <div class="hint" id="diag-dir">日志目录：读取中…</div>
     </section>
 
     <!-- ===== 视频跨屏 ===== -->
@@ -207,14 +248,28 @@
         <button class="ghost" id="span-fg">铺满当前前台窗口</button>
         <button class="ghost" id="restore-fg">↩ 还原</button>
       </div>
-      <div class="hint">推荐：点「刷新窗口列表」→ 在「目标窗口」里选中 → 点「铺满选中窗口」。<b>任何窗口都能铺满</b>（浏览器里的抖音全屏、PotPlayer、VLC…）。铺满后若界面被盖住，按 <b>Ctrl+Alt+R</b> 或右键托盘「还原铺满的窗口」即可还原 —— 不会再有「点不到按钮」的情况。</div>
+      <div class="hint" id="window-hotkey-note" style="margin-top:6px">窗口恢复快捷键：读取中…</div>
     </section>
 
-    <!-- ===== 一键恢复默认（安全阀） ===== -->
+    <!-- ===== 一键检测（Windows） ===== -->
+    <section class="card" id="diag-card" style="display:none">
+      <div class="card-head">
+        <h2>🩺 一键检测</h2>
+        <span class="hint" id="diag-when">尚未检测</span>
+      </div>
+      <div class="btn-row">
+        <button class="primary" id="diag-run">开始检测</button>
+        <button class="ghost" id="diag-fix">🔧 一键修复检测出的问题</button>
+        <button class="ghost" id="diag-open">📂 打开日志文件夹</button>
+      </div>
+      <pre id="diag-out" style="max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:Consolas,ui-monospace,monospace;font-size:12px;line-height:1.55;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:10px;padding:10px;margin:10px 0 6px;color:var(--foreground);"></pre>
+    </section>
+
+    <!-- ===== 一键恢复默认 ===== -->
     <section class="card">
       <div class="card-head">
         <h2>🛟 一键恢复默认</h2>
-        <span class="hint">把「软件层面」的改动全部还原</span>
+        <span class="hint" id="restore-summary">把「软件层面」的改动全部还原</span>
       </div>
       <div class="btn-row">
         <button class="primary" id="restore-defaults">恢复到默认状态</button>
@@ -225,6 +280,39 @@
         </label>
       </div>
       <div class="hint" id="restore-note">覆盖范围：总亮度（回到原始曲线）、HDR、色彩配置、被铺满的窗口、屏幕电源、音量 —— 全部回到<b>软件启动时</b>的状态（启动时会自动存一份「基线」，所以乱调之后总能一键回到好的状态）。<b>硬件层面的设置不受影响</b>（显示器自己的亮度/音量、KVM 都不动）。</div>
+    </section>
+
+    <section class="card" id="updates-card">
+      <div class="card-head">
+        <h2>⬆️ 软件更新</h2>
+        <span class="hint">检查 GitHub 上的公开版本</span>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" id="update-check">检查更新</button>
+        <button class="ghost" id="release-page">打开下载页</button>
+      </div>
+      <div class="hint" id="update-status">应用会定期检查公开版本；不会自动下载或安装。未签名分发下，更新由用户确认后从 GitHub 下载。</div>
+    </section>
+
+    <section class="card" id="settings-backup-card">
+      <div class="card-head">
+        <h2>🗂️ 设置备份</h2>
+        <span class="hint">只导入导出应用偏好</span>
+      </div>
+      <div class="btn-row">
+        <button class="ghost" id="settings-export">导出设置</button>
+        <button class="ghost" id="settings-import">导入设置</button>
+        <input type="file" id="settings-file" accept="application/json,.json" style="display:none">
+      </div>
+      <div class="hint" id="settings-backup-status">备份包含应用偏好，可能含本地 IP 或设备标识；不包含恢复基线、日志、密码或令牌。只在你信任的位置保存备份文件。</div>
+    </section>
+
+    <section class="card" id="privacy-card">
+      <div class="card-head">
+        <h2>🔒 隐私与数据</h2>
+        <span class="hint">本地优先</span>
+      </div>
+      <div class="hint">Screenguard 不要求账号，不上传显示器数据，也不内置遥测。设置与日志保存在本机。更新检查只读取 GitHub 公开版本信息；可选 ADB 工具仅在你主动下载时连接 Google。完整说明：<button class="ghost" id="privacy-page" style="padding:2px 6px">隐私与数据说明</button>。</div>
     </section>
 
   </main>

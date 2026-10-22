@@ -1,6 +1,6 @@
 [package]
 name = "screenguard"
-version = "0.4.0"
+version = "0.4.34"
 description = "跨平台显示器控制与色彩/多屏助手"
 authors = ["陆冠霖"]
 license = "MIT"
@@ -19,6 +19,11 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "=0.10.1"
+ddc = "=0.2.2"
+ddc-macos = "=0.2.2"
 
 [profile.release]
 lto = true

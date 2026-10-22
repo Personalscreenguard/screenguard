@@ -1,0 +1,11 @@
+/Users/nanyu/Documents/AI项目/Screenguard屏幕守护项目/源码/tools/miot-probe/target/debug/deps/socket2-2f6f076617e030cf.d: /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/lib.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sockaddr.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/socket.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sockref.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sys/unix.rs
+
+/Users/nanyu/Documents/AI项目/Screenguard屏幕守护项目/源码/tools/miot-probe/target/debug/deps/libsocket2-2f6f076617e030cf.rlib: /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/lib.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sockaddr.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/socket.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sockref.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sys/unix.rs
+
+/Users/nanyu/Documents/AI项目/Screenguard屏幕守护项目/源码/tools/miot-probe/target/debug/deps/libsocket2-2f6f076617e030cf.rmeta: /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/lib.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sockaddr.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/socket.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sockref.rs /Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sys/unix.rs
+
+/Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/lib.rs:
+/Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sockaddr.rs:
+/Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/socket.rs:
+/Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sockref.rs:
+/Users/nanyu/.cargo/registry/src/rsproxy.cn-e3de039b2554c837/socket2-0.6.5/src/sys/unix.rs:

@@ -20,6 +20,129 @@ function invoke(cmd, args = {}) {
   return Promise.reject(new Error('TAURI_CORE_UNAVAILABLE'));
 }
 
+const RELEASES_PAGE = 'https://github.com/Personalscreenguard/screenguard/releases/latest';
+const UPDATE_API = 'https://api.github.com/repos/Personalscreenguard/screenguard/releases/latest';
+const UPDATE_CACHE_KEY = 'sg_update_check_v1';
+function versionParts(version) {
+  const match = String(version || '').trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/);
+  return match ? match.slice(1).map(Number) : null;
+}
+function isNewerVersion(candidate, current) {
+  const a = versionParts(candidate), b = versionParts(current);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] > b[i]; }
+  return false;
+}
+async function checkForUpdates(force = false, currentVersion = '') {
+  const status = document.getElementById('update-status');
+  const button = document.getElementById('update-check');
+  if (!status || !button) return;
+  button.disabled = true;
+  status.textContent = '正在检查 GitHub 最新公开版本…';
+  try {
+    const cached = JSON.parse(localStorage.getItem(UPDATE_CACHE_KEY) || 'null');
+    const fresh = cached && Date.now() - Number(cached.checkedAt) < 24 * 60 * 60 * 1000;
+    let release = !force && fresh ? cached.release : null;
+    if (!release) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 9000);
+      try {
+        const response = await fetch(UPDATE_API, {
+          headers: { Accept: 'application/vnd.github+json' },
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`GitHub 返回 HTTP ${response.status}`);
+        const data = await response.json();
+        release = { tag: String(data.tag_name || ''), url: String(data.html_url || RELEASES_PAGE) };
+        if (!versionParts(release.tag) || !/^https:\/\/github\.com\/Personalscreenguard\/screenguard\/releases\//.test(release.url)) {
+          throw new Error('Release 信息格式无效');
+        }
+        localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify({ checkedAt: Date.now(), release }));
+      } finally { clearTimeout(timeout); }
+    }
+    const version = currentVersion || await invoke('get_version');
+    status.textContent = isNewerVersion(release.tag, version)
+      ? `发现新版本 ${release.tag}（当前 v${version}）。打开 GitHub 下载页后，由你确认下载和安装。`
+      : `当前为 v${version}；GitHub 最新公开版本为 ${release.tag}。`;
+  } catch (error) {
+    status.textContent = `暂时无法检查更新：${errText(error)}。可直接打开 GitHub 下载页手动查看。`;
+  } finally { button.disabled = false; }
+}
+document.getElementById('update-check')?.addEventListener('click', () => checkForUpdates(true));
+document.getElementById('release-page')?.addEventListener('click', async () => {
+  try { await invoke('open_external_page', { page: 'releases' }); }
+  catch (error) { document.getElementById('update-status').textContent = `无法打开下载页：${errText(error)}`; }
+});
+document.getElementById('privacy-page')?.addEventListener('click', async () => {
+  try { await invoke('open_external_page', { page: 'privacy' }); }
+  catch (error) { setStatus(`无法打开隐私说明：${errText(error)}`, false); }
+});
+
+async function platformSettingsBackup() {
+  const platform = await invoke('get_platform');
+  const version = await invoke('get_version');
+  const native = JSON.parse(await invoke('export_user_settings_json') || '{}');
+  const uiPreferences = {};
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('sg_') && key !== UPDATE_CACHE_KEY) uiPreferences[key] = localStorage.getItem(key);
+  }
+  return {
+    format: 'screenguard-settings', schemaVersion: 1, platform,
+    appVersion: version, exportedAt: new Date().toISOString(),
+    preferences: {
+      local: uiPreferences,
+      native,
+      powerLinkEnabled: await invoke('get_power_link_preference').catch(() => false)
+    }
+  };
+}
+document.getElementById('settings-export')?.addEventListener('click', async () => {
+  const status = document.getElementById('settings-backup-status');
+  try {
+    const bundle = await platformSettingsBackup();
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Screenguard-settings-${bundle.platform}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    status.textContent = '设置备份已导出。文件可能含本地 IP 和设备标识，请妥善保管。';
+  } catch (error) { status.textContent = `导出失败：${errText(error)}`; }
+});
+const settingsFile = document.getElementById('settings-file');
+document.getElementById('settings-import')?.addEventListener('click', () => settingsFile?.click());
+settingsFile?.addEventListener('change', async () => {
+  const file = settingsFile.files && settingsFile.files[0];
+  if (!file) return;
+  const status = document.getElementById('settings-backup-status');
+  try {
+    if (file.size > 1024 * 1024) throw new Error('设置备份文件超过 1 MB');
+    const bundle = JSON.parse(await file.text());
+    const platform = await invoke('get_platform');
+    if (bundle.format !== 'screenguard-settings' || bundle.schemaVersion !== 1 || !bundle.preferences) {
+      throw new Error('这不是受支持的 Screenguard 设置备份');
+    }
+    if (bundle.platform !== platform) throw new Error('备份来自另一操作系统；为避免导入不兼容的设备设置，请在相同平台恢复');
+    const local = bundle.preferences.local;
+    if (!local || typeof local !== 'object' || Array.isArray(local)) throw new Error('本地偏好格式无效');
+    for (const [key, value] of Object.entries(local)) {
+      if (!/^sg_[a-z0-9_]{1,100}$/i.test(key) || typeof value !== 'string' || value.length > 20000) {
+        throw new Error('备份含无效的本地偏好');
+      }
+    }
+    if (!confirm('导入会覆盖 Screenguard 当前的应用偏好。硬件恢复基线和日志不会被覆盖。继续吗？')) return;
+    const nativeJson = JSON.stringify(bundle.preferences.native || {});
+    const imported = await invoke('import_user_settings_json', { settingsJson: nativeJson });
+    await invoke('set_power_link_preference', { enabled: bundle.preferences.powerLinkEnabled === true });
+    for (const key of Object.keys(localStorage)) if (key.startsWith('sg_')) localStorage.removeItem(key);
+    for (const [key, value] of Object.entries(local)) localStorage.setItem(key, value);
+    await window.refreshPowerLinkButton?.();
+    status.textContent = `${imported}。本地应用偏好已恢复；硬件基线仍保留本机数据。`;
+  } catch (error) { status.textContent = `导入失败：${errText(error)}`; }
+  finally { settingsFile.value = ''; }
+});
+
 // DDC 写入串行化 + 合并最新值：拖动滑块时最多只有 1 个后台进程在跑，
 // 中间值被覆盖、最终值保证送达（此前每格都新起 powershell 进程，拖动即卡死）
 const vpState = new Map();
@@ -41,7 +164,7 @@ function sendVCP(kind, id, val) {
 }
 
 // ===== 屏幕电源（纯本地，不依赖网络）=====
-// 全部待机走 Windows 系统级指令：一次黑掉全部屏，含不走 DDC 的屏。
+// 全部待机走平台系统级指令：一次控制全部屏，含不走 DDC 的屏。
 const pwNote = document.getElementById('pw-note');
 function pwStat(t, ok = true) { pwNote.textContent = t; pwNote.style.color = ok ? '' : '#ef6a6a'; }
 
@@ -56,17 +179,156 @@ document.getElementById('pw-wake').addEventListener('click', async () => {
   catch (e) { pwStat('唤醒失败：' + (e && e.message ? e.message : e), false); }
 });
 
+// 主窗口也提供电源联动开关，避免用户只看到待机/唤醒按钮而不知道还需启用联动。
+const POWER_LINK_KEY = 'sg_power_link_enabled';
+const powerLinkBtn = document.getElementById('power-link-btn');
+async function readPowerLinkPreference() {
+  try {
+    const enabled = Boolean(await invoke('get_power_link_preference'));
+    localStorage.setItem(POWER_LINK_KEY, enabled ? '1' : '0');
+    return enabled;
+  } catch (_) {
+    return localStorage.getItem(POWER_LINK_KEY) === '1';
+  }
+}
+function paintPowerLinkButton(enabled) {
+  powerLinkBtn.textContent = enabled ? '🔗 电源联动：开' : '🔗 电源联动：关';
+  powerLinkBtn.setAttribute('aria-pressed', String(enabled));
+  powerLinkBtn.classList.toggle('primary', enabled);
+  powerLinkBtn.classList.toggle('ghost', !enabled);
+  powerLinkBtn.title = enabled
+    ? '已开启。后台监测显示器电源状态，并在连接变化时同步其它屏幕'
+    : '开启后，后台监测显示器电源状态；macOS 的 DDC 不可读时使用连接变化兜底';
+}
+async function refreshPowerLinkButton() {
+  paintPowerLinkButton(await readPowerLinkPreference());
+}
+window.applyPowerLinkUiState = enabled => {
+  try { localStorage.setItem(POWER_LINK_KEY, enabled ? '1' : '0'); } catch (_) {}
+  paintPowerLinkButton(Boolean(enabled));
+  pwStat(enabled
+    ? '电源联动已开启；保持 Screenguard 运行，后台会同步显示器电源变化。'
+    : '电源联动已关闭。');
+};
+if (window.__TAURI__ && window.__TAURI__.event) {
+  window.__TAURI__.event.listen('power-link-status', event => {
+    const message = String(event.payload || '');
+    if (message) pwStat(message, !/失败|未完成|超时/.test(message));
+  }).catch(() => {});
+}
+refreshPowerLinkButton();
+window.refreshPowerLinkButton = refreshPowerLinkButton;
+document.getElementById('open-panel-btn').addEventListener('click', async () => {
+  try {
+    const powerLinkEnabled = await readPowerLinkPreference();
+    await invoke('open_control_panel', { powerLinkEnabled });
+    setStatus('快捷控制面板已打开；电源联动状态未更改');
+  } catch (error) {
+    setStatus('打开快捷面板失败：' + errText(error), false);
+  }
+});
+window.addEventListener('focus', refreshPowerLinkButton);
+window.addEventListener('storage', ev => {
+  if (ev.key === POWER_LINK_KEY) refreshPowerLinkButton();
+});
+powerLinkBtn.addEventListener('click', async () => {
+  const previous = await readPowerLinkPreference();
+  const enabled = !previous;
+  try {
+    await invoke('set_power_link_preference', { enabled });
+    localStorage.setItem(POWER_LINK_KEY, enabled ? '1' : '0');
+    await refreshPowerLinkButton();
+    await invoke('open_control_panel', { powerLinkEnabled:enabled });
+    pwStat(enabled
+      ? '电源联动已开启；保持 Screenguard 运行，后台会同步显示器电源变化。'
+      : '电源联动已关闭。');
+  } catch (e) {
+    try { await invoke('set_power_link_preference', { enabled: previous }); } catch (_) {}
+    localStorage.setItem(POWER_LINK_KEY, previous ? '1' : '0');
+    await refreshPowerLinkButton();
+    pwStat('无法打开控制面板：' + (e && e.message ? e.message : e), false);
+  }
+});
+
 async function refreshDisplays() {
   try {
     setStatus('读取显示器…');
     const displays = await invoke('get_displays');
     renderDisplays(displays);
+    loadBetterDisplayTargets(displays);
     setStatus('就绪');
   } catch (e) {
     renderDisplays([]);
     setStatus(e.message === 'TAURI_CORE_UNAVAILABLE' ? '非 Tauri 环境（预览模式）' : '读取显示器失败：' + e.message, false);
   }
 }
+
+function loadBetterDisplayTargets(displays) {
+  const card = document.getElementById('betterdisplay-card');
+  const source = document.getElementById('bd-source');
+  const target = document.getElementById('bd-target');
+  if (!card || !source || !target || card.style.display === 'none') return;
+  const previousSource = source.value;
+  const previousTarget = target.value;
+  const options = (displays || []).map(d => ({
+    id: d.id,
+    label: `${d.name || d.id}${d.main ? '（主屏）' : ''} · ${d.resolution || ''}`
+  }));
+  for (const select of [source, target]) {
+    select.replaceChildren();
+    if (!options.length) {
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = '未检测到显示器';
+      select.appendChild(empty);
+    } else {
+      for (const item of options) {
+        const option = document.createElement('option');
+        option.value = item.id;
+        option.textContent = item.label;
+        select.appendChild(option);
+      }
+    }
+  }
+  if (options.some(d => d.id === previousSource)) source.value = previousSource;
+  else source.value = (displays || []).find(d => d.main)?.id || options[0]?.id || '';
+  if (options.some(d => d.id === previousTarget)) target.value = previousTarget;
+  else target.value = options.find(d => d.id !== source.value)?.id || '';
+  for (const button of card.querySelectorAll('[data-bd-action]')) {
+    const action = button.dataset.bdAction || '';
+    button.disabled = !options.length || (action.startsWith('place-') ||
+      ['mirror-on','pip-on','stream-on'].includes(action)) && options.length < 2;
+  }
+}
+
+document.querySelectorAll('#betterdisplay-card [data-bd-action]').forEach(button => {
+  button.addEventListener('click', async () => {
+    const source = document.getElementById('bd-source');
+    const target = document.getElementById('bd-target');
+    const hint = document.getElementById('bd-hint');
+    const action = button.dataset.bdAction;
+    const input = document.getElementById('bd-input-code');
+    button.disabled = true;
+    hint.textContent = '正在执行…';
+    try {
+      const result = await invoke('display_action', {
+        action,
+        displayId: source.value,
+        targetId: target.value || null,
+        value: action === 'input-source' ? input.value.trim() : null
+      });
+      hint.textContent = String(result || '操作已提交');
+      setStatus(String(result || '显示设置已更新'));
+      await refreshDisplays();
+    } catch (error) {
+      hint.textContent = '操作失败：' + errText(error);
+      setStatus('高级显示控制失败：' + errText(error), false);
+    } finally {
+      button.disabled = false;
+      loadBetterDisplayTargets(await invoke('get_displays').catch(() => []));
+    }
+  });
+});
 
 function renderDisplays(displays) {
   const box = document.getElementById('displays');
@@ -83,6 +345,7 @@ function renderDisplays(displays) {
   displays.forEach(d => {
     const row = document.createElement('div');
     row.className = 'display-row';
+    row.dataset.displayId = d.id;
 
     const hasBri = d.ddc || d.brightness != null; // DDC 或 WMI（内屏）亮度
     const briBadge = d.ddc ? '<span class="badge ddc">DDC</span>'
@@ -136,6 +399,67 @@ function renderDisplays(displays) {
       setStatus(`${kind === 'brightness' ? '亮度' : '音量'} → ${ev.target.value}`);
     });
   });
+  void loadDisplayModes(displays, box);
+}
+
+async function loadDisplayModes(displays, box) {
+  for (const display of displays) {
+    try {
+      const modes = await invoke('get_display_modes', { displayId: display.id });
+      if (!Array.isArray(modes) || modes.length === 0) continue;
+      const row = [...box.querySelectorAll('.display-row')]
+        .find(element => element.dataset.displayId === display.id);
+      if (!row) continue;
+      const control = document.createElement('div');
+      control.className = 'slider-row mode-row';
+      const label = document.createElement('label');
+      label.textContent = '分辨率/刷新率';
+      const select = document.createElement('select');
+      select.className = 'display-mode-select';
+      select.title = '切换时画面可能短暂黑屏；系统未应用时会自动恢复原设置';
+      let activeMode = null;
+      for (const mode of modes) {
+        const option = document.createElement('option');
+        option.value = String(mode.mode);
+        option.textContent = `${mode.resolution} · ${mode.hz}Hz${mode.scaled ? ' · 缩放' : ''}${mode.recommended ? '（推荐）' : ''}`;
+        if (mode.current) {
+          option.selected = true;
+          activeMode = String(mode.mode);
+        }
+        select.appendChild(option);
+      }
+      const state = document.createElement('span');
+      state.className = 'val';
+      state.textContent = '当前';
+      control.append(label, select, state);
+      row.appendChild(control);
+      select.addEventListener('change', async () => {
+        const selectedMode = Number(select.value);
+        select.disabled = true;
+        state.textContent = '切换中…';
+        setStatus('正在应用显示模式…');
+        try {
+          const result = await invoke('set_display_mode', {
+            displayId: display.id,
+            mode: selectedMode,
+          });
+          activeMode = String(selectedMode);
+          state.textContent = '已核验';
+          setStatus(result || '显示模式已切换');
+          await new Promise(resolve => setTimeout(resolve, 800));
+          await refreshDisplays();
+        } catch (error) {
+          if (activeMode !== null) select.value = activeMode;
+          state.textContent = '未切换';
+          setStatus('显示模式切换失败：' + errText(error), false);
+        } finally {
+          select.disabled = false;
+        }
+      });
+    } catch (_) {
+      // Windows/Linux 当前由系统设置或各自平台工具管理显示模式。
+    }
+  }
 }
 
 // ===== 系统音量（Windows：默认输出端点，托盘音量同源） =====
@@ -163,6 +487,7 @@ async function loadAudio() {
   const muteBtn = document.getElementById('mute-btn');
   const sel = document.getElementById('audio-dev-sel');
   try {
+    const platform = await invoke('get_platform');
     card.style.display = '';
     // v0.3.3：音量作用于「用户选定的输出端点」。默认输出若正好是固定音量的
     // HDMI/DP 显示器音频（Windows 自己的滑块也调不动），就自动落在一个可调的
@@ -176,6 +501,7 @@ async function loadAudio() {
       sel.innerHTML = eps.map(e =>
         `<option value="${e.id}"${(cur && e.id === cur.id) ? ' selected' : ''}>${e.name}　${e.adjustable ? ('音量 ' + e.volume + '%') : '（固定音量·不可调）'}</option>`
       ).join('');
+      sel.disabled = platform === 'macos' || eps.length <= 1;
     }
     if (!cur) { devEl.textContent = '没有可用的输出设备'; sl.disabled = true; return; }
     devEl.textContent = cur.name || '输出设备';
@@ -187,7 +513,9 @@ async function loadAudio() {
     muteBtn.disabled = !cur.adjustable;
     hint.textContent = cur.adjustable
       ? `控制的是上面选中的输出设备（与系统托盘音量同源）。总亮度作用于所有屏幕，不依赖 DDC。`
-      : '这个端点（显示器音频）是固定音量，Windows 自己的滑块也调不动 → 想调这块屏的喇叭，用下面的「小米音量」滑块（走显示器自己的系统）；或在上面的「输出设备」里换成扬声器/耳机。';
+      : platform === 'macos'
+        ? 'macOS 没有向当前默认输出设备提供系统音量读写接口，因此此设备的音量和静音不可由 Screenguard 调节。请使用显示器/音箱自身控制，或在“系统设置 → 声音”中更换输出设备。'
+        : '这个端点（显示器音频）是固定音量，Windows 自己的滑块也调不动 → 想调这块屏的喇叭，用下面的「小米音量」滑块（走显示器自己的系统）；或在上面的「输出设备」里换成扬声器/耳机。';
   } catch (e) {
     card.style.display = '';
     devEl.textContent = '不可用';
@@ -214,6 +542,11 @@ async function loadBatteries() {
   try {
     const list = await invoke('get_batteries');
     card.style.display = '';
+    const platform = await invoke('get_platform');
+    const note = document.getElementById('battery-hint');
+    if (note && platform === 'macos') {
+      note.textContent = 'macOS 提供内置电池电量和电源状态；外接蓝牙/USB 设备电量及电池健康度不在此处采集。耗电曲线保存在本机。';
+    }
     if (!list || list.length === 0) {
       box.innerHTML = '<div class="empty">未检测到带电池的设备</div>';
       return;
@@ -254,19 +587,44 @@ async function loadBatteries() {
 function applyPlatformCopy(p) {
   const matchMac = document.getElementById('match-mac');
   const note = document.getElementById('color-note');
+  const hdrNote = document.getElementById('hdr-note');
   if (p === 'windows') {
     // Windows 没有内建 P3 屏，「对齐 Mac 内建屏」改为语义成立的「对齐主屏色彩」
     matchMac.textContent = '对齐主屏色彩';
     matchMac.title = '把主屏当前关联的 ICC 配置应用到其余屏幕';
-    if (note) note.textContent = 'P3 / Adobe RGB 需自备 .icc 放到 %LOCALAPPDATA%\\screenguard_icc｜变更显示器色彩配置需管理员权限';
+    if (note) note.textContent = '';
+    if (hdrNote) hdrNote.textContent = '';
   } else if (p === 'linux') {
     matchMac.disabled = true;
     matchMac.title = 'Linux 版暂未实现';
     const apply = document.getElementById('apply-color');
     if (apply) { apply.disabled = true; apply.title = 'Linux 版暂未实现'; }
-    if (note) note.textContent = 'Linux 版色彩同步暂未实现（可先用系统级 colord 配置）';
+    if (note) note.textContent = '';
+    if (hdrNote) hdrNote.textContent = '';
   } else {
     matchMac.title = '外接屏对齐 Mac 内建屏（Display P3）';
+    const applyColor = document.getElementById('apply-color');
+    if (applyColor) { applyColor.disabled = false; applyColor.title = '通过 macOS ColorSync 设置系统显示器配置'; }
+    matchMac.disabled = false;
+    if (note) note.textContent = '';
+    if (hdrNote) hdrNote.hidden = true;
+    const hdrButton = document.getElementById('hdr-sync');
+    if (hdrButton) hdrButton.hidden = true;
+    const prophoto = document.querySelector('#color-space option[value="prophoto"]');
+    if (prophoto) prophoto.remove();
+    const bdHint = document.getElementById('bd-hint');
+    if (bdHint) bdHint.textContent = '此处由 Screenguard 原生控制显示器排列、主屏、镜像与标准 DDC/CI 输入源。画中画、串流、虚拟屏、HDR 和配置保护目前不在 macOS 支持范围。DDC 是否有效取决于显示器和连接链路。';
+    const unsupported = new Set([
+      'pip-on','pip-off','stream-on','stream-off','hdr-on','hdr-off',
+      'protect-resolution-on','protect-resolution-off','protect-refresh-on','protect-refresh-off',
+      'protect-rotation-on','protect-rotation-off','connect-on','connect-off',
+      'protect-main-on','protect-main-off','virtual-16-9','virtual-21-9'
+    ]);
+    document.querySelectorAll('#betterdisplay-card [data-bd-action]').forEach(button => {
+      if (unsupported.has(button.dataset.bdAction)) button.hidden = true;
+    });
+    const powerNote = document.getElementById('pw-note');
+    if (powerNote) powerNote.textContent = '一次让全部屏幕待机（含不走 DDC 的屏）；动一下鼠标或按键盘即可唤醒。电源联动由 Screenguard 内置 DDC/CI 实现，显示器或连接链路不支持时，不能检测物理关屏状态。';
   }
 }
 
@@ -397,23 +755,33 @@ loadGamma();
 
 // 全局快捷键显示
 (async () => {
-  const el = document.getElementById('hk-note');
+  const powerEl = document.getElementById('power-hotkey-note');
+  const windowEl = document.getElementById('window-hotkey-note');
   try {
     const hk = await invoke('hotkey_start');
-    el.innerHTML = `全局快捷键：<span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">${hk}</span> 切换「全部屏幕待机 / 唤醒」 ｜ <span style="font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px">Ctrl+Alt+R</span> 还原被铺满的窗口（铺满后界面被盖住也能用）`;
-  } catch (e) { el.textContent = '全局快捷键：' + errText(e); }
+    const platform = await invoke('get_platform');
+    const restoreKey = platform === 'macos' ? 'Control+Option+R' : 'Ctrl+Alt+R';
+    const keyStyle = 'font-family:Consolas,monospace;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:1px 6px';
+    powerEl.innerHTML = `全局快捷键：<span style="${keyStyle}">${hk}</span> 切换「全部屏幕待机 / 唤醒」`;
+    windowEl.innerHTML = `窗口恢复快捷键：<span style="${keyStyle}">${restoreKey}</span> 还原被铺满的窗口（铺满后界面被盖住也能用）`;
+  } catch (e) {
+    powerEl.textContent = '全局快捷键：' + errText(e);
+    windowEl.textContent = '窗口恢复快捷键暂不可用：' + errText(e);
+  }
 })();
 
 // 铺满任意前台窗口
-// 铺满方式：2 = 先对齐两屏再铺满；1 = 以主屏高度为基准；0 = 铺满桌面包围盒
+// 铺满方式：2 = 自动对齐后铺满；1 = 主屏尺寸；0 = 所有屏幕包围盒
 function spanMode() {
   const el = document.getElementById('span-mode');
-  const mode = el ? Number(el.value) : 1;
-  return Number.isInteger(mode) && mode >= 0 && mode <= 2 ? mode : 1;
+  const value = Number(el && el.value);
+  return [0, 1, 2].includes(value) ? value : 1;
 }
 
 document.getElementById('span-fg').onclick = async () => {
   try {
+    if (spanMode() === 2 && await invoke('get_platform').catch(() => '') === 'macos'
+      && !confirm('自动对齐会临时切换两块屏的分辨率，画面可能短暂变黑且清晰度会降低。\n\n原始分辨率已备份；点「还原」或退出软件可恢复。继续吗？')) return;
     setStatus('正在把当前窗口铺满两块屏…');
     const title = await invoke('span_foreground', { mode: spanMode() });
     setStatus(`已铺满：「${title}」（点「还原」回到原位置）`);
@@ -483,14 +851,19 @@ async function loadSpanTargets() {
     setStatus('正在读取窗口列表…');
     const raw = String(await invoke('list_windows') || '');
     const rows = [];
+    const permissions = new Set();
     for (const line of raw.split('\n')) {
       const p = line.split('|');
       if (p[0] === 'W' && p.length >= 4) rows.push({ hwnd: p[1], size: p[2], title: p.slice(3).join('|') });
+      if (p[0] === 'I' && p[1] === 'permission') permissions.add(p[2]);
     }
     sel.innerHTML = rows.length
       ? rows.map(r => `<option value="${r.hwnd}">${r.title}　(${r.size})</option>`).join('')
       : '<option value="">（没有可铺满的窗口）</option>';
-    setStatus(`找到 ${rows.length} 个可铺满的窗口，选中后点「铺满选中窗口」`);
+    const hints = [];
+    if (permissions.has('screen-capture')) hints.push('允许「屏幕与系统音频录制」以读取窗口标题');
+    if (permissions.has('accessibility')) hints.push('允许「辅助功能」以移动和调整窗口');
+    setStatus(`找到 ${rows.length} 个可铺满的窗口${hints.length ? '；macOS 权限待配置：' + hints.join('；') : '，选中后点「铺满选中窗口」'}`, !hints.includes('允许「辅助功能」以移动和调整窗口'));
   } catch (e) {
     sel.innerHTML = '<option value="">（读取失败）</option>';
     setStatus('读取窗口列表失败：' + errText(e), false);
@@ -502,9 +875,14 @@ document.getElementById('span-pick').onclick = async () => {
   const hwnd = sel && sel.value ? Number(sel.value) : 0;
   if (!hwnd) { setStatus('请先点「刷新窗口列表」并选一个窗口', false); return; }
   try {
+    if (spanMode() === 2 && await invoke('get_platform').catch(() => '') === 'macos'
+      && !confirm('自动对齐会临时切换两块屏的分辨率，画面可能短暂变黑且清晰度会降低。\n\n原始分辨率已备份；点「还原」或退出软件可恢复。继续吗？')) return;
     setStatus('正在铺满…');
     const title = await invoke('span_window', { hwnd, mode: spanMode() });
-    setStatus(`已铺满：「${title}」。还原：点「↩ 还原」或按 Ctrl+Alt+R`);
+    const p = await invoke('get_platform').catch(() => '');
+    setStatus(p === 'macos'
+      ? `已铺满：「${title}」。点「↩ 还原」回到原位置`
+      : `已铺满：「${title}」。还原：点「↩ 还原」或按 Ctrl+Alt+R`);
   } catch (e) { setStatus('铺满失败：' + errText(e), false); }
 };
 document.getElementById('restore-defaults').onclick = async () => {
@@ -651,14 +1029,17 @@ async function loadMitvVolume() {
   const rs = document.getElementById('align-restore');
   const out = document.getElementById('align-out');
   if (ap) ap.onclick = async () => {
-    const ok = confirm('把两块屏切到「竖向高度一致」的分辨率组合？\n\n· 切换时屏幕会黑一下（正常）\n· 已自动记录原始分辨率：关闭双屏铺满 / 退出软件 / 一键恢复默认 都会自动还原成 4K\n· 若切换失败会自动回滚\n\n继续吗？');
+    const platform = await invoke('get_platform').catch(() => '');
+    const ok = confirm(platform === 'macos'
+      ? '应用推荐的双屏分辨率组合？\n\n· 屏幕会短暂变黑，分辨率可能明显降低\n· 系统会先保存原始模式；失败时自动尝试回滚\n· 可用「还原」或退出软件恢复原分辨率\n\n继续吗？'
+      : '把两块屏切到「竖向高度一致」的分辨率组合？\n\n· 切换时屏幕会黑一下（正常）\n· 已自动记录原始分辨率，可一键还原\n· 若切换失败会自动回滚\n\n继续吗？');
     if (!ok) return;
     ap.disabled = true;
     if (out) out.textContent = '正在试算并切换…（屏幕可能短暂黑屏）';
     try {
       const r = await invoke('align_apply');
       if (out) out.textContent = String(r);
-      setStatus('双屏已对齐（关闭双屏铺满或退出软件会自动还原 4K）');
+      setStatus('双屏已对齐；关闭双屏铺满或退出软件可恢复原分辨率');
     } catch (e) {
       if (out) out.textContent = '对齐失败：' + errText(e);
       setStatus('对齐失败', false);
@@ -695,7 +1076,7 @@ async function loadMitvVolume() {
   }
   if (btn) btn.onclick = async () => {
     btn.disabled = true;
-    pre.textContent = '正在体检…（读 EDID 物理尺寸 + 每屏全部可用分辨率，约几秒）';
+    pre.textContent = '正在体检…（读取系统物理尺寸 + 每屏可用分辨率，约几秒）';
     try {
       pre.textContent = String(await invoke('align_report'));
       setStatus('体检完成');
@@ -720,7 +1101,18 @@ async function loadMitvVolume() {
       await paintSizes();
     } catch (e) { setStatus('保存失败：' + errText(e), false); }
   };
-  paintSizes();
+  invoke('get_platform').then(platform => {
+    if (platform === 'macos') {
+      const modeActions = document.getElementById('align-mode-actions');
+      const manualSize = document.getElementById('align-manual-size');
+      if (modeActions) modeActions.style.display = '';
+      if (manualSize) manualSize.style.display = 'none';
+      if (sizes) sizes.textContent = 'macOS 直接读取系统物理尺寸；应用组合前会保存原始分辨率，失败自动尝试回滚。';
+      if (pre) pre.textContent = '点「开始体检」先只读比较双屏物理尺寸、像素密度和分辨率组合。应用组合会切换屏幕模式，并在切换前备份原设置。';
+      return;
+    }
+    paintSizes();
+  }).catch(() => paintSizes());
 })();
 
 document.getElementById('refresh-btn').onclick = () => refreshDisplays();
@@ -752,11 +1144,20 @@ document.getElementById('mute-btn').onclick = async () => {
     const names = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
     setBadge(names[p] || p);
     applyPlatformCopy(p);
-    if (p === 'windows') {
-      // 系统音量卡：仅 Windows（CoreAudio 默认输出端点）
+    if (p === 'macos') {
+      document.getElementById('betterdisplay-card').style.display = '';
+      document.getElementById('diag-card').style.display = 'none';
+      const summary = document.getElementById('restore-summary');
+      const note = document.getElementById('restore-note');
+      if (summary) summary.textContent = '恢复本机已记录且系统允许恢复的状态';
+      if (note) note.textContent = 'macOS 恢复范围：Screenguard 首次启动时记录的显示布局、可读取的显示器 DDC 电源状态、被铺满窗口，并请求唤醒显示器。未能读取或不支持 DDC 的屏幕会跳过。ColorSync 配置、显示器硬件亮度/音量不会由此功能恢复。';
+    }
+    document.getElementById('diag-card').style.display = p === 'windows' ? '' : 'none';
+    if (p === 'windows' || p === 'macos') {
+      // macOS 只显示当前默认输出状态；端点不提供可写音量时会禁用滑块与静音。
       document.getElementById('audio-card').style.display = '';
       await loadAudio();
-      // 电池设备卡：仅 Windows（Battery 设备类枚举）
+      // Windows 枚举内置/外设电池；macOS 显示内置电池。
       await loadBatteries();
     }
   } catch (e) {
@@ -767,6 +1168,7 @@ document.getElementById('mute-btn').onclick = async () => {
     const v = await invoke('get_version');
     const verEl = document.getElementById('version');
     if (verEl) verEl.textContent = 'v' + v;
+    checkForUpdates(false, v);
   } catch (e) { /* 预览模式：静默 */ }
   await refreshDisplays();
 })();
